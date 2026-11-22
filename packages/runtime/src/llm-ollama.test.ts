@@ -129,7 +129,7 @@ describe("Ollama context size", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
         const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
           shows.push(raw);
@@ -1094,7 +1094,7 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
         if (req.url === "/api/chat") bodies.push(JSON.parse(raw) as { think?: unknown });
         const body = lines.map((line) => JSON.stringify(line)).join("\n");
         res.end(options.finalNewline === false ? body : `${body}\n`);
@@ -1226,7 +1226,7 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
         const think = (JSON.parse(raw) as { think?: unknown }).think;
         thinks.push(think);
         const reply = answer(think);
@@ -1314,7 +1314,7 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         // A provider check records another version under the name before the old reply ends.
         if (replaceDuringReply) recordOllamaModelFamily(endpoint, "swapped-model", { digest: "sha256:new" });
@@ -1698,6 +1698,49 @@ describe("Ollama reasoning models", () => {
       await llm.complete({ prompt: "p" });
       // A replacement listed without a family or a version.
       listing = { name: "versioned-model:latest" };
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("forgets what was learned about a model the model list shows was removed", async () => {
+    let listed = true;
+    let calls = 0;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: listed ? [{ name: "plain-alias:latest" }] : [] }));
+          return;
+        }
+        calls += 1;
+        if (!listed) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: "model 'plain-alias' not found" }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "plain-alias" });
+      await llm.complete({ prompt: "p" });
+      // Removed: the model list no longer has it, and the request fails.
+      listed = false;
+      await assert.rejects(llm.complete({ prompt: "p" }), /is not pulled/);
+      // Another model is installed under the name, again without metadata.
+      listed = true;
       await llm.complete({ prompt: "p" });
       assert.deepEqual(thinks, [false, false]);
     } finally {

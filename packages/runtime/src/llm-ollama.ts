@@ -499,6 +499,16 @@ export function recordOllamaModelFamily(endpoint: string, model: string, show: u
   recordFamily(key, show);
 }
 
+/** Forgets what is known about a model a read found missing, unless a newer read applied. */
+function forgetOllamaModel(endpoint: string, model: string, read: number): void {
+  const key = familyKey(endpoint, model);
+  if (read <= (ollamaFamilyReadApplied.get(key) ?? 0)) return;
+  ollamaFamilyReadApplied.set(key, read);
+  ollamaThinkLearned.delete(key);
+  ollamaModelFamilies.delete(key);
+  ollamaModelDigests.delete(key);
+}
+
 /**
  * Starts a read of Ollama's model list: call it before sending /api/tags and
  * pass the number to recordOllamaModelFamily, so a read that started earlier
@@ -543,10 +553,14 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
     if (!response.ok || isRefusedRedirect(response, url)) return;
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
+    if (!Array.isArray(data.models)) return;
     const wanted = ollamaModelName(model);
-    const entry = data.models?.find((candidate) => ollamaModelName(String(candidate.name ?? candidate.model ?? "")) === wanted);
+    const entry = data.models.find((candidate) => ollamaModelName(String(candidate.name ?? candidate.model ?? "")) === wanted);
     // An older read that ends after a newer one never replaces what the newer one saw.
     if (entry) recordOllamaModelFamily(endpoint, model, entry, seq);
+    // The model is not installed: nothing known about it carries over to a
+    // model installed later under the name.
+    else forgetOllamaModel(endpoint, model, seq);
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {
