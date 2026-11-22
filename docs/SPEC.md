@@ -402,7 +402,7 @@ first request; the chat path adds no `/api/show` call. Before each request, the
 app reads the model's entry from `/api/tags` (which loads no model), so a model
 replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
-resolves them, a read that started before another is ignored, and the retry
+resolves them (a final `:local` included), a read that started before another is ignored, and the retry
 after a context overflow reads the family again. Every successful model list read,
 from the provider check or the adapter, is ignored when an older one than the
 last applied for the endpoint, and forgets what was learned about a model

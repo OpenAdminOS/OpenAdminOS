@@ -499,8 +499,9 @@ const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replac
  * with the default tag.
  */
 export function ollamaModelName(name: string): string {
-  // Ollama's name parts: [scheme://][host/][namespace/]model[:tag][@digest].
-  const parts = name.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/").filter(Boolean);
+  // Ollama's name parts: [scheme://][host/][namespace/]model[:tag][@digest][:local].
+  // A final ":local" only says the installed model is meant, as Ollama reads it.
+  const parts = name.trim().toLowerCase().replace(/:\s*local\s*$/, "").replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/").filter(Boolean);
   if (parts.length === 3 && parts[0] === "registry.ollama.ai") parts.shift();
   if (parts.length === 2 && parts[0] === "library") parts.shift();
   let normalized = parts.join("/");

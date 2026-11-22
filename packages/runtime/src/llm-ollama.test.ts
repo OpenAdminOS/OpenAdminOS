@@ -1493,6 +1493,9 @@ describe("Ollama reasoning models", () => {
     assert.equal(ollamaModelName("hf.co/org/model:Q4"), "hf.co/org/model:q4");
     assert.equal(ollamaModelName("https://registry.ollama.ai/library/office-report:latest"), "office-report:latest");
     assert.equal(ollamaModelName("registry.ollama.ai/team/office-report"), "team/office-report:latest");
+    assert.equal(ollamaModelName("office-report:latest:local"), "office-report:latest");
+    assert.equal(ollamaModelName("office-report:LOCAL"), "office-report:latest");
+    assert.equal(ollamaModelName("office-report:cloud"), "office-report:cloud");
     const fake = await fakeByThink(() => ({ body: answered }));
     try {
       recordOllamaModelFamily(fake.endpoint, "full-name-model:latest", { details: { family: "gptoss" } });
@@ -1916,6 +1919,35 @@ describe("Ollama reasoning models", () => {
     try {
       assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-plain" }).complete({ prompt: "p" })).text, "ok");
       assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("reads the family of a model asked for with Ollama's :local suffix, and sends the name as given", async () => {
+    const sent: Array<{ model?: unknown; think?: unknown }> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "office-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "gpt-oss-office:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        sent.push(JSON.parse(raw) as { model?: unknown; think?: unknown });
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-report:latest:local" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-office:latest:local" }).complete({ prompt: "p" });
+      assert.deepEqual(sent.map((body) => [body.model, body.think]), [["office-report:latest:local", "low"], ["gpt-oss-office:latest:local", false]]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
