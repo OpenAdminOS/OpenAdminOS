@@ -1268,7 +1268,7 @@ describe("Ollama reasoning models", () => {
     }
   });
 
-  it("keeps no level for a model that rejected one, even when it reasons anyway", async () => {
+  it("answers every request for a model that rejects a level and reasons anyway, with at most one retry each", async () => {
     const fake = await fakeByThink((think) => (think === false
       ? { body: stream(
         { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
@@ -1277,15 +1277,35 @@ describe("Ollama reasoning models", () => {
       : rejected));
     try {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-qwen-copy" });
-      await llm.complete({ prompt: "p" });
-      await llm.complete({ prompt: "p" });
-      await llm.complete({ prompt: "p" });
-      assert.deepEqual(fake.thinks, ["low", false, false, false]);
+      for (let i = 0; i < 3; i += 1) assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.ok(fake.thinks.length <= 6, JSON.stringify(fake.thinks));
+      assert.equal(fake.thinks.filter((think) => think === false).length, 3);
     } finally {
       await fake.close();
     }
   });
 
+  it("follows the model's answers over a family recorded for an earlier model under the name", async () => {
+    const fake = await fakeByThink(() => ({
+      body: stream(
+        { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+        { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+      ),
+    }));
+    try {
+      recordOllamaModelFamily(fake.endpoint, "team-model", { digest: "sha256:qwen", details: { family: "qwen3" } });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "team-model" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, [false, "low"]);
+      // A check that finds another version under the name drops what the answers showed.
+      recordOllamaModelFamily(fake.endpoint, "team-model", { digest: "sha256:qwen-2", details: { family: "qwen3" } });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, [false, "low", false]);
+    } finally {
+      await fake.close();
+    }
+  });
 
   it("uses the family the provider check read, before the first request, for copies under any name", async () => {
     const fake = await fakeByThink(() => ({ body: answered }));

@@ -250,7 +250,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         let detail = await errorDetail(response);
         if (response.status === 400 && body.think !== false && rejectsThinkLevel(detail)) {
           // A model named like gpt-oss that is not one: ask again without a level.
-          ollamaThinkLearned.set(cacheKey, false);
+          ollamaThinkLearned.set(familyKey(endpoint, model), false);
           body.think = false;
           startAttempt(attemptLabel);
           response = await send(numCtx);
@@ -364,13 +364,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             const reasoningDelta = chunk.message?.thinking ?? "";
             if (reasoningDelta.length > 0) {
               reasoningOnly += reasoningDelta;
-              // A model that reasons although it was asked not to always
-              // does (gpt-oss under another name); later requests ask for the
-              // lowest level instead. A model that already rejected a level
-              // keeps `false`.
-              if (body.think === false && !ollamaThinkLearned.has(cacheKey) && !ollamaModelFamilies.has(familyKey(endpoint, model))) {
-                ollamaThinkLearned.set(cacheKey, "low");
-              }
+              // A model that reasons although it was asked not to (gpt-oss,
+              // also under another name or after a recorded family went
+              // stale) gets the lowest level on later requests. This is newer
+              // than any recorded family, so it wins over it.
+              if (body.think === false) ollamaThinkLearned.set(familyKey(endpoint, model), "low");
             }
             accumulated += delta;
             // Reasoning is not an answer, so it is never returned as one,
@@ -416,13 +414,19 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 }
 
 /**
- * The think value Ollama showed a model needs, keyed by endpoint and model:
- * `false` after it rejected a level, "low" after it reasoned when asked not to.
+ * The think value Ollama's last answer showed a model needs, keyed by
+ * endpoint and model: `false` after it rejected a level, "low" after it
+ * reasoned when asked not to. Each answer replaces the one before, so a model
+ * replaced under the same name is corrected by its first answer. Only a model
+ * that both rejects a level and reasons under `false` would alternate; each of
+ * its requests still gets an answer, with one retry.
  */
 const ollamaThinkLearned = new Map<string, false | "low">();
 
 /** Model families from the provider check's /api/show, keyed by endpoint and model. */
 const ollamaModelFamilies = new Map<string, string>();
+/** The model version (digest) each recorded family belongs to. */
+const ollamaModelDigests = new Map<string, string>();
 const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${model}`;
 
 /**
@@ -433,19 +437,30 @@ const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replac
  * forgets the one recorded before, so the name decides again.
  */
 export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown): void {
+  const key = familyKey(endpoint, model);
   const data = typeof show === "object" && show !== null
-    ? show as { details?: { family?: unknown }; model_info?: Record<string, unknown> }
+    ? show as { digest?: unknown; details?: { family?: unknown }; model_info?: Record<string, unknown> }
     : {};
+  // Another version under this name: what Ollama's answers showed about the
+  // one before no longer applies.
+  const digest = typeof data.digest === "string" ? data.digest : undefined;
+  if (digest !== undefined && ollamaModelDigests.has(key) && ollamaModelDigests.get(key) !== digest) ollamaThinkLearned.delete(key);
+  if (digest !== undefined) ollamaModelDigests.set(key, digest);
   const family = data.details?.family ?? data.model_info?.["general.architecture"];
-  if (typeof family === "string" && family.length > 0) ollamaModelFamilies.set(familyKey(endpoint, model), family);
-  else ollamaModelFamilies.delete(familyKey(endpoint, model));
+  if (typeof family === "string" && family.length > 0) ollamaModelFamilies.set(key, family);
+  else ollamaModelFamilies.delete(key);
 }
 
-/** The think value for a request: the model's family, then what Ollama showed, then the name. */
+/**
+ * The think value for a request: what Ollama's last answer showed about the
+ * model, then its recorded family, then its name.
+ */
 function ollamaThinkFor(endpoint: string, model: string): false | "low" {
-  const family = ollamaModelFamilies.get(familyKey(endpoint, model));
-  if (family !== undefined) return ollamaThinkSetting(model, family);
-  return ollamaThinkLearned.get(`${endpoint}\0${model}`) ?? ollamaThinkSetting(model);
+  const key = familyKey(endpoint, model);
+  const learned = ollamaThinkLearned.get(key);
+  if (learned !== undefined) return learned;
+  const family = ollamaModelFamilies.get(key);
+  return family !== undefined ? ollamaThinkSetting(model, family) : ollamaThinkSetting(model);
 }
 
 /** Ollama's answer to a think level the model does not support, in old and current wording. */
