@@ -401,7 +401,8 @@ another name, or a name replaced and restored, gets the right value before its
 first request; the chat path adds no `/api/show` call. Before each request, the
 app reads the model's entry from `/api/tags` (which loads no model), so a model
 replaced under the name since the provider check, or between two requests of
-one answer, gets its own family and version. A family Ollama reported decides. For a model without
+one answer, gets its own family and version; names are compared as Ollama
+resolves them, and a read that ends after a newer one is ignored. A family Ollama reported decides. For a model without
 one, Ollama's answers decide, per endpoint and model and only for the version
 (digest) the request was sent to: a rejected level (`think value ... is not
 supported`, or `... does not support thinking`) is sent again once with

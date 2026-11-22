@@ -323,7 +323,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
       let accumulated = "";
-      let reasoningOnly = "";
+      // Whether the model streamed any reasoning, whitespace included.
+      let reasoned = false;
       let actualModel = model;
 
       try {
@@ -380,7 +381,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             // reply with reasoning and no answer fails with that cause.
             const reasoningDelta = chunk.message?.thinking ?? "";
             if (reasoningDelta.length > 0) {
-              reasoningOnly += reasoningDelta;
+              reasoned = true;
               // A model of unknown family that reasons although it was asked
               // not to (gpt-oss under another name) gets the lowest level on
               // later requests.
@@ -389,7 +390,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             accumulated += delta;
             // Reasoning is not an answer, so it is never returned as one,
             // and the caller sees no completed chunk before this is known.
-            if (chunk.done && accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
+            if (chunk.done && accumulated.trim().length === 0 && reasoned) {
               throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
             }
             if (delta.length > 0) {
@@ -417,7 +418,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (done) break;
         }
         // The body ended without a final record after reasoning alone.
-        if (accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
+        if (accumulated.trim().length === 0 && reasoned) {
           throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, undefined));
         }
       } finally {
@@ -441,9 +442,25 @@ const ollamaThinkLearned = new Map<string, false | "low">();
 
 /** Model families from the provider check's /api/show, keyed by endpoint and model. */
 const ollamaModelFamilies = new Map<string, string>();
+/** Model list reads in the order they started, and the newest one applied per model. */
+let ollamaFamilyReadSeq = 0;
+const ollamaFamilyReadApplied = new Map<string, number>();
 /** The model version (digest) each recorded family belongs to. */
 const ollamaModelDigests = new Map<string, string>();
-const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${model}`;
+const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${ollamaModelName(model)}`;
+
+/**
+ * A model name as Ollama resolves it, so "team-model",
+ * "team-model:latest" and "registry.ollama.ai/library/team-model:latest"
+ * are one model: lower case, without the default registry and namespace,
+ * with the default tag.
+ */
+export function ollamaModelName(name: string): string {
+  let normalized = name.trim().toLowerCase().replace(/^registry\.ollama\.ai\//, "").replace(/^library\//, "");
+  const last = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (!last.includes(":") && !last.includes("@")) normalized += ":latest";
+  return normalized;
+}
 
 /**
  * Records a model's family as the provider check read it (`details.family`
@@ -454,6 +471,14 @@ const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replac
  */
 export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown): void {
   const key = familyKey(endpoint, model);
+  // This is the newest observation: a model list read that started before it
+  // and ends after it does not replace it.
+  ollamaFamilyReadSeq += 1;
+  ollamaFamilyReadApplied.set(key, ollamaFamilyReadSeq);
+  recordFamily(key, show);
+}
+
+function recordFamily(key: string, show: unknown): void {
   const data = typeof show === "object" && show !== null
     ? show as { digest?: unknown; details?: { family?: unknown }; model_info?: Record<string, unknown> }
     : {};
@@ -475,6 +500,9 @@ export function recordOllamaModelFamily(endpoint: string, model: string, show: u
  */
 export async function refreshOllamaModelFamily(endpoint: string, model: string, timeoutMs = 1500, signal?: AbortSignal): Promise<void> {
   const url = `${endpoint.trim().replace(/\/$/, "")}/api/tags`;
+  const key = familyKey(endpoint, model);
+  ollamaFamilyReadSeq += 1;
+  const seq = ollamaFamilyReadSeq;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const stop = () => controller.abort();
@@ -484,9 +512,13 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
     if (!response.ok || isRefusedRedirect(response, url)) return;
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
-    const wanted = model.includes(":") ? [model] : [model, `${model}:latest`];
-    const entry = data.models?.find((candidate) => wanted.includes(String(candidate.name ?? candidate.model ?? "")));
-    if (entry) recordOllamaModelFamily(endpoint, model, entry);
+    const wanted = ollamaModelName(model);
+    const entry = data.models?.find((candidate) => ollamaModelName(String(candidate.name ?? candidate.model ?? "")) === wanted);
+    // An older read that ends after a newer one never replaces what the newer one saw.
+    if (entry && seq > (ollamaFamilyReadApplied.get(key) ?? 0)) {
+      ollamaFamilyReadApplied.set(key, seq);
+      recordFamily(key, entry);
+    }
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {

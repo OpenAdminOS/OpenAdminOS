@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow, recordOllamaModelFamily, refreshOllamaModelFamily } from "./llm-ollama.js";
+import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, refreshOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1426,6 +1426,75 @@ describe("Ollama reasoning models", () => {
       assert.deepEqual(trace, ["tags", "low", "tags", false]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("fails a reply whose only reasoning is whitespace, without a completed chunk", async () => {
+    const fake = await fakeChat([
+      { model: "gpt-oss:20b", message: { content: "", thinking: "\n" }, done: false },
+      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const done: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).stream({ prompt: "p" })) {
+            if (chunk.done) done.push(chunk.accumulated);
+          }
+        })(),
+        /at the token limit while it was still reasoning/,
+      );
+      assert.deepEqual(done, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps the newest model list read when an older one ends after it", async () => {
+    const thinks: unknown[] = [];
+    let tagsCalls = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          // The first read saw gpt-oss and answers late; the second sees the Qwen that replaced it.
+          const [delay, family, digest] = tagsCalls === 1 ? [150, "gptoss", "sha256:oss"] : [0, "qwen3", "sha256:qwen"];
+          setTimeout(() => res.end(JSON.stringify({ models: [{ name: "raced-model:latest", digest, details: { family } }] })), delay);
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const older = refreshOllamaModelFamily(endpoint, "raced-model");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await refreshOllamaModelFamily(endpoint, "raced-model");
+      await older;
+      await createOllamaLlm({ endpoint, defaultModel: "raced-model" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("matches a model under its full name, its short name and its default tag", async () => {
+    assert.equal(ollamaModelName("registry.ollama.ai/library/Team-Model:latest"), "team-model:latest");
+    assert.equal(ollamaModelName("team-model"), "team-model:latest");
+    assert.equal(ollamaModelName("hf.co/org/model:Q4"), "hf.co/org/model:q4");
+    const fake = await fakeByThink(() => ({ body: answered }));
+    try {
+      recordOllamaModelFamily(fake.endpoint, "full-name-model:latest", { details: { family: "gptoss" } });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "registry.ollama.ai/library/full-name-model:latest" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "full-name-model" }).complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, ["low", "low"]);
+    } finally {
+      await fake.close();
     }
   });
 
