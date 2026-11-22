@@ -78,24 +78,30 @@ class SandboxBrokerError extends Error {
  * AggregateError, are indented and never match.
  */
 const ERROR_HEADER = /^[A-Za-z_$][\w$]*(?: \[[A-Z0-9_]+\])?(?::\s|$)/;
-const STACK_FRAME = /^\s+at /;
+/** The caret under the throwing source line, and a stack frame of the exception itself. */
+const CARET_LINE = /^\s*\^+\s*$/;
+const TOP_STACK_FRAME = /^ {4}at /;
 
 /**
- * The text (header and message lines) of the error the script ended with:
- * the last error Node printed at column 0, recognised by the stack trace that
- * follows its message. Undefined when the output holds no printed error.
+ * The header and message of the error the script ended with, read from how
+ * Node prints an uncaught exception: the source location ends with a caret
+ * line and a blank line, then the error's header and message (which may span
+ * blank lines), then its stack frames. Logged errors have no caret line before
+ * them, and errors printed inside the exception (a cause, an AggregateError's
+ * entries) come after its stack. Undefined when no uncaught exception can be
+ * found, so no cause is read from the output.
  */
 export function terminalErrorText(output: string): string | undefined {
   const lines = output.split(/\r?\n/);
-  let terminal: string | undefined;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!ERROR_HEADER.test(lines[i]!)) continue;
-    // The message may span lines; the stack follows it before any blank line.
-    let j = i + 1;
-    while (j < lines.length && lines[j]!.length > 0 && !STACK_FRAME.test(lines[j]!) && !ERROR_HEADER.test(lines[j]!)) j += 1;
-    if (j < lines.length && STACK_FRAME.test(lines[j]!)) terminal = lines.slice(i, j).join("\n");
-  }
-  return terminal;
+  let caret = -1;
+  for (let i = 0; i < lines.length; i += 1) if (CARET_LINE.test(lines[i]!)) caret = i;
+  if (caret < 0) return undefined;
+  let start = caret + 1;
+  while (start < lines.length && lines[start]!.trim() === "") start += 1;
+  let end = start;
+  while (end < lines.length && !TOP_STACK_FRAME.test(lines[end]!)) end += 1;
+  if (start >= lines.length || end >= lines.length || !ERROR_HEADER.test(lines[start]!)) return undefined;
+  return lines.slice(start, end).join("\n").trimEnd();
 }
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {

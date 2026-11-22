@@ -413,8 +413,8 @@ is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
 `failureCause: "reasoning-without-answer"`, also through a failed plan check
-before apply or a sandboxed script's exit (when the error the script ended with, the
-last error Node printed with its stack, carries it), and the failure panel shows only the
+before apply or a sandboxed script's exit (when the uncaught exception Node printed
+after its source caret, the error the script ended with, carries it), and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this

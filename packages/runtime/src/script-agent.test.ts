@@ -28,6 +28,9 @@ import {
 } from "./agent-template.js";
 import { reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { scriptAgentTemplateToModule } from "./script-agent.js";
+/** Stderr as Node writes it for an uncaught exception with this header and message. */
+const uncaught = (text: string) => `file:///agent.mjs:1\nthrow error;\n^\n\n${text}\n    at main (file:///agent.mjs:1:1)\n\nNode.js v22.0.0`;
+
 import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
 
 describe("script-backed MXC agents", () => {
@@ -255,7 +258,7 @@ definition:
           assert.equal(llm.ok, false);
           // A brokered read after the model failure, as in a finally block.
           if (readAfter) await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "read-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices" } } satisfies SandboxBrokerRequest);
-          const stderr = `${exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written"}\n    at main (file:///agent.mjs:1:1)`;
+          const stderr = uncaught(exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written");
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -316,7 +319,7 @@ definition:
           const model = `llm.complete: ${llm.error?.message}`;
           const read = `graph.request: ${graph.error?.message}`;
           // The cleanup read's denial is logged, then the script rethrows its error, or the other way round.
-          const stderr = `${exitOn === "model" ? `Warning: ${read}\nError: ${model}` : `Warning: ${model}\nError: ${read}`}\n    at main (file:///agent.mjs:1:1)`;
+          const stderr = exitOn === "model" ? `Warning: ${read}\n${uncaught(`Error: ${model}`)}` : `Warning: ${model}\n${uncaught(`Error: ${read}`)}`;
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
