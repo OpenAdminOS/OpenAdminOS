@@ -1954,36 +1954,70 @@ describe("Ollama reasoning models", () => {
   });
 
 
-  it("keeps a model tagged local apart from the default tag, and reads a lone :local as the default tag only without one", async () => {
-    let listing: unknown[] = [];
-    const sent: Array<[unknown, unknown]> = [];
+  it("reads a lone :local as the endpoint's Ollama does: a tag before 0.18, the default tag from 0.18", async () => {
+    const serve = async (version: string) => {
+      const sent: Array<[unknown, unknown]> = [];
+      const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+        let raw = "";
+        req.on("data", (part) => (raw += part));
+        req.on("end", () => {
+          if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+          if (req.url === "/api/tags") {
+            // A gpt-oss copy tagged local and a Qwen under the default tag.
+            res.end(JSON.stringify({ models: [
+              { name: "tagged-report:local", digest: "sha256:oss", details: { family: "gptoss" } },
+              { name: "tagged-report:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
+            ] }));
+            return;
+          }
+          const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+          sent.push([body.model, body.think]);
+          res.end(answered);
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      try {
+        await createOllamaLlm({ endpoint, defaultModel: "tagged-report:latest" }).complete({ prompt: "p" });
+        await createOllamaLlm({ endpoint, defaultModel: "tagged-report:local" }).complete({ prompt: "p" });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      return sent;
+    };
+    // Ollama 0.12 runs the model tagged local.
+    assert.deepEqual(await serve("0.12.11"), [["tagged-report:latest", false], ["tagged-report:local", "low"]]);
+    // Ollama 0.40 drops ":local" and runs the default tag, the Qwen.
+    assert.deepEqual(await serve("0.40.16"), [["tagged-report:latest", false], ["tagged-report:local", false]]);
+  });
+
+  it("keeps what was learned for a lone :local under the installed model, across a provider check", async () => {
+    let calls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        if (req.url === "/api/tags") {
-          res.end(JSON.stringify({ models: listing }));
-          return;
-        }
-        const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
-        sent.push([body.model, body.think]);
-        res.end(answered);
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version: "0.40.16" })); return; }
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "stable-report:latest", digest: "sha256:same" }] })); return; }
+        calls += 1;
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
-      // Older Ollama: "local" is a tag, and both models are installed.
-      listing = [
-        { name: "tagged-report:local", digest: "sha256:oss", details: { family: "gptoss" } },
-        { name: "tagged-report:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
-      ];
-      await createOllamaLlm({ endpoint, defaultModel: "tagged-report:latest" }).complete({ prompt: "p" });
-      await createOllamaLlm({ endpoint, defaultModel: "tagged-report:local" }).complete({ prompt: "p" });
-      // Ollama 0.40: no model is tagged "local", so ":local" means the default tag.
-      listing = [{ name: "suffixed-report:latest", digest: "sha256:oss", details: { family: "gptoss" } }];
-      await createOllamaLlm({ endpoint, defaultModel: "suffixed-report:local" }).complete({ prompt: "p" });
-      assert.deepEqual(sent, [["tagged-report:latest", false], ["tagged-report:local", "low"], ["suffixed-report:local", "low"]]);
+      const llm = createOllamaLlm({ endpoint, defaultModel: "stable-report:local" });
+      await llm.complete({ prompt: "p" });
+      // A provider check reads the same, unchanged list.
+      recordOllamaModelList(endpoint, [{ name: "stable-report:latest", digest: "sha256:same" }], beginOllamaModelRead());
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

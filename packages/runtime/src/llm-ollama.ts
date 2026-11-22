@@ -108,8 +108,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       if (!model) {
         throw new Error("No Ollama model available. Pull a model with `ollama pull <model>`.");
       }
+      // The installed model the name resolves to: what is known about the
+      // model is kept under it, while the request sends the name as given.
+      const installedModel = await resolveOllamaModel(endpoint, model, opts.signal);
+      if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
       if (options.refreshModelFamily !== false) {
-        await refreshOllamaModelFamily(endpoint, model, undefined, opts.signal);
+        await refreshOllamaModelFamily(endpoint, installedModel, undefined, opts.signal);
         if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
       }
 
@@ -148,16 +152,16 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // gpt-oss ignores `false` and always reasons, so it gets the
         // lowest effort level instead. What Ollama showed about this model
         // (it rejected the level, or reasoned anyway) overrides its name.
-        think: ollamaThinkFor(endpoint, model),
+        think: ollamaThinkFor(endpoint, installedModel),
       };
       // What Ollama's answers show applies only to the version this request was sent to.
-      let sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
+      let sentDigest = ollamaModelDigests.get(familyKey(endpoint, installedModel));
       // Registered, so a model list read that finds it removed while this
       // request runs changes its generation.
-      if (!ollamaModelGenerations.has(familyKey(endpoint, model))) ollamaModelGenerations.set(familyKey(endpoint, model), 0);
-      let sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, model)) ?? 0;
+      if (!ollamaModelGenerations.has(familyKey(endpoint, installedModel))) ollamaModelGenerations.set(familyKey(endpoint, installedModel), 0);
+      let sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
       const learn = (value: false | "low") => {
-        const key = familyKey(endpoint, model);
+        const key = familyKey(endpoint, installedModel);
         // Only about the model this request went to: not one removed or
         // replaced under the name since.
         if (ollamaModelFamilies.has(key) || ollamaModelDigests.get(key) !== sentDigest) return;
@@ -278,17 +282,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // The model may have been replaced since the request was built; the
           // fallback goes to the model installed now.
           if (options.refreshModelFamily !== false) {
-            await refreshOllamaModelFamily(endpoint, model, undefined, opts.signal);
+            await refreshOllamaModelFamily(endpoint, installedModel, undefined, opts.signal);
             if (opts.signal?.aborted) throw stoppedByUser();
           }
-          const key = familyKey(endpoint, model);
+          const key = familyKey(endpoint, installedModel);
           const generation = ollamaModelGenerations.get(key) ?? 0;
           // A family Ollama reports now decides; without one, the same model
           // gets no level and a replacement gets what is known about it.
           const family = ollamaModelFamilies.get(key);
           body.think = family !== undefined
             ? ollamaThinkSetting(model, family)
-            : generation === sentGeneration ? false : ollamaThinkFor(endpoint, model);
+            : generation === sentGeneration ? false : ollamaThinkFor(endpoint, installedModel);
           sentDigest = ollamaModelDigests.get(key);
           sentGeneration = generation;
           startAttempt(attemptLabel);
@@ -318,12 +322,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // The model may have been replaced under its name during the lookup:
           // the retry gets the think value of the model installed now.
           if (options.refreshModelFamily !== false) {
-            await refreshOllamaModelFamily(endpoint, model, undefined, opts.signal);
+            await refreshOllamaModelFamily(endpoint, installedModel, undefined, opts.signal);
             if (opts.signal?.aborted) throw stoppedByUser();
           }
-          body.think = ollamaThinkFor(endpoint, model);
-          sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
-          sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, model)) ?? 0;
+          body.think = ollamaThinkFor(endpoint, installedModel);
+          sentDigest = ollamaModelDigests.get(familyKey(endpoint, installedModel));
+          sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
@@ -606,6 +610,55 @@ function recordFamily(key: string, show: unknown): void {
   else ollamaModelFamilies.delete(key);
 }
 
+/** Ollama's version per endpoint, read once from /api/version (which loads no model). */
+const ollamaVersions = new Map<string, string>();
+
+async function ollamaServerVersion(endpoint: string, signal?: AbortSignal): Promise<string | undefined> {
+  const base = endpoint.trim().replace(/\/$/, "");
+  const known = ollamaVersions.get(base);
+  if (known !== undefined) return known;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    const url = `${base}/api/version`;
+    const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
+    if (!response.ok || isRefusedRedirect(response, url)) return undefined;
+    const version = ((await response.json()) as { version?: unknown }).version;
+    if (typeof version !== "string" || version.length === 0) return undefined;
+    ollamaVersions.set(base, version);
+    return version;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
+/** Whether a version is older than another, comparing major, minor and patch. */
+function versionBelow(version: string, than: string): boolean {
+  const parse = (value: string) => value.replace(/^v/, "").split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+  const [a, b] = [parse(version), parse(than)];
+  for (let i = 0; i < 3; i += 1) if (a[i]! !== b[i]!) return a[i]! < b[i]!;
+  return false;
+}
+
+/**
+ * The installed model a requested name resolves to, as the endpoint's Ollama
+ * reads it. Ollama 0.18 and later drop a final ":local" from every name (it
+ * only says the installed model is meant), so a lone "x:local" runs "x:latest"
+ * there; earlier versions read "local" as a tag. The version is asked only for
+ * such a name; when it cannot be read, current Ollama's reading applies.
+ */
+export async function resolveOllamaModel(endpoint: string, model: string, signal?: AbortSignal): Promise<string> {
+  const name = ollamaModelName(model);
+  if (!name.endsWith(":local")) return name;
+  const version = await ollamaServerVersion(endpoint, signal);
+  return version !== undefined && versionBelow(version, "0.18.0") ? name : `${name.slice(0, -":local".length)}:latest`;
+}
+
 /**
  * Reads the model's current entry from /api/tags, which loads no model, and
  * records its family and digest before a send, so a model replaced under the
@@ -626,17 +679,10 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
     if (!Array.isArray(data.models)) return;
     const wanted = ollamaModelName(model);
-    const models: unknown[] = [...data.models];
-    // A lone ":local" with no model tagged "local" is the installed default
-    // tag, as Ollama 0.40 reads it; that model's entry stands for the name.
-    if (wanted.endsWith(":local") && !models.some((candidate) => entryName(candidate) === wanted)) {
-      const installed = models.find((candidate) => entryName(candidate) === `${wanted.slice(0, -":local".length)}:latest`);
-      if (typeof installed === "object" && installed !== null) models.push({ ...installed, name: model });
-    }
-    if (!recordOllamaModelList(endpoint, models, seq)) return;
+    if (!recordOllamaModelList(endpoint, data.models, seq)) return;
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
-    if (!models.some((candidate) => entryName(candidate) === wanted)) forgetOllamaModel(endpoint, model, seq);
+    if (!data.models.some((candidate) => entryName(candidate) === wanted)) forgetOllamaModel(endpoint, model, seq);
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {

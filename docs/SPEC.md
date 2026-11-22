@@ -402,8 +402,10 @@ first request; the chat path adds no `/api/show` call. Before each request, the
 app reads the model's entry from `/api/tags` (which loads no model), so a model
 replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
-resolves them (a `:local` after a tag is dropped; a lone `:local` is the
-model tagged `local` when one is listed, otherwise the default tag), a read that started before another is ignored, and the retry
+resolves them (a `:local` after a tag is dropped; a lone `x:local` is
+`x:latest` on Ollama 0.18 and later, which drop the suffix, and the model
+tagged `local` before that, read from `/api/version` only for such a name;
+what is known is kept under the installed model the name resolves to), a read that started before another is ignored, and the retry
 after a context overflow reads the family again. Every successful model list read,
 from the provider check or the adapter, is ignored when an older one than the
 last applied for the endpoint, and forgets what was learned about a model
