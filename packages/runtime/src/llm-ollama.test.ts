@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow } from "./llm-ollama.js";
+import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1156,7 +1156,7 @@ describe("Ollama reasoning models", () => {
     try {
       await assert.rejects(
         createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
-        /returned only reasoning from "gpt-oss:20b" and no answer/,
+        (error) => isReasoningWithoutAnswerError(error) && /returned only reasoning from "gpt-oss:20b" and no answer/.test((error as Error).message),
       );
     } finally {
       await fake.close();

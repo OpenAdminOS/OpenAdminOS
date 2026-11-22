@@ -374,7 +374,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             // Reasoning is not an answer, so it is never returned as one,
             // and the caller sees no completed chunk before this is known.
             if (chunk.done && accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
-              throw new Error(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
+              throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
             }
             if (delta.length > 0) {
               yield {
@@ -402,7 +402,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
         // The body ended without a final record after reasoning alone.
         if (accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
-          throw new Error(reasoningWithoutAnswerMessage(actualModel, undefined));
+          throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, undefined));
         }
       } finally {
         clearTimeout(timer);
@@ -431,6 +431,16 @@ function rejectsThinkLevel(detail: string): boolean {
  */
 export function ollamaThinkSetting(model: string): false | "low" {
   return /(^|\/)gpt-oss([:-]|$)/i.test(model) ? "low" : false;
+}
+
+/** An Ollama reply that had reasoning and no answer. */
+export class OllamaReasoningWithoutAnswerError extends Error {
+  override name = "OllamaReasoningWithoutAnswerError";
+}
+
+/** Whether an error is a reply with reasoning and no answer, also across wrappers that keep the name. */
+export function isReasoningWithoutAnswerError(error: unknown): boolean {
+  return error instanceof Error && error.name === "OllamaReasoningWithoutAnswerError";
 }
 
 /** The failure for a reply that has reasoning and no answer. */

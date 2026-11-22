@@ -4,7 +4,7 @@ import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
-import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
+import { fenceTenantData, isReasoningWithoutAnswerError, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -1301,7 +1301,8 @@ export class IntuneChatService {
       conversationId: conversation.id,
       role: "assistant",
       content: assistantText,
-      // The tenant results stay in the job; a failed summary fails the message.
+      // The tenant results stay in the job; a summary model that reasoned
+      // without answering fails the message.
       status: !assistantError && (finalStatus === "completed" || finalStatus === "partial") ? "completed" : "failed",
       ...(assistantError ? { error: assistantError } : {}),
       createdAt: new Date().toISOString(),
@@ -1738,10 +1739,9 @@ export class IntuneChatService {
       return { text: text || deterministic };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return {
-        text: `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`,
-        error: message,
-      };
+      const text = `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      // Other provider failures keep the deterministic summary as the answer.
+      return isReasoningWithoutAnswerError(error) ? { text, error: message } : { text };
     }
   }
 

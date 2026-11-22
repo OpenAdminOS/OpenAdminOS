@@ -69,6 +69,7 @@ import {
 export {
   classifyOllamaEndpoint,
   createOllamaLlm,
+  isReasoningWithoutAnswerError,
   noopLlm,
   ollamaEndpointOverride,
   ollamaHostEndpoint,
