@@ -2023,4 +2023,46 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("follows a server upgraded across 0.18 while the app runs, also on the level fallback", async () => {
+    let version = "0.17.7";
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "upgraded-report:local", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "upgraded-report:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (sent.length === 2) {
+          // The server is upgraded as this request arrives: ":local" now runs the Qwen, which rejects a level.
+          version = "0.18.0";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"upgraded-report:local" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "upgraded-report:local" });
+      await llm.complete({ prompt: "p" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      // Every later request reads the version again.
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(sent, ["low", "low", false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });
