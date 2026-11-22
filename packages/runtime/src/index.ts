@@ -68,6 +68,7 @@ import {
 
 export {
   classifyOllamaEndpoint,
+  beginOllamaModelRead,
   createOllamaLlm,
   isReasoningWithoutAnswerError,
   noopLlm,

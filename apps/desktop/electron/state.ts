@@ -8884,11 +8884,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // The endpoint is resolved once and given to the adapter, so the one compared is the one used.
       const endpoint = resolveOllamaEndpoint();
       requireBound(endpoint.replace(/\/$/, ""));
-      // The model under a name may be replaced between requests; each request
-      // reads its current family from /api/tags, which sets the think value.
-      const options: { defaultModel?: string; endpoint?: string; refreshModelFamily: boolean } = binding
-        ? { endpoint, refreshModelFamily: true }
-        : { refreshModelFamily: true };
+      // The adapter reads the model's current family from /api/tags before
+      // each request, so a model replaced under its name gets its own think value.
+      const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
       if (defaultModel) {
         options.defaultModel = defaultModel;
       }

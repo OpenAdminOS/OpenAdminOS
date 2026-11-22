@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, refreshOllamaModelFamily } from "./llm-ollama.js";
+import { beginOllamaModelRead, classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, refreshOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -129,6 +129,7 @@ describe("Ollama context size", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
         const body = JSON.parse(raw) as { options?: { num_ctx?: number }; messages?: Array<{ content: string }> };
         if (req.url === "/api/show") {
           shows.push(raw);
@@ -1093,6 +1094,7 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
         if (req.url === "/api/chat") bodies.push(JSON.parse(raw) as { think?: unknown });
         const body = lines.map((line) => JSON.stringify(line)).join("\n");
         res.end(options.finalNewline === false ? body : `${body}\n`);
@@ -1224,6 +1226,7 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
         const think = (JSON.parse(raw) as { think?: unknown }).think;
         thinks.push(think);
         const reply = answer(think);
@@ -1311,6 +1314,7 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         // A provider check records another version under the name before the old reply ends.
         if (replaceDuringReply) recordOllamaModelFamily(endpoint, "swapped-model", { digest: "sha256:new" });
@@ -1487,6 +1491,8 @@ describe("Ollama reasoning models", () => {
     assert.equal(ollamaModelName("registry.ollama.ai/library/Team-Model:latest"), "team-model:latest");
     assert.equal(ollamaModelName("team-model"), "team-model:latest");
     assert.equal(ollamaModelName("hf.co/org/model:Q4"), "hf.co/org/model:q4");
+    assert.equal(ollamaModelName("https://registry.ollama.ai/library/office-report:latest"), "office-report:latest");
+    assert.equal(ollamaModelName("registry.ollama.ai/team/office-report"), "team/office-report:latest");
     const fake = await fakeByThink(() => ({ body: answered }));
     try {
       recordOllamaModelFamily(fake.endpoint, "full-name-model:latest", { details: { family: "gptoss" } });
@@ -1495,6 +1501,61 @@ describe("Ollama reasoning models", () => {
       assert.deepEqual(fake.thinks, ["low", "low"]);
     } finally {
       await fake.close();
+    }
+  });
+
+
+  it("ignores a provider check's model list read that started before the adapter's", async () => {
+    const family = "qwen3";
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "office-report:latest", digest: `sha256:${family}`, details: { family } }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      // The provider check starts while the name is gpt-oss; Qwen replaces it before the adapter reads.
+      const checkRead = beginOllamaModelRead();
+      await createOllamaLlm({ endpoint, defaultModel: "office-report" }).complete({ prompt: "p" });
+      // The provider check's older snapshot ends last.
+      recordOllamaModelFamily(endpoint, "office-report:latest", { digest: "sha256:gptoss", details: { family: "gptoss" } }, checkRead);
+      await createOllamaLlm({ endpoint, defaultModel: "office-report", refreshModelFamily: false }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the model list by default, so an adapter built without options follows a renamed gpt-oss", async () => {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "renamed-default:latest", digest: "sha256:a", details: { family: "gptoss" } }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "https://registry.ollama.ai/library/renamed-default:latest" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 

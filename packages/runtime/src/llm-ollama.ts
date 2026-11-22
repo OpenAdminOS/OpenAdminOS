@@ -16,7 +16,7 @@ export interface OllamaProviderOptions {
   /**
    * Read the model's entry from /api/tags (which loads no model) before each
    * request, so a model replaced under the same name between two requests on
-   * this adapter gets its own think value. The app turns it on.
+   * this adapter gets its own think value. On unless set to false.
    */
   refreshModelFamily?: boolean;
 }
@@ -108,7 +108,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       if (!model) {
         throw new Error("No Ollama model available. Pull a model with `ollama pull <model>`.");
       }
-      if (options.refreshModelFamily) {
+      if (options.refreshModelFamily !== false) {
         await refreshOllamaModelFamily(endpoint, model, undefined, opts.signal);
         if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
       }
@@ -456,8 +456,12 @@ const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replac
  * with the default tag.
  */
 export function ollamaModelName(name: string): string {
-  let normalized = name.trim().toLowerCase().replace(/^registry\.ollama\.ai\//, "").replace(/^library\//, "");
-  const last = normalized.slice(normalized.lastIndexOf("/") + 1);
+  // Ollama's name parts: [scheme://][host/][namespace/]model[:tag][@digest].
+  const parts = name.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/").filter(Boolean);
+  if (parts.length === 3 && parts[0] === "registry.ollama.ai") parts.shift();
+  if (parts.length === 2 && parts[0] === "library") parts.shift();
+  let normalized = parts.join("/");
+  const last = parts.at(-1) ?? "";
   if (!last.includes(":") && !last.includes("@")) normalized += ":latest";
   return normalized;
 }
@@ -469,13 +473,25 @@ export function ollamaModelName(name: string): string {
  * first request, without another /api/show call. An answer without a family
  * forgets the one recorded before, so the name decides again.
  */
-export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown): void {
+export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown, read?: number): void {
   const key = familyKey(endpoint, model);
-  // This is the newest observation: a model list read that started before it
-  // and ends after it does not replace it.
-  ollamaFamilyReadSeq += 1;
-  ollamaFamilyReadApplied.set(key, ollamaFamilyReadSeq);
+  // A read that started before the last one applied for this model is older
+  // than what is known and is ignored. Without a read number the observation
+  // is the newest.
+  const seq = read ?? beginOllamaModelRead();
+  if (seq <= (ollamaFamilyReadApplied.get(key) ?? 0)) return;
+  ollamaFamilyReadApplied.set(key, seq);
   recordFamily(key, show);
+}
+
+/**
+ * Starts a read of Ollama's model list: call it before sending /api/tags and
+ * pass the number to recordOllamaModelFamily, so a read that started earlier
+ * never replaces one that started later, whichever ends first.
+ */
+export function beginOllamaModelRead(): number {
+  ollamaFamilyReadSeq += 1;
+  return ollamaFamilyReadSeq;
 }
 
 function recordFamily(key: string, show: unknown): void {
@@ -500,9 +516,7 @@ function recordFamily(key: string, show: unknown): void {
  */
 export async function refreshOllamaModelFamily(endpoint: string, model: string, timeoutMs = 1500, signal?: AbortSignal): Promise<void> {
   const url = `${endpoint.trim().replace(/\/$/, "")}/api/tags`;
-  const key = familyKey(endpoint, model);
-  ollamaFamilyReadSeq += 1;
-  const seq = ollamaFamilyReadSeq;
+  const seq = beginOllamaModelRead();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const stop = () => controller.abort();
@@ -515,10 +529,7 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const wanted = ollamaModelName(model);
     const entry = data.models?.find((candidate) => ollamaModelName(String(candidate.name ?? candidate.model ?? "")) === wanted);
     // An older read that ends after a newer one never replaces what the newer one saw.
-    if (entry && seq > (ollamaFamilyReadApplied.get(key) ?? 0)) {
-      ollamaFamilyReadApplied.set(key, seq);
-      recordFamily(key, entry);
-    }
+    if (entry) recordOllamaModelFamily(endpoint, model, entry, seq);
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {
