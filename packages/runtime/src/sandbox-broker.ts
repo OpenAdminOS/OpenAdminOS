@@ -39,10 +39,10 @@ export interface SandboxBroker {
   graphDenialFor(scriptOutput: string): Error | undefined;
   /**
    * The typed model failure (a reply with reasoning and no answer) behind a
-   * script failure: the brokered failure whose message comes last in the
-   * script's output, when that is a reply with reasoning and no answer. Every
-   * brokered failure of the run counts, so a script that logged one and
-   * exited on another, such as a timeout, gets the other.
+   * script failure: the brokered failure that the script's terminal error
+   * (the last error header in its output) carries, when that is a reply with
+   * reasoning and no answer. A script that logged one and exited on another
+   * error, brokered or not, gets no model failure.
    */
   llmFailureFor(scriptOutput: string): Error | undefined;
 }
@@ -69,6 +69,9 @@ class SandboxBrokerError extends Error {
     this.detail = detail;
   }
 }
+
+/** The header line of a thrown error as Node writes it to stderr. */
+const ERROR_HEADER = /^[A-Za-z]*Error: /;
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
@@ -125,16 +128,13 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         ? lastFailure
         : undefined,
     llmFailureFor: (scriptOutput) => {
-      let terminal: Error | undefined;
-      let at = -1;
-      for (const failure of failures.values()) {
-        const position = scriptOutput.lastIndexOf(failure.message);
-        if (position >= at && position >= 0) {
-          terminal = failure;
-          at = position;
-        }
-      }
-      return terminal && isReasoningWithoutAnswerError(terminal) ? terminal : undefined;
+      // The error the script ended with is the last error header in its
+      // output ("Error: ...", "TypeError: ..."); warnings and earlier logged
+      // errors come before it.
+      const terminal = scriptOutput.split("\n").filter((line) => ERROR_HEADER.test(line.trim())).at(-1)?.trim();
+      if (!terminal) return undefined;
+      const answered = [...failures.values()].reverse().find((failure) => terminal.includes(failure.message));
+      return answered && isReasoningWithoutAnswerError(answered) ? answered : undefined;
     },
   };
 }

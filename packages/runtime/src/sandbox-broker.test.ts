@@ -63,6 +63,10 @@ it("takes the model failure the script exited with, written last, among every br
   for (const id of ["a", "b", "c"]) await broker.handle({ id, method: "llm.complete", params: { prompt: "Summarize." } });
   // Logged a reasoning failure, retried, and exited on a timeout: not a reasoning failure.
   assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${timeout.message}`), undefined);
+  // Logged a reasoning failure and ended on an error of its own, outside the broker.
+  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${tokenLimit.message}\nfile:///agent.mjs:9\n  await writeFile(path, data);\n  ^\n\nError: ENOSPC: no space left on device, write\n    at async main (file:///agent.mjs:9:3)`), undefined);
+  // The terminal error after Node's stack preamble.
+  assert.equal(broker.llmFailureFor(`file:///agent.mjs:152\n    throw new Error(\`\${method}: \${message}\`);\n    ^\n\nError: llm.complete: ${tokenLimit.message}\n    at request (file:///agent.mjs:152:11)`), tokenLimit);
   // Two reasoning failures: the one written last, whatever the request order.
   assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${onlyReasoning.message}\nError: llm.complete: ${tokenLimit.message}`), tokenLimit);
   assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${onlyReasoning.message}`), onlyReasoning);
