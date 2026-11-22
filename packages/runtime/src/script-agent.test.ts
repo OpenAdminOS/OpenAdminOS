@@ -396,6 +396,8 @@ definition:
       { agent: `console.error(${caretNote}); console.error(new Error(${carried})); process.exit(1);`, cause: false },
       // Handles the failure with its own listener, carries on, and exits later.
       { agent: `process.on("uncaughtException", (error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
+      // A Worker started from a file, which loads the hook too, fails with it; the script handles that and exits for another reason.
+      { agent: `import { Worker } from "node:worker_threads"; const worker = new Worker(new URL("./worker.mjs", import.meta.url)); worker.on("error", () => setTimeout(() => process.exit(1), 50));`, cause: false },
       // Logs the failure, then ends on an error of its own.
       { agent: `console.error(new Error(${carried})); throw new Error("ENOSPC: no space left on device, write");`, cause: false },
     ];
@@ -404,6 +406,7 @@ definition:
       const agentDir = path.join(tempRoot, "agent");
       await mkdir(agentDir, { recursive: true });
       await writeFile(path.join(agentDir, "agent.mjs"), `${testCase.agent}\n`);
+      await writeFile(path.join(agentDir, "worker.mjs"), `throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });\n`);
       const runner: SandboxRunner = {
         id: "mxc",
         probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),

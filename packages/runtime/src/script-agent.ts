@@ -41,22 +41,29 @@ const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
  * Loaded into the script's Node process before its entrypoint: records the
  * error the script ends with (an uncaught exception or an unhandled
  * rejection), without changing how Node reports it or exits: its message and
- * the broker request id it or an error in its cause chain carries. An error
- * the script handles itself (an uncaughtException listener or a capture
- * callback) is not fatal and is not recorded.
+ * the broker request id it or an error in its cause chain carries. Only the
+ * launched process's main thread records: the destination is taken out of
+ * the environment as the hook loads, so Workers and child processes, which
+ * inherit the hook, have none. An error the script handles itself (an
+ * uncaughtException listener or a capture callback) is not recorded.
  */
 const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
-process.on("uncaughtExceptionMonitor", (error) => {
-  if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
-  try {
-    const message = error instanceof Error ? String(error.message) : String(error);
-    let brokerRequestId;
-    for (let current = error, depth = 0; current && depth < 8; current = current.cause, depth += 1) {
-      if (typeof current.brokerRequestId === "string") { brokerRequestId = current.brokerRequestId; break; }
-    }
-    writeFileSync(process.env.${EXIT_RECORD_ENV}, JSON.stringify(brokerRequestId ? { message, brokerRequestId } : { message }));
-  } catch {}
-});
+import { isMainThread } from "node:worker_threads";
+const target = process.env.${EXIT_RECORD_ENV};
+delete process.env.${EXIT_RECORD_ENV};
+if (isMainThread && target) {
+  process.on("uncaughtExceptionMonitor", (error) => {
+    if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
+    try {
+      const message = error instanceof Error ? String(error.message) : String(error);
+      let brokerRequestId;
+      for (let current = error, depth = 0; current && depth < 8; current = current.cause, depth += 1) {
+        if (typeof current.brokerRequestId === "string") { brokerRequestId = current.brokerRequestId; break; }
+      }
+      writeFileSync(target, JSON.stringify(brokerRequestId ? { message, brokerRequestId } : { message }));
+    } catch {}
+  });
+}
 `;
 const BROKER_REQUEST_SUFFIX = ".request.json";
 const BROKER_RESPONSE_SUFFIX = ".response.json";
