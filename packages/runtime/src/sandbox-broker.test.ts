@@ -39,7 +39,7 @@ it("keeps a model reply with reasoning and no answer for the script failure that
   const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw failure; } }) });
   const response = await broker.handle({ id: "llm", method: "llm.complete", params: { prompt: "Summarize." } });
   assert.equal(response.ok, false);
-  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
+  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}\n    at main (file:///agent.mjs:1:1)`), failure);
   assert.equal(broker.llmFailureFor("Error: something else"), undefined);
   // Repeated failures with another message do not push it out.
   const other = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'), { name: "OllamaReasoningWithoutAnswerError" });
@@ -47,10 +47,10 @@ it("keeps a model reply with reasoning and no answer for the script failure that
   const again = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { calls += 1; throw calls === 1 ? failure : other; } }) });
   await again.handle({ id: "first", method: "llm.complete", params: { prompt: "first" } });
   for (let i = 0; i < 9; i += 1) await again.handle({ id: `next-${i}`, method: "llm.complete", params: { prompt: "next" } });
-  assert.equal(again.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
+  assert.equal(again.llmFailureFor(`Error: llm.complete: ${failure.message}\n    at main (file:///agent.mjs:1:1)`), failure);
   // A request after it, such as a read in a finally block, does not erase it.
   assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path: "/users" } })).ok, false);
-  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
+  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}\n    at main (file:///agent.mjs:1:1)`), failure);
   assert.equal(broker.graphDenialFor(`Error: llm.complete: ${failure.message}`), undefined);
 });
 
@@ -64,14 +64,14 @@ it("takes the model failure the script exited with, written last, among every br
   const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw replies[calls++]!; } }) });
   for (const id of ["a", "b", "c"]) await broker.handle({ id, method: "llm.complete", params: { prompt: "Summarize." } });
   // Logged a reasoning failure, retried, and exited on a timeout: not a reasoning failure.
-  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${timeout.message}`), undefined);
+  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${timeout.message}\n    at main (file:///agent.mjs:1:1)`), undefined);
   // Logged a reasoning failure and ended on an error of its own, outside the broker.
   assert.equal(broker.llmFailureFor(`Error: llm.complete: ${tokenLimit.message}\nfile:///agent.mjs:9\n  await writeFile(path, data);\n  ^\n\nError: ENOSPC: no space left on device, write\n    at async main (file:///agent.mjs:9:3)`), undefined);
   // The terminal error after Node's stack preamble.
   assert.equal(broker.llmFailureFor(`file:///agent.mjs:152\n    throw new Error(\`\${method}: \${message}\`);\n    ^\n\nError: llm.complete: ${tokenLimit.message}\n    at request (file:///agent.mjs:152:11)`), tokenLimit);
   // Two reasoning failures: the one written last, whatever the request order.
-  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${onlyReasoning.message}\nError: llm.complete: ${tokenLimit.message}`), tokenLimit);
-  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${onlyReasoning.message}`), onlyReasoning);
+  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${onlyReasoning.message}\nError: llm.complete: ${tokenLimit.message}\n    at main (file:///agent.mjs:1:1)`), tokenLimit);
+  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${onlyReasoning.message}\n    at main (file:///agent.mjs:1:1)`), onlyReasoning);
 });
 
 it("finds the terminal error in stderr written by a real Node process, coded headers included", async () => {
@@ -91,6 +91,12 @@ it("finds the terminal error in stderr written by a real Node process, coded hea
   assert.equal(broker.llmFailureFor(stderrOf(`require("node:assert").fail(${JSON.stringify(`llm.complete: ${reasoning.message}`)});`)), reasoning);
   // Ended on a plain Error carrying it, after Node's stack preamble.
   assert.equal(broker.llmFailureFor(stderrOf(`throw new Error(${JSON.stringify(`llm.complete: ${reasoning.message}`)});`)), reasoning);
+  // Logged it, then ended on an Error without a message.
+  assert.equal(broker.llmFailureFor(stderrOf(`${logged} throw new Error();`)), undefined);
+  // Ended on an AggregateError that only contains it.
+  assert.equal(broker.llmFailureFor(stderrOf(`throw new AggregateError([new Error(${JSON.stringify(`llm.complete: ${reasoning.message}`)})], "every attempt failed");`)), undefined);
+  // Ended on an error class of the script's own that carries it.
+  assert.equal(broker.llmFailureFor(stderrOf(`class ModelFailure extends Error { name = "ModelFailure"; } throw new ModelFailure(${JSON.stringify(`llm.complete: ${reasoning.message}`)});`)), reasoning);
   // Ended on another error that has the reasoning failure only as its cause.
   assert.equal(broker.llmFailureFor(stderrOf(`throw new Error("result file could not be written", { cause: new Error(${JSON.stringify(`llm.complete: ${reasoning.message}`)}) });`)), undefined);
 });

@@ -71,12 +71,32 @@ class SandboxBrokerError extends Error {
 }
 
 /**
- * The header line of a thrown error as Node writes it to stderr, with or
- * without a code ("Error: ...", "TypeError: ...",
- * "AssertionError [ERR_ASSERTION]: ..."). A "[cause]: Error: ..." line inside
- * the printed error is not a header.
+ * The first line of an error as Node prints it, at column 0: its name, an
+ * optional code and an optional message ("Error", "TypeError: ...",
+ * "AssertionError [ERR_ASSERTION]: ...", "ModelFailure: ..."). Errors printed
+ * inside it, such as "[cause]: Error: ..." or the entries of an
+ * AggregateError, are indented and never match.
  */
-const ERROR_HEADER = /^[A-Za-z]*Error(?: \[[A-Z0-9_]+\])?: /;
+const ERROR_HEADER = /^[A-Za-z_$][\w$]*(?: \[[A-Z0-9_]+\])?(?::\s|$)/;
+const STACK_FRAME = /^\s+at /;
+
+/**
+ * The text (header and message lines) of the error the script ended with:
+ * the last error Node printed at column 0, recognised by the stack trace that
+ * follows its message. Undefined when the output holds no printed error.
+ */
+export function terminalErrorText(output: string): string | undefined {
+  const lines = output.split(/\r?\n/);
+  let terminal: string | undefined;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!ERROR_HEADER.test(lines[i]!)) continue;
+    // The message may span lines; the stack follows it before any blank line.
+    let j = i + 1;
+    while (j < lines.length && lines[j]!.length > 0 && !STACK_FRAME.test(lines[j]!) && !ERROR_HEADER.test(lines[j]!)) j += 1;
+    if (j < lines.length && STACK_FRAME.test(lines[j]!)) terminal = lines.slice(i, j).join("\n");
+  }
+  return terminal;
+}
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
@@ -136,7 +156,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       // The error the script ended with is the last error header in its
       // output ("Error: ...", "TypeError: ..."); warnings and earlier logged
       // errors come before it.
-      const terminal = scriptOutput.split("\n").filter((line) => ERROR_HEADER.test(line.trim())).at(-1)?.trim();
+      const terminal = terminalErrorText(scriptOutput);
       if (!terminal) return undefined;
       const answered = [...failures.values()].reverse().find((failure) => terminal.includes(failure.message));
       return answered && isReasoningWithoutAnswerError(answered) ? answered : undefined;

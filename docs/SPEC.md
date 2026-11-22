@@ -405,7 +405,7 @@ one answer, gets its own family and version; names are compared as Ollama
 resolves them, a read that started before another is ignored, and the retry
 after a context overflow reads the family again. A family Ollama reported decides. For a model without
 one, Ollama's answers decide, per endpoint and model and only for the version
-(digest) the request was sent to: a rejected level (`think value ... is not
+(digest) the request was sent to and learned against: a rejected level (`think value ... is not
 supported`, or `... does not support thinking`) is sent again once with
 `false`, and reasoning streamed after `false` switches later requests to "low".
 Without either, the name decides. A reply with reasoning and no answer
@@ -413,8 +413,8 @@ is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
 `failureCause: "reasoning-without-answer"`, also through a failed plan check
-before apply or a sandboxed script's exit (when the script's terminal error, the
-last error header in its output, carries it), and the failure panel shows only the
+before apply or a sandboxed script's exit (when the error the script ended with, the
+last error Node printed with its stack, carries it), and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
