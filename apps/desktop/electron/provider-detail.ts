@@ -47,6 +47,7 @@ export interface OllamaTagsResponse {
   models?: Array<{
     name?: string;
     digest?: string;
+    details?: { family?: string };
   }>;
 }
 
@@ -144,6 +145,10 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     clearTimeout(timeout);
     const installed =
       payload.models?.filter((model): model is { name: string; digest?: string } => Boolean(model.name)) ?? [];
+    // The family sets the think value Chat and runs send to each model. The
+    // list is read on every check, so a model replaced under the same name,
+    // or restored to a digest seen before, never keeps an old family.
+    for (const model of installed) recordOllamaModelFamily(endpoint, model.name, model);
     const installedModels = installed.map((model) => model.name);
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.
@@ -169,8 +174,6 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         if (isRefusedRedirect(details, `${endpoint}/api/show`)) redirectedShow = redirectRefusedDetail("Ollama", `${endpoint}/api/show`);
         if (!details.ok) throw new Error("Model details unavailable");
         const data = await details.json() as { capabilities?: unknown };
-        // The family sets the think value Chat and runs send to this model.
-        recordOllamaModelFamily(endpoint, model, data);
         if (!Array.isArray(data.capabilities)) throw new Error("Model capabilities unavailable");
         const completion = data.capabilities.includes("completion");
         if (key) ollamaCompletionSupport.set(key, completion);

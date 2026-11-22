@@ -426,10 +426,11 @@ const ollamaModelFamilies = new Map<string, string>();
 const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${model}`;
 
 /**
- * Records a model's family as the provider check read it from /api/show
- * (`details.family`, or `general.architecture` in `model_info`), so a copy
- * of a model under another name gets the right think value before its first
- * request, without another /api/show call.
+ * Records a model's family as the provider check read it (`details.family`
+ * in /api/tags or /api/show, or `general.architecture` in `model_info`), so a
+ * copy of a model under another name gets the right think value before its
+ * first request, without another /api/show call. An answer without a family
+ * forgets the one recorded before, so the name decides again.
  */
 export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown): void {
   const data = typeof show === "object" && show !== null
@@ -437,6 +438,7 @@ export function recordOllamaModelFamily(endpoint: string, model: string, show: u
     : {};
   const family = data.details?.family ?? data.model_info?.["general.architecture"];
   if (typeof family === "string" && family.length > 0) ollamaModelFamilies.set(familyKey(endpoint, model), family);
+  else ollamaModelFamilies.delete(familyKey(endpoint, model));
 }
 
 /** The think value for a request: the model's family, then what Ollama showed, then the name. */

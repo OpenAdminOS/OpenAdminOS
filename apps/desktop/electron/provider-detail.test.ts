@@ -73,8 +73,8 @@ it("reuses capability results for an unchanged model digest", async () => {
 it("gives a gpt-oss copy under another name the lowest think level from the family the check read", async () => {
   const thinks: unknown[] = [];
   mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
-    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "office-report:latest" }] });
-    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion", "thinking"], details: { family: "gptoss" } });
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "office-report:latest", details: { family: "gptoss" } }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion", "thinking"] });
     thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
     return new Response(`${JSON.stringify({ model: "office-report:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
   });
@@ -82,4 +82,22 @@ it("gives a gpt-oss copy under another name the lowest think level from the fami
   assert.deepEqual(result.models, ["office-report:latest"]);
   assert.equal((await createOllamaLlm({ defaultModel: "office-report:latest" }).complete({ prompt: "p" })).text, "ok");
   assert.deepEqual(thinks, ["low"]);
+});
+
+it("sends the family of the model installed now when a name is replaced and restored to a cached digest", async () => {
+  let installed = { digest: "sha256:oss", family: "gptoss" };
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "office-report:latest", digest: installed.digest, details: { family: installed.family } }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "office-report:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  const ask = () => createOllamaLlm({ defaultModel: "office-report:latest" }).complete({ prompt: "p" });
+  for (const next of [{ digest: "sha256:oss", family: "gptoss" }, { digest: "sha256:qwen", family: "qwen3" }, { digest: "sha256:oss", family: "gptoss" }]) {
+    installed = next;
+    await checkOllama(provider);
+    await ask();
+  }
+  assert.deepEqual(thinks, ["low", false, "low"]);
 });
