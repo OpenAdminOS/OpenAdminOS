@@ -152,9 +152,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       };
       // What Ollama's answers show applies only to the version this request was sent to.
       let sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
+      let sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, model)) ?? 0;
       const learn = (value: false | "low") => {
         const key = familyKey(endpoint, model);
+        // Only about the model this request went to: not one removed or
+        // replaced under the name since.
         if (ollamaModelFamilies.has(key) || ollamaModelDigests.get(key) !== sentDigest) return;
+        if ((ollamaModelGenerations.get(key) ?? 0) !== sentGeneration) return;
         ollamaThinkLearned.set(key, { value, digest: sentDigest });
       };
       const optionsPayload: Record<string, number> = {};
@@ -301,6 +305,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           body.think = ollamaThinkFor(endpoint, model);
           sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
+          sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, model)) ?? 0;
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
@@ -460,6 +465,9 @@ const ollamaModelFamilies = new Map<string, string>();
 /** Model list reads in the order they started, and the newest one applied per model. */
 let ollamaFamilyReadSeq = 0;
 const ollamaFamilyReadApplied = new Map<string, number>();
+/** Bumped when a model under a name is removed or replaced, keyed by endpoint and model. */
+const ollamaModelGenerations = new Map<string, number>();
+const nextGeneration = (key: string) => ollamaModelGenerations.set(key, (ollamaModelGenerations.get(key) ?? 0) + 1);
 /** The model version (digest) each recorded family belongs to. */
 const ollamaModelDigests = new Map<string, string>();
 const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${ollamaModelName(model)}`;
@@ -507,6 +515,7 @@ function forgetOllamaModel(endpoint: string, model: string, read: number): void 
   ollamaThinkLearned.delete(key);
   ollamaModelFamilies.delete(key);
   ollamaModelDigests.delete(key);
+  nextGeneration(key);
 }
 
 /**
@@ -526,7 +535,10 @@ function recordFamily(key: string, show: unknown): void {
   // Another version under this name: what Ollama's answers showed about the
   // one before no longer applies.
   const digest = typeof data.digest === "string" ? data.digest : undefined;
-  if (ollamaModelDigests.get(key) !== digest) ollamaThinkLearned.delete(key);
+  if (ollamaModelDigests.get(key) !== digest) {
+    ollamaThinkLearned.delete(key);
+    nextGeneration(key);
+  }
   // An entry without a version leaves none recorded.
   if (digest !== undefined) ollamaModelDigests.set(key, digest);
   else ollamaModelDigests.delete(key);

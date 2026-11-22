@@ -40,10 +40,13 @@ const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
 /**
  * Loaded into the script's Node process before its entrypoint: records the
  * message of the error the script ends with (an uncaught exception or an
- * unhandled rejection), without changing how Node reports it or exits.
+ * unhandled rejection), without changing how Node reports it or exits. An
+ * error the script handles with its own uncaughtException listener is not
+ * fatal and is not recorded.
  */
 const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
 process.on("uncaughtExceptionMonitor", (error) => {
+  if (process.listenerCount("uncaughtException") > 0) return;
   try {
     const message = error instanceof Error ? String(error.message) : String(error);
     writeFileSync(process.env.${EXIT_RECORD_ENV}, JSON.stringify({ message }));

@@ -1748,4 +1748,45 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("does not learn from a reply of a model that was removed while it answered", async () => {
+    let listed = true;
+    let calls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: listed ? [{ name: "inflight-alias:latest" }] : [] }));
+          return;
+        }
+        calls += 1;
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        if (calls === 1) {
+          // Another request's read sees the alias removed before this reply streams.
+          listed = false;
+          await refreshOllamaModelFamily(endpoint, "inflight-alias");
+          listed = true;
+        }
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "inflight-alias" });
+      await llm.complete({ prompt: "p" });
+      // A replacement under the name, again without metadata.
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });

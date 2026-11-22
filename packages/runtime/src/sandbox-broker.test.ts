@@ -66,6 +66,13 @@ it("takes the model failure that the error the script ended with carries, among 
   // Two reasoning failures: the one the error carries, whatever the request order.
   assert.equal(broker.llmFailureFor(`llm.complete: ${tokenLimit.message}`), tokenLimit);
   assert.equal(broker.llmFailureFor(`summary failed\n\nllm.complete: ${onlyReasoning.message}`), onlyReasoning);
+  // A later failure that quotes the reasoning failure is the one the error carries.
+  const loadFailure = new Error(`Ollama error: model failed to load after: ${tokenLimit.message}`);
+  const quoting = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw calls++ % 2 === 0 ? tokenLimit : loadFailure; } }) });
+  calls = 0;
+  await quoting.handle({ id: "first", method: "llm.complete", params: { prompt: "Summarize." } });
+  await quoting.handle({ id: "second", method: "llm.complete", params: { prompt: "Summarize." } });
+  assert.equal(quoting.llmFailureFor(`llm.complete: ${loadFailure.message}`), undefined);
   // An error of the script's own.
   assert.equal(broker.llmFailureFor("ENOSPC: no space left on device, write"), undefined);
 });

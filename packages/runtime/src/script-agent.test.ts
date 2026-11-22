@@ -388,6 +388,8 @@ definition:
       { agent: `throw new Error(${caretNote} + "\\n" + ${carried});`, cause: true },
       // Prints a diagnostic with a caret, logs the failure it caught, and exits.
       { agent: `console.error(${caretNote}); console.error(new Error(${carried})); process.exit(1);`, cause: false },
+      // Handles the failure with its own listener, carries on, and exits later.
+      { agent: `process.on("uncaughtException", (error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
       // Logs the failure, then ends on an error of its own.
       { agent: `console.error(new Error(${carried})); throw new Error("ENOSPC: no space left on device, write");`, cause: false },
     ];

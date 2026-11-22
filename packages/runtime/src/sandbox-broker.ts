@@ -123,8 +123,16 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
         : undefined,
-    llmFailureFor: (endedWith) =>
-      [...failures.values()].reverse().find((failure) => endedWith.includes(failure.message) && isReasoningWithoutAnswerError(failure)),
+    llmFailureFor: (endedWith) => {
+      // The failure the error carries is the most specific one it contains
+      // (the longest message, then the newest), whatever its type; only then
+      // is it checked for a reply with reasoning and no answer.
+      let match: Error | undefined;
+      for (const failure of failures.values()) {
+        if (endedWith.includes(failure.message) && (!match || failure.message.length >= match.message.length)) match = failure;
+      }
+      return match && isReasoningWithoutAnswerError(match) ? match : undefined;
+    },
   };
 }
 
