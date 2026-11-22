@@ -622,8 +622,9 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
             : outcome.kind === "unreachable" ? "Could not reach the model"
               : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
-        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : outcome.reason === "budget-spent" ? "the tool was not run; fell back to cached data" : "asked the model to try again"}`
-          : outcome.kind === "context-limit" ? `${name} · answered from cached data instead`
+        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : outcome.reason === "budget-spent" ? "the tool was not run; the tool loop ended here" : "asked the model to try again"}`
+          // The loop step says only that the loop ended; the cached-data answer step after it reports its own outcome.
+          : outcome.kind === "context-limit" ? `${name} · the tool loop ended here`
             : outcome.kind === "unreachable" ? `${name} · the request did not connect` : name;
       steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });
       current = undefined;

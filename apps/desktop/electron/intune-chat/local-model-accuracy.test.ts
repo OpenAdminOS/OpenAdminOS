@@ -260,7 +260,8 @@ describe("local model accuracy on the tester's tenant", () => {
         rows: [...managedDevices, { id: "md-nc-1", deviceName: "NON-COMPLIANT", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }, { id: "md-nc-2", deviceName: "NONCOMPLIANT", operatingSystem: "Windows", complianceState: "compliant", lastSyncDateTime: recent }] });
       assert.equal(deviceComplianceReasonQuery("Why is NON-COMPLIANT not compliant?", cache, tenant.id)?.deviceId, "md-nc-1");
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows: managedDevices });
-      // A refresh between the lookup and the answer renames MAC-02's device: the answer reads the device now named MAC-02.
+      // A refresh between the lookup and the answer renames MAC-02's device and gives the name to another device:
+      // the name now means a different device, so code does not answer and the planner takes the question.
       const lookup = deviceComplianceReasonQuery("why is MAC-02 not compliant?", cache, tenant.id)!;
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
         rows: managedDevices.map((device) => (device.id === "md-m2" ? { ...device, deviceName: "MAC-02-OLD" } : device.id === "md-m1" ? { ...device, deviceName: "MAC-02" } : device)) });
@@ -271,7 +272,7 @@ describe("local model accuracy on the tester's tenant", () => {
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
         rows: managedDevices.map((device) => (device.id === "md-m2" ? { ...device, deviceName: "MAC-02-OLD" } : device.id === "md-m1" ? { ...device, deviceName: "MAC-02" } : device)) });
       const renamed = computeStructuredResult({ store: cache, tenantId: tenant.id, query: lookup, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: new Date().toISOString() });
-      assert.match(renamed?.facts[0] ?? "", /^MAC-02 \(macOS\) is marked compliant/);
+      assert.equal(renamed, undefined);
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows: managedDevices });
 
       // Always investigative, the loop fails, and the model writes a blank deterministic answer: nothing was shown.
@@ -430,6 +431,19 @@ describe("local model accuracy on the tester's tenant", () => {
           { id: "md-lab", deviceName: "Lab", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent }] });
       assert.equal(deviceComplianceReasonQuery("Why is Device Lab not compliant?", cache, tenant.id)?.deviceId, "md-devlab");
       assert.equal(deviceComplianceReasonQuery("Why is the device WIN-01 not compliant?", cache, tenant.id)?.deviceId, "md-w1");
+
+      // Resolved as "Lab" on a cache without "Device Lab": once the refresh adds "Device Lab", the asked name
+      // means that device, so the stale lookup is not answered and the planner takes the question.
+      const at = new Date().toISOString();
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices, { id: "md-lab", deviceName: "Lab", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent }] });
+      const stale = deviceComplianceReasonQuery("Why is Device Lab not compliant?", cache, tenant.id)!;
+      assert.equal(stale.deviceId, "md-lab");
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices,
+          { id: "md-lab", deviceName: "Lab", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent },
+          { id: "md-devlab", deviceName: "Device Lab", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }] });
+      assert.equal(computeStructuredResult({ store: cache, tenantId: tenant.id, query: stale, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: at }), undefined);
     });
   });
 
@@ -753,6 +767,9 @@ describe("structured device questions", () => {
     assert.deepEqual(deviceRowFilters("Which devices are Windows or noncompliant?"), []);
     // The sample rows never get the inverse filter either.
     assert.deepEqual(deviceRowFilters("How many devices in Intune are not Windows?"), []);
+    // A compliance state in a "why" question is its premise, not a filter: the named device stays in the rows.
+    assert.deepEqual(deviceRowFilters("Why is PC1 not compliant?"), []);
+    assert.deepEqual(deviceRowFilters("Which devices are noncompliant?"), [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
   });
 
   it("leaves questions it does not fully understand to the planner", () => {

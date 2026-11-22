@@ -46,6 +46,8 @@ export interface DeviceDetailQuery {
   resource: "managedDevices";
   deviceId: string;
   deviceName: string;
+  /** The name as the question gave it, resolved again (whole name first) in the snapshot that answers. */
+  askedName: string;
   /** What was asked about the device. Only compliance reasons are modelled. */
   topic: "compliance-reason";
 }
@@ -469,16 +471,22 @@ export function deviceComplianceReasonQuery(question: string, store: Intelligenc
   // Read from the question as typed, not shapeText: its rewrites ("non-compliant" to "noncompliant") would change a device name.
   const name = WHY_NOT_COMPLIANT.exec(normalize(question).replace(/[?!.]+$/, ""))?.groups?.name;
   if (!name) return undefined;
-  // Matched by exact name, so "PC1" and "Front Desk" are found and "my laptop" is not. The whole name is tried
-  // first, so "Device Lab" is never answered as "Lab"; "the device" or "device" before it is dropped only when
-  // the whole name matches nothing.
+  const match = resolveNamedDevice(store, tenantId, name);
+  if (!match) return undefined;
+  return { kind: "device-detail", resource: "managedDevices", deviceId: match.id, deviceName: match.name, askedName: name, topic: "compliance-reason" };
+}
+
+/**
+ * The one cached managed device a typed name means, or undefined. Matched by exact name, so "PC1" and
+ * "Front Desk" are found and "my laptop" is not. The whole name is tried first, so "Device Lab" is never
+ * answered as "Lab"; "the device" or "device" before it is dropped only when the whole name matches nothing.
+ * None, or two records with the name: their states can differ, so code does not pick one.
+ */
+function resolveNamedDevice(store: IntelligenceSqliteStore, tenantId: string, name: string): { id: string; name: string } | undefined {
   let matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name, limit: 2 });
   const unprefixed = name.replace(/^(?:the device|device) /, "");
   if (matches.length === 0 && unprefixed !== name) matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name: unprefixed, limit: 2 });
-  // None, or two records with this name: their states can differ, so code does not pick one. The planner path answers.
-  if (matches.length !== 1) return undefined;
-  const match = matches[0]!;
-  return { kind: "device-detail", resource: "managedDevices", deviceId: match.id, deviceName: match.name, topic: "compliance-reason" };
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function listedRow(row: unknown): ComputedListedRow | undefined {
@@ -675,11 +683,12 @@ function computeDeviceDetail(
   snapshot: ComputedResult["snapshot"],
   generatedAt: string,
 ): ComputedResult | undefined {
-  // The name is resolved again in the snapshot that answers, as the first lookup did it (whole name, any case):
-  // a refresh in this turn can have renamed the device or added another of that name.
-  const named = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name: query.deviceName, limit: 2 });
-  if (named.length !== 1) return undefined;
-  const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "id", op: "eq", value: named[0]!.id }], listLimit: 1 });
+  // The asked name is resolved again in the snapshot that answers, as the first lookup did it: a refresh in this
+  // turn can have renamed the device, added another of that name, or added the whole name ("Device Lab" next to
+  // "Lab"). When it now means another device, or none, the planner answers.
+  const named = resolveNamedDevice(store, tenantId, query.askedName);
+  if (!named || named.id !== query.deviceId) return undefined;
+  const counted = store.countGraphCache({ tenantId, resource: "managedDevices", filters: [{ field: "id", op: "eq", value: named.id }], listLimit: 1 });
   if (counted.total !== 1) return undefined;
   const raw = counted.rows?.[0] as Record<string, unknown> | undefined;
   const row = listedRow(raw);
@@ -784,7 +793,11 @@ export function deviceRowFilters(question: string): GraphCacheQueryPredicate[] {
   const lower = normalize(question);
   // "Windows or noncompliant" is a union; ANDing its parts would sample the wrong rows.
   if (/\bor\b/.test(lower)) return [];
-  const compliance = complianceFocus(lower);
+  // A compliance state filters the rows only when the question asks for devices in it ("which are noncompliant",
+  // "how many are compliant"). In "why is PC1 not compliant" it is the question's premise: filtering on it would
+  // leave out PC1 itself when PC1 is compliant.
+  const asksForDevices = /^(?:which|list|show|how many|what are|count|give me|find)\b/.test(lower);
+  const compliance = asksForDevices ? complianceFocus(lower) : undefined;
   return [osFilter(lower), compliance === "ambiguous" ? undefined : compliance].flatMap((entry) => (entry ? [entry.predicate] : []));
 }
 
