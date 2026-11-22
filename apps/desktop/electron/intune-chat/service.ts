@@ -129,7 +129,7 @@ import {
   updateJobTenantProgress,
 } from "../state-helpers.js";
 import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./sqlite-store.js";
-import { runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } from "./agentic-loop.js";
+import { extractLastJsonObject, runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   chatResultContextFor,
   computedAnswerText,
@@ -4100,23 +4100,20 @@ export class IntuneChatService {
 
 
 /**
- * A reply in the tool loop's JSON protocol, bare or fenced, in any key order: `{ answer }` when it carries an
- * answer text, `{ request }` when it is a tool request or a protocol object with no answer, undefined otherwise.
+ * A reply in the tool loop's JSON protocol, read the way the loop reads one (the whole reply, the last fenced
+ * block or the last balanced object, also after prose): `{ answer }` when it carries an answer text and no tool
+ * name, `{ request }` when it names a tool or is a protocol object with no answer, undefined otherwise.
  */
 function protocolReply(text: string): { answer: string } | { request: true } | undefined {
-  const body = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  if (!body.startsWith("{")) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return undefined;
-  }
+  const extracted = extractLastJsonObject(text);
+  if (!extracted.found || !extracted.valid) return undefined;
+  const parsed = extracted.value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
   const record = parsed as Record<string, unknown>;
-  if ("tool" in record) return { request: true };
+  const tool = typeof record.tool === "string" ? record.tool.trim() : "";
+  if (tool && tool.toLowerCase() !== "none") return { request: true };
   if (typeof record.answer === "string" && record.answer.trim()) return { answer: record.answer.trim() };
-  return "final" in record || "kind" in record ? { request: true } : undefined;
+  return "final" in record || "kind" in record || "tool" in record ? { request: true } : undefined;
 }
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */

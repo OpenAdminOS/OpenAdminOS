@@ -1005,8 +1005,9 @@ export function readPlannedChatRows(
     });
   }
   // A device the question names stays in the samples whatever its words filter on: in "is Windows-Lab compliant"
-  // the OS and the state are about that device, which may be a noncompliant Mac.
-  if (input.resources.includes("managedDevices") && deviceFilters.length > 0) {
+  // the OS and the state are about that device, which may be a noncompliant Mac. Without filters too: a name the
+  // text search cannot tokenize ("上海总部") would otherwise be one row among many and fall out of the pack.
+  if (input.resources.includes("managedDevices")) {
     const named = store.findGraphRowsNamedIn({ tenantId: input.tenantId, resource: "managedDevices", text: input.question, limit: 5 });
     if (named.length > 0) {
       const namedRows = store.countGraphCache({ tenantId: input.tenantId, resource: "managedDevices", filters: [{ field: "id", op: "in", value: named.map((entry) => entry.id) }], listLimit: named.length }).rows ?? [];

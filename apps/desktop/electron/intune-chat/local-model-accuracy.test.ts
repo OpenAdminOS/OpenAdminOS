@@ -487,6 +487,13 @@ describe("local model accuracy on the tester's tenant", () => {
         rows: [...managedDevices, { id: "md-elodie", deviceName: "Élodie’s iPhone", operatingSystem: "iOS", complianceState: "noncompliant", lastSyncDateTime: recent }] });
       assert.equal(deviceComplianceReasonQuery("Why is Élodie’s iPhone not compliant?", cache, tenant.id)?.deviceId, "md-elodie");
       assert.equal(deviceComplianceReasonQuery("why is ÉLODIE’S IPHONE not compliant?", cache, tenant.id)?.deviceId, "md-elodie");
+
+      // A named device goes first in the samples also when the question sets no field filter, as a "why" does.
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...Array.from({ length: 25 }, (_, i) => ({ id: `md-other-${i}`, deviceName: `OTHER-${String(i).padStart(2, "0")}`, operatingSystem: "Windows", complianceState: "compliant", lastSyncDateTime: recent })),
+          { id: "md-shanghai", deviceName: "上海总部", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }] });
+      const unfiltered = readPlannedChatRows(cache, { tenantId: tenant.id, question: "Why is 上海总部 not compliant?", generatedAt: at, resources: ["managedDevices"], searchTerms: [], limitPerResource: 20 });
+      assert.equal((unfiltered.managedDevices?.[0] as { id?: string } | undefined)?.id, "md-shanghai");
     });
   });
 
@@ -624,6 +631,8 @@ describe("The fallback after a failed compact loop", () => {
         ["stream", JSON.stringify({ tool: "list_cached_resources", params: {} })],
         ["send", '```json\n{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}\n```'],
         ["stream", '{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}'],
+        ["send", 'I will check the cache.\n```json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n```'],
+        ["stream", 'I will check the cache.\n```json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n```'],
       ] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
         reply(() => request);
@@ -663,6 +672,24 @@ describe("A provider that refuses every call", () => {
         assert.equal(message.status, "failed", send);
         assert.equal(message.engineNotice, undefined, `${send}: no "answered from cached data" notice on a failed message`);
       }
+    });
+  });
+});
+
+describe("A failed lookup on the compact budget", () => {
+  it("blocks a zero count when the loop then ends on progress replies", async () => {
+    await withHarness(async ({ store, reply }) => {
+      let turn = 0;
+      reply(({ loop }) => {
+        if (!loop) return "0 devices match.";
+        turn += 1;
+        // A progress reply (nudged), then a rejected count, then progress again: the loop ends on the second
+        // progress reply before a second final answer reaches the failed-lookup count.
+        return turn === 2 ? JSON.stringify({ tool: "count_cached", params: { resource: "managedDevices", groupBy: ["noSuchField"] } }) : "I'll check that now.";
+      });
+      const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+      assert.match(message.content, /a data lookup failed/);
+      assert.doesNotMatch(message.content, /0 devices match/);
     });
   });
 });

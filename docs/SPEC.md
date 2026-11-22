@@ -3910,8 +3910,8 @@ the format. Decisions:
   premise or part of a device name ("why is Windows-Lab not compliant"), so
   the named device stays in the samples; every other question keeps both, and
   any cached device the question names by its whole name goes first in the
-  samples whatever the filters ("is Windows-Lab compliant" about a Mac), so
-  no later cap drops it.
+  samples, with or without filters ("is Windows-Lab compliant" about a Mac,
+  "why is 上海总部 not compliant"), so no later cap drops it.
 - Follow-ups: the structured result of the last answer is stored per
   conversation (`chat_result_context`: resource, filters, label, total and up
   to 500 matched row ids; deleted with the conversation) and a follow-up such
@@ -3982,15 +3982,17 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  a reply in the loop's JSON shows its answer text; when the reply is empty,
-  only promises work or is a tool request (any key order), the message fails
-  with
+  a reply in the loop's JSON, read as the loop reads it (also after prose),
+  shows its answer text; when the reply is empty, only promises work or names
+  a tool (any key order), the message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the
   failed message. Stop pressed while the providers are still being read ends
   in the designed cancelled answer, not an abort error. A second
-  progress-only reply falls back as `unfinished` instead of being kept. A rejected `count_cached` call blocks a zero answer as a
+  progress-only reply falls back as `unfinished` instead of being kept, unless
+  a lookup in the turn failed: then, as for an empty answer, the turn says no
+  verified count is available instead of falling back. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.
   Always investigative mode and hosted providers keep the established budget,

@@ -2515,17 +2515,20 @@ export class IntelligenceSqliteStore {
   /**
    * Cached rows whose display name appears in a text as a whole word, ignoring case: the devices a question
    * names, kept in its sample rows whatever filters the question's words set. Names shorter than three
-   * characters never match on their own. SQL only narrows by length; the case-insensitive match is done here
-   * with full Unicode folding, so "Élodie’s iPhone" is found as typed in any case.
+   * characters never match on their own. SQL keeps ASCII names that occur in the text (its lower() folds ASCII
+   * only) and every name with other characters; the case-insensitive match is then done here with full Unicode
+   * folding, so "Élodie’s iPhone" is found as typed in any case without reading every device name.
    */
   findGraphRowsNamedIn(input: { tenantId: string; resource: GraphCacheResourceKind; text: string; limit: number }): Array<{ id: string; name: string }> {
     const text = foldName(input.text);
     const rows = this.db
       .prepare(`SELECT graph_id, display_name FROM graph_resources
-        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) BETWEEN 3 AND ?`)
-      // A name stored decomposed ("E" plus a combining accent) is longer than it reads, so the bound has room.
-      .all(input.tenantId, input.resource, [...input.text].length * 2) as unknown as Array<{ graph_id: string; display_name: string }>;
-    const wordChar = /[\p{L}\p{N}-]/u;
+        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) BETWEEN 3 AND ?
+          AND (instr(lower(?), lower(display_name)) > 0 OR display_name GLOB '*[^ -~]*')`)
+      // A name stored decomposed ("E" plus a combining accent) is longer than it reads: the bound is the text's
+      // decomposed length.
+      .all(input.tenantId, input.resource, [...text.normalize("NFD")].length, input.text) as unknown as Array<{ graph_id: string; display_name: string }>;
+    const wordChar = /[\p{L}\p{M}\p{N}-]/u;
     return rows
       .filter((row) => {
         // A name must stand as its own word: "PC-1" is not found inside "PC-12".

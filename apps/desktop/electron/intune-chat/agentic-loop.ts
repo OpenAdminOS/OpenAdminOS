@@ -605,7 +605,7 @@ export async function runAgenticChat(
       // An empty answer, also one that is only fences, is never a completed answer.
       await settleModelStep({ kind: "repair", reason: "empty", ...(unfinishedCount + 1 > limits.unfinished || attempts >= maxAttempts ? { ends: true } : {}) });
       lastProblem = thinkingOnly ? "thinking-only" : "empty-answer";
-      if (++unfinishedCount > limits.unfinished) return {
+      if (++unfinishedCount > limits.unfinished) return invalidQueries.size ? blockedAnswer() : {
         ok: false, reason: "empty-answer", failureReason: lastProblem, fallbackNotice: noticeFor(lastProblem, `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`),
         toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
       };
@@ -618,6 +618,8 @@ export async function runAgenticChat(
     // On the compact budget a progress message after the last nudge falls back; it is never kept as the answer.
     if (compact && action.kind === "final" && promiseNudges >= limits.promiseNudges && looksLikeUnkeptPromise(finalAnswer)) {
       await settleModelStep({ kind: "repair", reason: "unfinished", ends: true });
+      // A failed lookup still blocks a fallback that could state a zero count from it.
+      if (invalidQueries.size) return blockedAnswer();
       return {
         ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: LOCAL_FALLBACK_NOTICES.unfinished,
         toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
@@ -626,7 +628,7 @@ export async function runAgenticChat(
     if (action.kind === "final" && promiseNudges < limits.promiseNudges + (input.voice ? 1 : 0) && looksLikeUnkeptPromise(finalAnswer)) {
       await settleModelStep({ kind: "repair", reason: "unfinished", ...(promiseNudges + 1 > limits.promiseNudges || attempts >= maxAttempts ? { ends: true } : {}) });
       lastProblem = "unfinished";
-      if (++promiseNudges > limits.promiseNudges) return {
+      if (++promiseNudges > limits.promiseNudges) return invalidQueries.size ? blockedAnswer() : {
         ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: noticeFor("unfinished", "The model returned progress instead of a completed answer."),
         toolTrace, iterations: iteration, model: responseModel,
       };
@@ -1199,7 +1201,8 @@ function declaredKind(record: Record<string, unknown>): DeclaredKind {
   return kind === "docs" || kind === "tenant" || kind === "mixed" ? { questionKind: kind, sources } : { sources };
 }
 
-function extractLastJsonObject(text: string):
+/** The loop's own reading of a reply's JSON (whole reply, last fenced block, or last balanced object). */
+export function extractLastJsonObject(text: string):
   | { found: false }
   | { found: true; valid: true; value: unknown }
   | { found: true; valid: false; reason: string } {
