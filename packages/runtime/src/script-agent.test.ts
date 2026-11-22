@@ -293,6 +293,74 @@ definition:
     }
   });
 
+  it("keeps the cause the script exited with when its output carries a model failure and a Graph denial", async () => {
+    const reasoning = Object.assign(
+      new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    const denial = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: [] });
+    for (const exitOn of ["model", "graph"] as const) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-both-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const dir = input.env!.OPENADMINOS_BROKER_DIR!;
+          const llm = await requestViaBrokerDir(dir, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          const graph = await requestViaBrokerDir(dir, { id: "graph-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices", query: { $select: "id,deviceName" } } } satisfies SandboxBrokerRequest);
+          assert.equal(llm.ok, false);
+          assert.equal(graph.ok, false);
+          const model = `llm.complete: ${llm.error?.message}`;
+          const read = `graph.request: ${graph.error?.message}`;
+          // The cleanup read's denial is logged, then the script rethrows its error, or the other way round.
+          const stderr = exitOn === "model" ? `Warning: ${read}\nError: ${model}` : `Warning: ${model}\nError: ${read}`;
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      ctx.llm.complete = async () => { throw reasoning; };
+      ctx.graph.request = async () => { throw denial; };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error);
+      assert.equal(reasoningWithoutAnswerInChain(error), exitOn === "model", exitOn);
+      assert.equal(graphAccessDenialFromError(error)?.cause, exitOn === "graph" ? "missing-consent" : undefined, exitOn);
+    }
+  });
+
   it("refuses direct template-module conversion for script agents", () => {
     const manifest = parseAgentTemplate(`
 descriptor:

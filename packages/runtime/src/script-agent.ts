@@ -185,7 +185,13 @@ async function runScriptAgent(
           // on that denial, the typed error is kept as the cause so the run
           // records the Graph denial.
           // A model reply with reasoning and no answer is kept the same way.
-          const cause = broker.graphDenialFor(detail) ?? broker.llmFailureFor(detail);
+          // When the output carries both, the one written last is the error
+          // the script exited with.
+          const denied = broker.graphDenialFor(detail);
+          const reasoning = broker.llmFailureFor(detail);
+          const cause = denied && reasoning
+            ? (detail.lastIndexOf(reasoning.message) > detail.lastIndexOf(denied.message) ? reasoning : denied)
+            : denied ?? reasoning;
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
             cause ? { cause } : undefined,
