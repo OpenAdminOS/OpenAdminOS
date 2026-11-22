@@ -1857,4 +1857,35 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("ignores a whole model list read older than one already applied for the endpoint", async () => {
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          // The adapter's read sees the old gpt-oss copy and answers late.
+          setTimeout(() => res.end(JSON.stringify({ models: [{ name: "team-alias:latest", digest: "sha256:oss", details: { family: "gptoss" } }] })), 150);
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const pending = createOllamaLlm({ endpoint, defaultModel: "team-alias" }).complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      // A newer Settings check finds the alias removed; a non-gpt-oss model replaces it.
+      recordOllamaModelList(endpoint, [], beginOllamaModelRead());
+      await pending;
+      assert.deepEqual(thinks, [false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });

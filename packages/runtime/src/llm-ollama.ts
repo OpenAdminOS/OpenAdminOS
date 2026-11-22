@@ -477,6 +477,8 @@ const ollamaThinkLearned = new Map<string, { value: false | "low"; digest: strin
 const ollamaModelFamilies = new Map<string, string>();
 /** Model list reads in the order they started, and the newest one applied per model. */
 let ollamaFamilyReadSeq = 0;
+/** The newest model list read applied per endpoint. */
+const ollamaListReadApplied = new Map<string, number>();
 const ollamaFamilyReadApplied = new Map<string, number>();
 /** Bumped when a model under a name is removed or replaced, keyed by endpoint and model. */
 const ollamaModelGenerations = new Map<string, number>();
@@ -529,10 +531,15 @@ const entryName = (entry: unknown) => {
  * Applies one successful read of Ollama's model list (from the provider check
  * or an adapter): records every listed model, and forgets what is known about
  * a model of this endpoint the list no longer has, so a model installed later
- * under its name starts fresh. A read older than the last one applied for a
- * model changes nothing for it.
+ * under its name starts fresh. A read older than the last list applied for
+ * the endpoint changes nothing; returns whether it was applied.
  */
-export function recordOllamaModelList(endpoint: string, models: readonly unknown[], read: number): void {
+export function recordOllamaModelList(endpoint: string, models: readonly unknown[], read: number): boolean {
+  // A whole list older than one already applied for this endpoint is
+  // ignored, also for names it has that the newer one did not.
+  const endpointKey = familyKey(endpoint, "").split("\0")[0]!;
+  if (read <= (ollamaListReadApplied.get(endpointKey) ?? 0)) return false;
+  ollamaListReadApplied.set(endpointKey, read);
   const listed = new Set<string>();
   for (const entry of models) {
     const name = entryName(entry);
@@ -545,6 +552,7 @@ export function recordOllamaModelList(endpoint: string, models: readonly unknown
   for (const key of known) {
     if (key.startsWith(prefix) && !listed.has(key)) forgetOllamaModelKey(key, read);
   }
+  return true;
 }
 
 /** Forgets what is known about a model a read found missing, unless a newer read applied. */
@@ -609,7 +617,7 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     if (!response.ok || isRefusedRedirect(response, url)) return;
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
     if (!Array.isArray(data.models)) return;
-    recordOllamaModelList(endpoint, data.models, seq);
+    if (!recordOllamaModelList(endpoint, data.models, seq)) return;
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
     const wanted = ollamaModelName(model);
