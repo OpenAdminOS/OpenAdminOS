@@ -63,6 +63,7 @@ import {
   createMsalClient,
   defaultClientId,
   createOllamaLlm,
+  refreshOllamaModelFamily,
   createRegistryInstallCountPayload,
   createTenantSession,
   awaitWithSignal,
@@ -8887,6 +8888,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
       if (defaultModel) {
         options.defaultModel = defaultModel;
+        // The model under this name may have been replaced since the provider
+        // check; its current family sets the think value.
+        await refreshOllamaModelFamily(endpoint, defaultModel);
       }
       return createOllamaLlm(options);
     }

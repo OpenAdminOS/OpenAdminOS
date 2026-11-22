@@ -452,6 +452,30 @@ export function recordOllamaModelFamily(endpoint: string, model: string, show: u
 }
 
 /**
+ * Reads the model's current entry from /api/tags, which loads no model, and
+ * records its family and digest before a send, so a model replaced under the
+ * same name since the provider check gets its own think value. A failed or
+ * slow read changes nothing.
+ */
+export async function refreshOllamaModelFamily(endpoint: string, model: string, timeoutMs = 1500): Promise<void> {
+  const url = `${endpoint.trim().replace(/\/$/, "")}/api/tags`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
+    if (!response.ok || isRefusedRedirect(response, url)) return;
+    const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
+    const wanted = model.includes(":") ? [model] : [model, `${model}:latest`];
+    const entry = data.models?.find((candidate) => wanted.includes(String(candidate.name ?? candidate.model ?? "")));
+    if (entry) recordOllamaModelFamily(endpoint, model, entry);
+  } catch {
+    // The send goes ahead with what is known; Ollama's answer still corrects it.
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * The think value for a request: what Ollama's last answer showed about the
  * model, then its recorded family, then its name.
  */

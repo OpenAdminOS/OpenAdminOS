@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow, recordOllamaModelFamily } from "./llm-ollama.js";
+import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow, recordOllamaModelFamily, refreshOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1333,6 +1333,43 @@ describe("Ollama reasoning models", () => {
     } finally {
       await fake.close();
     }
+  });
+
+
+  it("reads the model's current family and version before a send, so a replacement that accepts a level is not sent one", async () => {
+    let installed = { digest: "sha256:qwen", family: "qwen3" };
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "team-model:latest", digest: installed.digest, details: { family: installed.family } }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      // The provider check saw gpt-oss under this name, and an answer confirmed it.
+      recordOllamaModelFamily(endpoint, "team-model", { digest: "sha256:oss", details: { family: "gptoss" } });
+      // Since then the name was replaced with a Qwen model that accepts a level.
+      await refreshOllamaModelFamily(endpoint, "team-model");
+      await createOllamaLlm({ endpoint, defaultModel: "team-model" }).complete({ prompt: "p" });
+      installed = { digest: "sha256:oss-2", family: "gpt-oss" };
+      await refreshOllamaModelFamily(endpoint, "team-model");
+      await createOllamaLlm({ endpoint, defaultModel: "team-model" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("lets the send go ahead when the model list cannot be read", async () => {
+    await assert.doesNotReject(refreshOllamaModelFamily("http://127.0.0.1:9", "unreachable-model", 200));
   });
 
 });

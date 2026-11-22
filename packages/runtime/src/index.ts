@@ -75,6 +75,7 @@ export {
   ollamaEndpointOverride,
   ollamaHostEndpoint,
   recordOllamaModelFamily,
+  refreshOllamaModelFamily,
   resolveOllamaEndpoint,
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
