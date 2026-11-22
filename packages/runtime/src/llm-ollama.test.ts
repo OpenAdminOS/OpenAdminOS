@@ -1559,4 +1559,42 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("sends the retry after a context overflow with the think value of the model installed now", async () => {
+    let family = "gptoss";
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "retried-model:latest", digest: `sha256:${family}`, details: { family } }] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          // Qwen replaces the name while the context limit is looked up.
+          family = "qwen3";
+          res.end(JSON.stringify({ model_info: { "qwen3.context_length": 131072 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { think?: unknown; options?: { num_ctx?: number } };
+        thinks.push(body.think);
+        if (body.options?.num_ctx === undefined) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "retried-model" }).complete({ prompt: "big" })).text, "ok");
+      assert.deepEqual(thinks, ["low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });

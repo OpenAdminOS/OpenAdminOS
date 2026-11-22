@@ -151,7 +151,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         think: ollamaThinkFor(endpoint, model),
       };
       // What Ollama's answers show applies only to the version this request was sent to.
-      const sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
+      let sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
       const learn = (value: false | "low") => {
         const key = familyKey(endpoint, model);
         if (ollamaModelFamilies.has(key) || ollamaModelDigests.get(key) !== sentDigest) return;
@@ -285,6 +285,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // plus the answer, up to what the model supports, and retry once.
           modelMax = await readOllamaContextLength(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
           if (opts.signal?.aborted) throw stoppedByUser();
+          // The model may have been replaced under its name during the lookup:
+          // the retry gets the think value of the model installed now.
+          if (options.refreshModelFamily !== false) {
+            await refreshOllamaModelFamily(endpoint, model, undefined, opts.signal);
+            if (opts.signal?.aborted) throw stoppedByUser();
+          }
+          body.think = ollamaThinkFor(endpoint, model);
+          sentDigest = ollamaModelDigests.get(familyKey(endpoint, model));
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
