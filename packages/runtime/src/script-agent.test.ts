@@ -8,6 +8,8 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { exec } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -28,8 +30,14 @@ import {
 } from "./agent-template.js";
 import { reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { scriptAgentTemplateToModule } from "./script-agent.js";
-/** Stderr as Node writes it for an uncaught exception with this header and message. */
-const uncaught = (text: string) => `file:///agent.mjs:1\nthrow error;\n^\n\n${text}\n    at main (file:///agent.mjs:1:1)\n\nNode.js v22.0.0`;
+/**
+ * Stderr as Node writes it for an uncaught exception with this header and
+ * message, and the exit record the run's hook writes for it.
+ */
+const uncaught = (input: SandboxRunInput, text: string) => {
+  writeFileSync(input.env!.OPENADMINOS_EXIT_RECORD!, JSON.stringify({ message: text.replace(/^[A-Za-z]*Error: /, "") }));
+  return `file:///agent.mjs:1\nthrow error;\n^\n\n${text}\n    at main (file:///agent.mjs:1:1)\n\nNode.js v22.0.0`;
+};
 
 import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
 
@@ -258,7 +266,7 @@ definition:
           assert.equal(llm.ok, false);
           // A brokered read after the model failure, as in a finally block.
           if (readAfter) await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "read-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices" } } satisfies SandboxBrokerRequest);
-          const stderr = uncaught(exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written");
+          const stderr = uncaught(input, exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written");
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -319,7 +327,7 @@ definition:
           const model = `llm.complete: ${llm.error?.message}`;
           const read = `graph.request: ${graph.error?.message}`;
           // The cleanup read's denial is logged, then the script rethrows its error, or the other way round.
-          const stderr = exitOn === "model" ? `Warning: ${read}\n${uncaught(`Error: ${model}`)}` : `Warning: ${model}\n${uncaught(`Error: ${read}`)}`;
+          const stderr = exitOn === "model" ? `Warning: ${read}\n${uncaught(input, `Error: ${model}`)}` : `Warning: ${model}\n${uncaught(input, `Error: ${read}`)}`;
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -361,6 +369,77 @@ definition:
       assert.ok(error instanceof Error);
       assert.equal(reasoningWithoutAnswerInChain(error), exitOn === "model", exitOn);
       assert.equal(graphAccessDenialFromError(error)?.cause, exitOn === "graph" ? "missing-consent" : undefined, exitOn);
+    }
+  });
+
+  it("reads the error a real script process ended with from its own exit record", async () => {
+    const reasoning = Object.assign(
+      new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    const carried = JSON.stringify(`llm.complete: ${reasoning.message}`);
+    const caretNote = JSON.stringify("config.json:3\n  \"model\": gpt-oss\n           ^\n");
+    const cases: Array<{ agent: string; cause: boolean }> = [
+      // Throws the brokered failure.
+      { agent: `throw new Error(${carried});`, cause: true },
+      // A rejected promise carrying it.
+      { agent: `await Promise.reject(new Error(${carried}));`, cause: true },
+      // Its message also holds a diagnostic with a caret.
+      { agent: `throw new Error(${caretNote} + "\\n" + ${carried});`, cause: true },
+      // Prints a diagnostic with a caret, logs the failure it caught, and exits.
+      { agent: `console.error(${caretNote}); console.error(new Error(${carried})); process.exit(1);`, cause: false },
+      // Logs the failure, then ends on an error of its own.
+      { agent: `console.error(new Error(${carried})); throw new Error("ENOSPC: no space left on device, write");`, cause: false },
+    ];
+    for (const testCase of cases) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-exit-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), `${testCase.agent}\n`);
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          assert.equal(llm.ok, false);
+          // The command line the app builds, run by a real Node process.
+          return await new Promise((resolve) => {
+            exec(input.commandLine, { cwd: input.cwd, env: input.env }, (error, stdout, stderr) => {
+              resolve({ exitCode: error ? (typeof error.code === "number" ? error.code : 1) : 0, signal: null, stdout, stderr });
+            });
+          });
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      ctx.llm.complete = async () => { throw reasoning; };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error, testCase.agent);
+      assert.equal(reasoningWithoutAnswerInChain(error), testCase.cause, testCase.agent);
     }
   });
 

@@ -39,12 +39,11 @@ export interface SandboxBroker {
   graphDenialFor(scriptOutput: string): Error | undefined;
   /**
    * The typed model failure (a reply with reasoning and no answer) behind a
-   * script failure: the brokered failure that the script's terminal error
-   * (the last error header in its output) carries, when that is a reply with
-   * reasoning and no answer. A script that logged one and exited on another
-   * error, brokered or not, gets no model failure.
+   * script failure: the newest brokered failure that the message of the error
+   * the script ended with carries, when that is a reply with reasoning and no
+   * answer. The message comes from the script's own process, not its output.
    */
-  llmFailureFor(scriptOutput: string): Error | undefined;
+  llmFailureFor(endedWith: string): Error | undefined;
 }
 
 export interface SandboxBrokerInput {
@@ -68,40 +67,6 @@ class SandboxBrokerError extends Error {
     this.code = code;
     this.detail = detail;
   }
-}
-
-/**
- * The first line of an error as Node prints it, at column 0: its name, an
- * optional code and an optional message ("Error", "TypeError: ...",
- * "AssertionError [ERR_ASSERTION]: ...", "ModelFailure: ..."). Errors printed
- * inside it, such as "[cause]: Error: ..." or the entries of an
- * AggregateError, are indented and never match.
- */
-const ERROR_HEADER = /^[A-Za-z_$][\w$]*(?: \[[A-Z0-9_]+\])?(?::\s|$)/;
-/** The caret under the throwing source line, and a stack frame of the exception itself. */
-const CARET_LINE = /^\s*\^+\s*$/;
-const TOP_STACK_FRAME = /^ {4}at /;
-
-/**
- * The header and message of the error the script ended with, read from how
- * Node prints an uncaught exception: the source location ends with a caret
- * line and a blank line, then the error's header and message (which may span
- * blank lines), then its stack frames. Logged errors have no caret line before
- * them, and errors printed inside the exception (a cause, an AggregateError's
- * entries) come after its stack. Undefined when no uncaught exception can be
- * found, so no cause is read from the output.
- */
-export function terminalErrorText(output: string): string | undefined {
-  const lines = output.split(/\r?\n/);
-  let caret = -1;
-  for (let i = 0; i < lines.length; i += 1) if (CARET_LINE.test(lines[i]!)) caret = i;
-  if (caret < 0) return undefined;
-  let start = caret + 1;
-  while (start < lines.length && lines[start]!.trim() === "") start += 1;
-  let end = start;
-  while (end < lines.length && !TOP_STACK_FRAME.test(lines[end]!)) end += 1;
-  if (start >= lines.length || end >= lines.length || !ERROR_HEADER.test(lines[start]!)) return undefined;
-  return lines.slice(start, end).join("\n").trimEnd();
 }
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
@@ -158,15 +123,8 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
         : undefined,
-    llmFailureFor: (scriptOutput) => {
-      // The error the script ended with is the last error header in its
-      // output ("Error: ...", "TypeError: ..."); warnings and earlier logged
-      // errors come before it.
-      const terminal = terminalErrorText(scriptOutput);
-      if (!terminal) return undefined;
-      const answered = [...failures.values()].reverse().find((failure) => terminal.includes(failure.message));
-      return answered && isReasoningWithoutAnswerError(answered) ? answered : undefined;
-    },
+    llmFailureFor: (endedWith) =>
+      [...failures.values()].reverse().find((failure) => endedWith.includes(failure.message) && isReasoningWithoutAnswerError(failure)),
   };
 }
 

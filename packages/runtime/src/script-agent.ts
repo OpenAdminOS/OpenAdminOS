@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type {
@@ -34,6 +35,21 @@ import { createSandboxBroker } from "./sandbox-broker.js";
 
 const SCRIPT_RESULT_FILE = "result.json";
 const BROKER_DIR_ENV = "OPENADMINOS_BROKER_DIR";
+const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
+
+/**
+ * Loaded into the script's Node process before its entrypoint: records the
+ * message of the error the script ends with (an uncaught exception or an
+ * unhandled rejection), without changing how Node reports it or exits.
+ */
+const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
+process.on("uncaughtExceptionMonitor", (error) => {
+  try {
+    const message = error instanceof Error ? String(error.message) : String(error);
+    writeFileSync(process.env.${EXIT_RECORD_ENV}, JSON.stringify({ message }));
+  } catch {}
+});
+`;
 const BROKER_REQUEST_SUFFIX = ".request.json";
 const BROKER_RESPONSE_SUFFIX = ".response.json";
 const BROKER_POLL_MS = 10;
@@ -113,6 +129,9 @@ async function runScriptAgent(
   const brokerDir = path.join(workDir, "broker");
   await mkdir(brokerDir, { recursive: true });
   const resultPath = path.join(workDir, SCRIPT_RESULT_FILE);
+  const exitHookPath = path.join(workDir, "exit-record-hook.mjs");
+  const exitRecordPath = path.join(workDir, "exit-record.json");
+  await writeFile(exitHookPath, EXIT_RECORD_HOOK);
   const runner = options.sandboxRunner ?? createMxcSandboxRunner();
   const policy = agentTemplateToRegistrySummary(manifest);
   const broker = createSandboxBroker({
@@ -145,6 +164,8 @@ async function runScriptAgent(
 
         const commandLine = [
           quoteCommandArg(nodePath),
+          "--import",
+          quoteCommandArg(pathToFileURL(exitHookPath).href),
           quoteCommandArg(entrypoint),
           "--result",
           quoteCommandArg(resultPath),
@@ -166,6 +187,7 @@ async function runScriptAgent(
               ...process.env,
               ELECTRON_RUN_AS_NODE: "1",
               [BROKER_DIR_ENV]: brokerDir,
+              [EXIT_RECORD_ENV]: exitRecordPath,
             },
           });
         } finally {
@@ -185,8 +207,10 @@ async function runScriptAgent(
           // on that denial, the typed error is kept as the cause so the run
           // records the Graph denial.
           // A model reply with reasoning and no answer is kept the same way
-          // when it is the error the script exited with, written last.
-          const cause = broker.llmFailureFor(detail) ?? broker.graphDenialFor(detail);
+          // when the error the script ended with, as its process recorded
+          // it, carries it.
+          const ended = await readExitRecord(exitRecordPath);
+          const cause = (ended !== undefined ? broker.llmFailureFor(ended) : undefined) ?? broker.graphDenialFor(detail);
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
             cause ? { cause } : undefined,
@@ -198,6 +222,16 @@ async function runScriptAgent(
     );
   } finally {
     await rm(runRoot, { recursive: true, force: true });
+  }
+}
+
+/** The message of the error the script ended with, when its process recorded one. */
+async function readExitRecord(recordPath: string): Promise<string | undefined> {
+  try {
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as { message?: unknown };
+    return typeof record.message === "string" ? record.message : undefined;
+  } catch {
+    return undefined;
   }
 }
 
