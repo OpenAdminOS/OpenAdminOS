@@ -1087,14 +1087,15 @@ describe("Ollama context size", () => {
 });
 
 describe("Ollama reasoning models", () => {
-  async function fakeChat(lines: object[]) {
+  async function fakeChat(lines: object[], options: { finalNewline?: boolean } = {}) {
     const bodies: Array<{ think?: unknown }> = [];
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
         if (req.url === "/api/chat") bodies.push(JSON.parse(raw) as { think?: unknown });
-        res.end(lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
+        const body = lines.map((line) => JSON.stringify(line)).join("\n");
+        res.end(options.finalNewline === false ? body : `${body}\n`);
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -1161,4 +1162,56 @@ describe("Ollama reasoning models", () => {
       await fake.close();
     }
   });
+
+  it("gives a caller that stops at the last chunk no completed blank answer", async () => {
+    const fake = await fakeChat([
+      thinking("Thinking about it."),
+      { model: "gpt-oss:20b", message: { content: "\n" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const done: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).stream({ prompt: "p" })) {
+            if (chunk.done) {
+              done.push(chunk.accumulated);
+              break;
+            }
+          }
+        })(),
+        /at the token limit while it was still reasoning/,
+      );
+      assert.deepEqual(done, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reads a last record without a newline", async () => {
+    const fake = await fakeChat([
+      thinking("Thinking about it."),
+      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
+    ], { finalNewline: false });
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+        /at the token limit while it was still reasoning/,
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("fails when the body ends after reasoning without a final record", async () => {
+    const fake = await fakeChat([thinking("Thinking about it.")]);
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+        /returned only reasoning from "gpt-oss:20b" and no answer/,
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
 });

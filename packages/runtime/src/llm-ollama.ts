@@ -310,8 +310,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             throw abortError() ?? error;
           }
           const { value, done } = read;
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+          // At the end of the body the last record may lack its newline;
+          // it is read like any other.
+          buffer += done ? `${decoder.decode()}\n` : decoder.decode(value, { stream: true });
 
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
@@ -355,8 +356,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             if (reasoningDelta.length > 0) {
               reasoningOnly += reasoningDelta;
             }
+            accumulated += delta;
+            // Reasoning is not an answer, so it is never returned as one,
+            // and the caller sees no completed chunk before this is known.
+            if (chunk.done && accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
+              throw new Error(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
+            }
             if (delta.length > 0) {
-              accumulated += delta;
               yield {
                 delta,
                 accumulated,
@@ -366,10 +372,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               };
             }
             if (chunk.done) {
-              // Reasoning is not an answer, so it is never returned as one.
-              if (accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
-                throw new Error(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
-              }
               if (delta.length === 0) {
                 yield {
                   delta: "",
@@ -382,6 +384,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               return;
             }
           }
+          if (done) break;
+        }
+        // The body ended without a final record after reasoning alone.
+        if (accumulated.trim().length === 0 && reasoningOnly.trim().length > 0) {
+          throw new Error(reasoningWithoutAnswerMessage(actualModel, undefined));
         }
       } finally {
         clearTimeout(timer);
