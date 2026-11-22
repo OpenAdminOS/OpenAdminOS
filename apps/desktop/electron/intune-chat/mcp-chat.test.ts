@@ -724,6 +724,33 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("fails the Chat answer when the query writer's model reasoned without answering, and keeps other writer failures as tool results", async () => {
+    await withStore(async (store) => {
+      const writerFailing = (failure: Error): RunLlmApi => {
+        const base = scriptedLlm([callDocs("x"), '{"final":true,"answer":"Done."}']);
+        return {
+          ...base,
+          async complete(options) {
+            if (isMcpQueryWriterRequest(options.system)) throw failure;
+            return base.complete(options);
+          },
+        };
+      };
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const reasoning = Object.assign(
+        new Error('Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning.'),
+        { name: "OllamaReasoningWithoutAnswerError" },
+      );
+      await assert.rejects(
+        runAgenticChat({ ...input(store, writerFailing(reasoning), mcpContext(calls)), questionKind: "docs" }),
+        (error) => error === reasoning,
+      );
+      const other = await runAgenticChat({ ...input(store, writerFailing(new Error("Ollama timed out after 500ms at http://127.0.0.1:11434/api/chat.")), mcpContext(calls)), questionKind: "docs" });
+      assert.match(other.toolTrace[0]!.error ?? "", /query could not be written: Ollama timed out/);
+      assert.equal(calls.length, 0);
+    });
+  });
+
   it("never gives the query writer Graph results, and never sends the params the answering model wrote", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

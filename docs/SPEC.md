@@ -396,9 +396,9 @@ requires hosted-provider confirmation before tenant context is sent.
 Reasoning models on Ollama (added 2026-11-21, PR #222). Every request sends
 `think: false`, except to gpt-oss, which ignores `false` and always reasons, so
 it gets `think: "low"`. The model family that provider detection reads from
-`/api/show` (`gptoss` or `gpt-oss`) decides, so a copy under another name gets
-the right value before its first request; the chat path adds no `/api/show`
-call. For a model detection did not read, the name decides, corrected by
+`/api/tags` on every check (`gptoss` or `gpt-oss`) decides, so a copy under
+another name, or a name replaced and restored, gets the right value before its
+first request; the chat path adds no `/api/show` call. For a model detection did not read, the name decides, corrected by
 Ollama's answers per endpoint and model: a rejected level (`think value ... is
 not supported`, or `... does not support thinking`) is sent again once with
 `false` and kept, and reasoning streamed after `false` switches later requests
@@ -409,7 +409,8 @@ is never returned as the answer: it fails with
 `failureCause: "reasoning-without-answer"`, also through a failed plan check
 before apply or a sandboxed script's exit, and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
-cause; a multi-tenant answer keeps its tenant results and fails only for this
+cause, also when the model writing an MCP query reasoned without answering
+(other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
 cause, other summary failures keep the deterministic summary. The provider Test
 allows 64 tokens so a model that reasons first can still reply.
 
