@@ -70,8 +70,13 @@ class SandboxBrokerError extends Error {
   }
 }
 
-/** The header line of a thrown error as Node writes it to stderr. */
-const ERROR_HEADER = /^[A-Za-z]*Error: /;
+/**
+ * The header line of a thrown error as Node writes it to stderr, with or
+ * without a code ("Error: ...", "TypeError: ...",
+ * "AssertionError [ERR_ASSERTION]: ..."). A "[cause]: Error: ..." line inside
+ * the printed error is not a header.
+ */
+const ERROR_HEADER = /^[A-Za-z]*Error(?: \[[A-Z0-9_]+\])?: /;
 
 export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;

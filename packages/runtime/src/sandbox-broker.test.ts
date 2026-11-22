@@ -9,6 +9,8 @@ import type {
   WritePlan,
 } from "@openadminos/agent-sdk";
 
+import { spawnSync } from "node:child_process";
+
 import { createSandboxBroker } from "./sandbox-broker.js";
 import { TENANT_DATA_INSTRUCTIONS } from "./tenant-data.js";
 
@@ -70,6 +72,27 @@ it("takes the model failure the script exited with, written last, among every br
   // Two reasoning failures: the one written last, whatever the request order.
   assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${onlyReasoning.message}\nError: llm.complete: ${tokenLimit.message}`), tokenLimit);
   assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${onlyReasoning.message}`), onlyReasoning);
+});
+
+it("finds the terminal error in stderr written by a real Node process, coded headers included", async () => {
+  const agent = fakeAgent();
+  const reasoning = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+  const replies = [reasoning, timeout];
+  let calls = 0;
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw replies[calls++]!; } }) });
+  await broker.handle({ id: "first", method: "llm.complete", params: { prompt: "Summarize." } });
+  await broker.handle({ id: "retry", method: "llm.complete", params: { prompt: "Summarize." } });
+  const stderrOf = (script: string) => spawnSync(process.execPath, ["-e", script], { encoding: "utf8" }).stderr;
+  const logged = `console.error(${JSON.stringify(`Error: llm.complete: ${reasoning.message}`)});`;
+  // Logged the reasoning failure, retried, and ended on an assertion carrying the retry's timeout.
+  assert.equal(broker.llmFailureFor(stderrOf(`${logged} require("node:assert").fail(${JSON.stringify(`retry failed: llm.complete: ${timeout.message}`)});`)), undefined);
+  // Ended on an assertion carrying the reasoning failure.
+  assert.equal(broker.llmFailureFor(stderrOf(`require("node:assert").fail(${JSON.stringify(`llm.complete: ${reasoning.message}`)});`)), reasoning);
+  // Ended on a plain Error carrying it, after Node's stack preamble.
+  assert.equal(broker.llmFailureFor(stderrOf(`throw new Error(${JSON.stringify(`llm.complete: ${reasoning.message}`)});`)), reasoning);
+  // Ended on another error that has the reasoning failure only as its cause.
+  assert.equal(broker.llmFailureFor(stderrOf(`throw new Error("result file could not be written", { cause: new Error(${JSON.stringify(`llm.complete: ${reasoning.message}`)}) });`)), undefined);
 });
 
 describe("sandbox broker", () => {
