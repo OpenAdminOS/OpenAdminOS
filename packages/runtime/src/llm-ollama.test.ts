@@ -1285,7 +1285,7 @@ describe("Ollama reasoning models", () => {
     }
   });
 
-  it("follows the model's answers over a family recorded for an earlier model under the name", async () => {
+  it("keeps the family Ollama reported over what a reply suggests", async () => {
     const fake = await fakeByThink(() => ({
       body: stream(
         { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
@@ -1297,13 +1297,40 @@ describe("Ollama reasoning models", () => {
       const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "team-model" });
       await llm.complete({ prompt: "p" });
       await llm.complete({ prompt: "p" });
-      assert.deepEqual(fake.thinks, [false, "low"]);
-      // A check that finds another version under the name drops what the answers showed.
-      recordOllamaModelFamily(fake.endpoint, "team-model", { digest: "sha256:qwen-2", details: { family: "qwen3" } });
-      await llm.complete({ prompt: "p" });
-      assert.deepEqual(fake.thinks, [false, "low", false]);
+      assert.deepEqual(fake.thinks, [false, false]);
     } finally {
       await fake.close();
+    }
+  });
+
+  it("ignores a reply from a model version that was replaced while it answered", async () => {
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    let replaceDuringReply = true;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        // A provider check records another version under the name before the old reply ends.
+        if (replaceDuringReply) recordOllamaModelFamily(endpoint, "swapped-model", { digest: "sha256:new" });
+        replaceDuringReply = false;
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      recordOllamaModelFamily(endpoint, "swapped-model", { digest: "sha256:old" });
+      const llm = createOllamaLlm({ endpoint, defaultModel: "swapped-model" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
