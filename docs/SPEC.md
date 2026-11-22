@@ -402,7 +402,8 @@ first request; the chat path adds no `/api/show` call. Before each request, the
 app reads the model's entry from `/api/tags` (which loads no model), so a model
 replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
-resolves them, and a read that ends after a newer one is ignored. A family Ollama reported decides. For a model without
+resolves them, a read that started before another is ignored, and the retry
+after a context overflow reads the family again. A family Ollama reported decides. For a model without
 one, Ollama's answers decide, per endpoint and model and only for the version
 (digest) the request was sent to: a rejected level (`think value ... is not
 supported`, or `... does not support thinking`) is sent again once with
@@ -412,8 +413,8 @@ is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
 `failureCause: "reasoning-without-answer"`, also through a failed plan check
-before apply or a sandboxed script's exit (when it is the brokered failure
-written last in the script's output), and the failure panel shows only the
+before apply or a sandboxed script's exit (when the script's terminal error, the
+last error header in its output, carries it), and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
