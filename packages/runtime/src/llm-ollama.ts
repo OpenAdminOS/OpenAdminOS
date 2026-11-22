@@ -474,6 +474,14 @@ export function isReasoningWithoutAnswerError(error: unknown): boolean {
   return error instanceof Error && error.name === "OllamaReasoningWithoutAnswerError";
 }
 
+/** Whether a reply with reasoning and no answer is the error or one of its causes. */
+export function reasoningWithoutAnswerInChain(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 8; current = current.cause, depth += 1) {
+    if (isReasoningWithoutAnswerError(current)) return true;
+  }
+  return false;
+}
+
 /** The failure for a reply that has reasoning and no answer. */
 export function reasoningWithoutAnswerMessage(model: string, doneReason: string | undefined): string {
   return doneReason === "length"

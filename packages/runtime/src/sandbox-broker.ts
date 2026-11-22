@@ -13,6 +13,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import { assertWritePlanLimits, graphAccessDenialFromError, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
+import { isReasoningWithoutAnswerError } from "./llm-ollama.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
@@ -36,6 +37,11 @@ export interface SandboxBroker {
    * requests and never counts.
    */
   graphDenialFor(scriptOutput: string): Error | undefined;
+  /**
+   * The typed model failure (a reply with reasoning and no answer) behind a
+   * script failure, on the same terms as a Graph denial.
+   */
+  llmFailureFor(scriptOutput: string): Error | undefined;
 }
 
 export interface SandboxBrokerInput {
@@ -106,6 +112,10 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
     getWritePlan: () => writePlan,
     graphDenialFor: (scriptOutput) =>
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
+        ? lastFailure
+        : undefined,
+    llmFailureFor: (scriptOutput) =>
+      lastFailure instanceof Error && isReasoningWithoutAnswerError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
         : undefined,
   };

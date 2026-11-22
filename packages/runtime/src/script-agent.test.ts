@@ -26,6 +26,7 @@ import {
   agentTemplateToModule,
   parseAgentTemplate,
 } from "./agent-template.js";
+import { reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { scriptAgentTemplateToModule } from "./script-agent.js";
 import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
 
@@ -233,6 +234,60 @@ definition:
       const error = await module.run(ctx).then(() => undefined, (failure: unknown) => failure);
       assert.ok(error instanceof Error);
       assert.equal(graphAccessDenialFromError(error)?.cause, testCase.cause, JSON.stringify({ ...testCase, denials: undefined }));
+    }
+  });
+
+  it("keeps a brokered model reply with reasoning and no answer the script exited on as the cause", async () => {
+    const failure = Object.assign(
+      new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    for (const exitOnModel of [true, false]) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-reasoning-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          assert.equal(llm.ok, false);
+          const stderr = exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written";
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      ctx.llm.complete = async () => { throw failure; };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /^MXC script agent "script-auditor" failed: /);
+      assert.equal(reasoningWithoutAnswerInChain(error), exitOnModel);
     }
   });
 

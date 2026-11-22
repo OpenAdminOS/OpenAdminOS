@@ -41,7 +41,7 @@ export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
 import { accumulateRunUsage } from "./run-usage.js";
 import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
 
-import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+import { createOllamaLlm, noopLlm, reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 import { createClaudeCodeLlm, probeClaudeCodeLlm } from "./llm-claude-code.js";
 import { createLmStudioLlm, probeLmStudioLlm } from "./llm-lm-studio.js";
@@ -71,6 +71,7 @@ export {
   createOllamaLlm,
   isReasoningWithoutAnswerError,
   noopLlm,
+  reasoningWithoutAnswerInChain,
   ollamaEndpointOverride,
   ollamaHostEndpoint,
   recordOllamaModelFamily,
@@ -953,6 +954,7 @@ async function failPhase(
     error: message,
     ...(accessDenial ? { accessDenial } : {}),
     graphDenialChecked: true,
+    ...(reasoningWithoutAnswerInChain(error) ? { failureCause: "reasoning-without-answer" as const } : {}),
     logs: [
       ...working.logs,
       buildLog(working.id, "error", `Agent failed: ${message}`, finishedAt),

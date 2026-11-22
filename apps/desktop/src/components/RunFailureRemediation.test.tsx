@@ -384,3 +384,14 @@ it("shows only the reasoning card for a model whose name matches another playboo
   expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
   expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
 });
+
+it.each([
+  'The plan could not be checked against the tenant before applying, so nothing was applied. Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer.',
+  'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.',
+])("gives a wrapped reasoning-only failure its card from the recorded cause: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, failureCause: "reasoning-without-answer" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});

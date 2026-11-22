@@ -150,7 +150,11 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   // cause and one recovery; an HTTP status or a
   // number in their text (for example 403) is not a Graph denial.
   const own = ownText(run.error);
-  const exclusive = EXCLUSIVE.find((match) => match(own));
+  // A cause the runtime classified from its typed error decides, whatever
+  // wrapper the app put in front of the message.
+  const exclusive = run.failureCause === "reasoning-without-answer"
+    ? isReasoningWithoutAnswer
+    : EXCLUSIVE.find((match) => match(own));
   const matched = exclusive
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
     : SUGGESTIONS.filter((suggestion) => suggestion.match(own));

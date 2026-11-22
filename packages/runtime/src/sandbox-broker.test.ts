@@ -31,6 +31,17 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
   if (response.ok) assert.deepEqual(response.result, { text: "Evidence reviewed", model: "test" });
 });
 
+it("keeps a model reply with reasoning and no answer for the script failure that carries it", async () => {
+  const agent = fakeAgent();
+  const failure = Object.assign(new Error("Ollama stopped \"gpt-oss:20b\" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning."), { name: "OllamaReasoningWithoutAnswerError" });
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw failure; } }) });
+  const response = await broker.handle({ id: "llm", method: "llm.complete", params: { prompt: "Summarize." } });
+  assert.equal(response.ok, false);
+  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
+  assert.equal(broker.llmFailureFor("Error: something else"), undefined);
+  assert.equal(broker.graphDenialFor(`Error: llm.complete: ${failure.message}`), undefined);
+});
+
 describe("sandbox broker", () => {
   it("allows only manifest-declared Graph GET requests", async () => {
     const graphRequests: GraphRequestInput[] = [];
