@@ -39,7 +39,8 @@ export interface SandboxBroker {
   graphDenialFor(scriptOutput: string): Error | undefined;
   /**
    * The typed model failure (a reply with reasoning and no answer) behind a
-   * script failure, on the same terms as a Graph denial.
+   * script failure: one the script received during this run whose message
+   * its output carries, also when the script made other requests after it.
    */
   llmFailureFor(scriptOutput: string): Error | undefined;
 }
@@ -71,6 +72,8 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
   // The error that answered the last brokered request, log calls aside.
   let lastFailure: unknown;
+  // Model replies with reasoning and no answer the script received, newest last.
+  const reasoningFailures: Error[] = [];
 
   return {
     async handle(request) {
@@ -106,6 +109,10 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         }
       } catch (error) {
         if (request?.method !== "log") lastFailure = error;
+        if (error instanceof Error && isReasoningWithoutAnswerError(error)) {
+          reasoningFailures.push(error);
+          if (reasoningFailures.length > 8) reasoningFailures.shift();
+        }
         return failure(id, error);
       }
     },
@@ -115,9 +122,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         ? lastFailure
         : undefined,
     llmFailureFor: (scriptOutput) =>
-      lastFailure instanceof Error && isReasoningWithoutAnswerError(lastFailure) && scriptOutput.includes(lastFailure.message)
-        ? lastFailure
-        : undefined,
+      [...reasoningFailures].reverse().find((failure) => scriptOutput.includes(failure.message)),
   };
 }
 

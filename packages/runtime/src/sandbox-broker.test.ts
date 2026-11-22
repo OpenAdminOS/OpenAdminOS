@@ -39,6 +39,9 @@ it("keeps a model reply with reasoning and no answer for the script failure that
   assert.equal(response.ok, false);
   assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
   assert.equal(broker.llmFailureFor("Error: something else"), undefined);
+  // A request after it, such as a read in a finally block, does not erase it.
+  assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path: "/users" } })).ok, false);
+  assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
   assert.equal(broker.graphDenialFor(`Error: llm.complete: ${failure.message}`), undefined);
 });
 

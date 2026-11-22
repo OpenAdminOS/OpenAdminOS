@@ -242,7 +242,7 @@ definition:
       new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
       { name: "OllamaReasoningWithoutAnswerError" },
     );
-    for (const exitOnModel of [true, false]) {
+    for (const [exitOnModel, readAfter] of [[true, false], [true, true], [false, false]] as const) {
       const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-reasoning-"));
       const agentDir = path.join(tempRoot, "agent");
       await mkdir(agentDir, { recursive: true });
@@ -253,6 +253,8 @@ definition:
         run: async (input) => {
           const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
           assert.equal(llm.ok, false);
+          // A brokered read after the model failure, as in a finally block.
+          if (readAfter) await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "read-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices" } } satisfies SandboxBrokerRequest);
           const stderr = exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written";
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
