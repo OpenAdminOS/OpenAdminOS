@@ -1672,4 +1672,37 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("drops what was learned for a version when the model is listed again without one", async () => {
+    let listing: Record<string, unknown> = { name: "versioned-model:latest", digest: "sha256:first" };
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [listing] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: thinks.length === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "versioned-model" });
+      await llm.complete({ prompt: "p" });
+      // A replacement listed without a family or a version.
+      listing = { name: "versioned-model:latest" };
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });

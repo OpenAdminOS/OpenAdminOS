@@ -516,8 +516,10 @@ function recordFamily(key: string, show: unknown): void {
   // Another version under this name: what Ollama's answers showed about the
   // one before no longer applies.
   const digest = typeof data.digest === "string" ? data.digest : undefined;
-  if (digest !== undefined && ollamaModelDigests.has(key) && ollamaModelDigests.get(key) !== digest) ollamaThinkLearned.delete(key);
+  if (ollamaModelDigests.get(key) !== digest) ollamaThinkLearned.delete(key);
+  // An entry without a version leaves none recorded.
   if (digest !== undefined) ollamaModelDigests.set(key, digest);
+  else ollamaModelDigests.delete(key);
   const family = data.details?.family ?? data.model_info?.["general.architecture"];
   if (typeof family === "string" && family.length > 0) ollamaModelFamilies.set(key, family);
   else ollamaModelFamilies.delete(key);
