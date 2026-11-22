@@ -2416,7 +2416,7 @@ export class IntuneChatService {
           model = completion.model;
           return completion.text.trim();
         }, buildAnswerPrompt(answerPack, documentation), afterCompactLoop ? 0 : undefined);
-        if (afterCompactLoop && (!content || looksLikeUnkeptPromise(content))) {
+        if (afterCompactLoop && (!content || looksLikeUnkeptPromise(content) || isToolProtocolReply(content))) {
           finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
           assistantStatus = "failed";
           assistantError = LOCAL_FALLBACK_UNFINISHED;
@@ -3166,7 +3166,7 @@ export class IntuneChatService {
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
-        if (afterCompactLoop && !isCancelled() && (!assistantContent || looksLikeUnkeptPromise(assistantContent))) {
+        if (afterCompactLoop && !isCancelled() && (!assistantContent || looksLikeUnkeptPromise(assistantContent) || isToolProtocolReply(assistantContent))) {
           assistantStatus = "failed";
           assistantError = LOCAL_FALLBACK_UNFINISHED;
           assistantContent = LOCAL_FALLBACK_UNFINISHED;
@@ -4090,9 +4090,14 @@ export class IntuneChatService {
 }
 
 
+/** A reply that is only a tool request in the loop's JSON protocol, fenced or not: no answer to show. */
+function isToolProtocolReply(text: string): boolean {
+  return /^\s*(?:```(?:json)?\s*)?\{\s*"tool"\s*:/i.test(text);
+}
+
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */
 const LOCAL_FALLBACK_UNFINISHED =
-  "The local model did not finish an answer. Its tool loop stopped, and its answer from cached data was empty or only a progress message, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
+  "The local model did not finish an answer. Its tool loop stopped, and its answer from cached data was empty, only a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.

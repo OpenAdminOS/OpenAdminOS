@@ -12,6 +12,7 @@ import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
 import { recordAgenticOutcome } from "./service.js";
 import { chatResultContextFor, computeStructuredResult, deviceComplianceReasonQuery, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
 import { buildAnswerPack, GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
+import { readPlannedChatRows } from "../state-helpers.js";
 
 /**
  * The tester's tenant from 2026-11-18, as a seeded cache: 9 Intune managed
@@ -456,6 +457,22 @@ describe("local model accuracy on the tester's tenant", () => {
       assert.match(detail, /is marked noncompliant/);
       assert.match(detail, /the last sync was on 2026-05-18/);
       assert.equal(deviceComplianceReasonQuery("Why is Front Desk not compliant?", cache, tenant.id)?.deviceId, "md-desk-1");
+
+      // A curly apostrophe is part of the name: "Alice’s iPhone" is not "Alice's iPhone".
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices,
+          { id: "md-alice-curly", deviceName: "Alice’s iPhone", operatingSystem: "iOS", complianceState: "noncompliant", lastSyncDateTime: "2026-05-18T09:30:00.000Z" },
+          { id: "md-alice-straight", deviceName: "Alice's iPhone", operatingSystem: "iOS", complianceState: "compliant", lastSyncDateTime: recent }] });
+      const curly = deviceComplianceReasonQuery("Why is Alice’s iPhone not compliant?", cache, tenant.id)!;
+      assert.equal(curly.deviceId, "md-alice-curly");
+      assert.match(computeStructuredResult({ store: cache, tenantId: tenant.id, query: curly, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: at })!.facts.join("\n"), /is marked noncompliant/);
+      assert.equal(deviceComplianceReasonQuery("Why is Alice's iPhone not compliant?", cache, tenant.id)?.deviceId, "md-alice-straight");
+
+      // A device the question names stays in the sample rows whatever its words filter on.
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices, { id: "md-wlab", deviceName: "Windows-Lab", operatingSystem: "macOS", complianceState: "noncompliant", lastSyncDateTime: recent }] });
+      const sampled = readPlannedChatRows(cache, { tenantId: tenant.id, question: "Is Windows-Lab compliant?", generatedAt: at, resources: ["managedDevices"], searchTerms: ["windows-lab", "compliant"], limitPerResource: 5 });
+      assert.ok((sampled.managedDevices ?? []).some((row) => (row as { id?: string }).id === "md-wlab"), "the named Mac is in the samples");
     });
   });
 
@@ -585,6 +602,21 @@ describe("The fallback after a failed compact loop", () => {
       }
     });
   });
+
+  it("fails plainly when the one cached-data call replies with a tool request, in both send paths", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      for (const send of ["send", "stream"] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(() => JSON.stringify({ tool: "list_cached_resources", params: {} }));
+        const request = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
+        assert.equal(calls.filter((call) => !call.loop).length, 1, `${send}: one fallback call`);
+        assert.equal(message.status, "failed", send);
+        assert.match(message.content, /^The local model did not finish an answer\./, send);
+        assert.equal(message.engineNotice, undefined, send);
+      }
+    });
+  });
 });
 
 describe("A provider that refuses every call", () => {
@@ -682,6 +714,15 @@ describe("an OS switch after a relative sync window", () => {
       const sync = [...switched.filters, ...(switched.focus?.filters ?? [])].find((filter) => filter.field === "lastSyncDateTime");
       assert.equal(sync?.value, new Date(2026, 10, 17).toISOString(), "the cutoff is Tuesday's start, not Monday's");
       assert.ok(switched.filters.some((filter) => filter.field === "operatingSystem" && filter.value === "macOS"));
+
+      // A second switch still reads the window from the question that set it, not from "What about macOS?".
+      const wednesday = new Date(2026, 10, 18, 9, 0, 0).toISOString();
+      const second = computeStructuredResult({ store: cache, tenantId: tenant.id, query: switched, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: tuesday })!;
+      const afterSwitch = chatResultContextFor(second, { tenantId: tenant.id, question: "What about macOS?", computedAt: tuesday })!;
+      const android = structuredQueryForQuestion({ question: "What about Android?", generatedAt: wednesday, previous: afterSwitch })!;
+      const androidSync = [...android.filters, ...(android.focus?.filters ?? [])].find((filter) => filter.field === "lastSyncDateTime");
+      assert.equal(androidSync?.value, new Date(2026, 10, 18).toISOString(), "the cutoff is Wednesday's start");
+      assert.ok(android.filters.some((filter) => filter.field === "operatingSystem" && filter.value === "Android"));
     });
   });
 });

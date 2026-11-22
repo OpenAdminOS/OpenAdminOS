@@ -3870,7 +3870,8 @@ the format. Decisions:
   names" together with a subset asks for two lists and goes to the planner;
   "what about macOS" asks the stored question again with macOS swapped in or
   added in the same shape, with a relative sync window ("today", "in the last
-  7 days") read again from the stored question at the time of the switch (its split, subset, count or list), replacing the OS
+  7 days") read again at the time of the switch from the question that set
+  it, also after a further switch or narrowing (its split, subset, count or list), replacing the OS
   in the set and the subset alike, and a split that was over a follow-up's
   subset is not rebuilt; a split asked after the subset clause could mean
   either and goes to the planner; a turn with attached workspace context goes
@@ -3907,7 +3908,9 @@ the format. Decisions:
   names, and question words are no longer ANDed as text matches. A "why"
   question gets no field filter, since its state and any OS word are the
   premise or part of a device name ("why is Windows-Lab not compliant"), so
-  the named device stays in the samples; every other question keeps both.
+  the named device stays in the samples; every other question keeps both, and
+  any cached device the question names by its whole name is added to the
+  samples whatever the filters ("is Windows-Lab compliant" about a Mac).
 - Follow-ups: the structured result of the last answer is stored per
   conversation (`chat_result_context`: resource, filters, label, total and up
   to 500 matched row ids; deleted with the conversation) and a follow-up such
@@ -3938,7 +3941,8 @@ the format. Decisions:
   the whole name is tried first, so "Device Lab" is never answered as "Lab";
   the name as asked is resolved again in the snapshot that answers, and when
   a refresh made it mean another device, or none, the planner answers; the
-  name keeps its own spacing, so "Front  Desk" is not "Front Desk"),
+  name keeps its own spacing and punctuation, so "Front  Desk" is not "Front
+  Desk" and "Alice’s iPhone" is not "Alice's iPhone"),
   says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. Only a failing state
   (noncompliant, conflict, error) and grace period get that guidance. A
@@ -3975,7 +3979,8 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  when that reply is empty or only promises work, the message fails with
+  when that reply is empty, only promises work or is a bare tool request,
+  the message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the

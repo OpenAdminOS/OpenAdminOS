@@ -1004,6 +1004,18 @@ export function readPlannedChatRows(
       ...(deviceFilters.length > 0 ? { filters: deviceFilters } : {}),
     });
   }
+  // A device the question names stays in the samples whatever its words filter on: in "is Windows-Lab compliant"
+  // the OS and the state are about that device, which may be a noncompliant Mac.
+  if (input.resources.includes("managedDevices") && deviceFilters.length > 0) {
+    const named = store.findGraphRowsNamedIn({ tenantId: input.tenantId, resource: "managedDevices", text: input.question, limit: 5 });
+    if (named.length > 0) {
+      const namedRows = store.countGraphCache({ tenantId: input.tenantId, resource: "managedDevices", filters: [{ field: "id", op: "in", value: named.map((entry) => entry.id) }], listLimit: named.length }).rows ?? [];
+      const sampled = rows.managedDevices ?? [];
+      const sampledIds = new Set(sampled.map((row) => (row && typeof row === "object" ? (row as { id?: unknown }).id : undefined)));
+      const missing = namedRows.filter((row) => !sampledIds.has((row as { id?: unknown }).id));
+      rows.managedDevices = [...missing, ...sampled].slice(0, Math.max(input.limitPerResource, missing.length));
+    }
+  }
   return rows;
 }
 

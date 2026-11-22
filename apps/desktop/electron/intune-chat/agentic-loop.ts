@@ -603,7 +603,7 @@ export async function runAgenticChat(
     const finalAnswer = action.kind === "final" ? stripTenantDataFences(action.answer).trim() : "";
     if (action.kind === "final" && !finalAnswer) {
       // An empty answer, also one that is only fences, is never a completed answer.
-      await settleModelStep({ kind: "repair", reason: "empty" });
+      await settleModelStep({ kind: "repair", reason: "empty", ...(unfinishedCount + 1 > limits.unfinished || attempts >= maxAttempts ? { ends: true } : {}) });
       lastProblem = thinkingOnly ? "thinking-only" : "empty-answer";
       if (++unfinishedCount > limits.unfinished) return {
         ok: false, reason: "empty-answer", failureReason: lastProblem, fallbackNotice: noticeFor(lastProblem, `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`),
@@ -617,14 +617,14 @@ export async function runAgenticChat(
     // retrieval, as before; Chat keeps the answer it has.
     // On the compact budget a progress message after the last nudge falls back; it is never kept as the answer.
     if (compact && action.kind === "final" && promiseNudges >= limits.promiseNudges && looksLikeUnkeptPromise(finalAnswer)) {
-      await settleModelStep({ kind: "repair", reason: "unfinished" });
+      await settleModelStep({ kind: "repair", reason: "unfinished", ends: true });
       return {
         ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: LOCAL_FALLBACK_NOTICES.unfinished,
         toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
       };
     }
     if (action.kind === "final" && promiseNudges < limits.promiseNudges + (input.voice ? 1 : 0) && looksLikeUnkeptPromise(finalAnswer)) {
-      await settleModelStep({ kind: "repair", reason: "unfinished" });
+      await settleModelStep({ kind: "repair", reason: "unfinished", ...(promiseNudges + 1 > limits.promiseNudges || attempts >= maxAttempts ? { ends: true } : {}) });
       lastProblem = "unfinished";
       if (++promiseNudges > limits.promiseNudges) return {
         ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: noticeFor("unfinished", "The model returned progress instead of a completed answer."),
@@ -649,7 +649,7 @@ export async function runAgenticChat(
     if (action.kind === "final" && !docsOnly && !input.smallTalk && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
       noEvidenceCount += 1;
       lastProblem = "no-evidence";
-      await settleModelStep({ kind: "repair", reason: "evidence" });
+      await settleModelStep({ kind: "repair", reason: "evidence", ...(noEvidenceCount > limits.noEvidence || attempts >= maxAttempts ? { ends: true } : {}) });
       if (noEvidenceCount > limits.noEvidence) {
         return {
           ok: false,

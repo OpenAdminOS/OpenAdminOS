@@ -39,6 +39,8 @@ export interface StructuredDeviceQuery {
   ids?: string[];
   /** The set was read on an earlier answer's devices with a filter replaced, so a switch cannot rebuild it afresh. */
   historical?: true;
+  /** The question whose words set the sync window, when an earlier question did: a switch reads the window again from it. */
+  windowQuestion?: string;
 }
 
 export interface DeviceDetailQuery {
@@ -67,7 +69,7 @@ export interface ChatResultContext {
   /** The rows the answer matched, when at most CONTEXT_ID_LIMIT: a follow-up narrows these, not a re-read of the cache. */
   ids?: string[];
   /** The question's shape (its set, subset, split and list), so "what about macOS?" asks it again with macOS. */
-  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean; breakdownOnSubset?: boolean; subsetReplacesSet?: boolean };
+  shape?: { filters: GraphCacheQueryPredicate[]; focus?: { label: string; filters: GraphCacheQueryPredicate[] }; breakdown: string[]; list: boolean; breakdownOnSubset?: boolean; subsetReplacesSet?: boolean; windowQuestion?: string };
   computedAt: string;
 }
 
@@ -406,7 +408,7 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     let window: GraphCacheQueryPredicate | undefined;
     if (stored.length > 1) return undefined;
     if (stored.length === 1) {
-      window = syncFilter(normalize(previous.question), generatedAt)?.predicate;
+      window = syncFilter(normalize(shape.windowQuestion ?? previous.question), generatedAt)?.predicate;
       if (!window || window.op !== stored[0]!.op) return undefined;
     }
     const current = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (window && filter.field === "lastSyncDateTime" ? window : filter));
@@ -428,6 +430,8 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
       breakdown: inFocus && !inScope ? shape.breakdown : shape.breakdown.filter((entry) => entry !== field),
       ...(shapeFocus ? { focus: inFocus ? { label: part.label, filters: swap(shapeFocus.filters) } : shapeFocus } : {}),
       list: shape.list,
+      // A later switch reads the window from the question that set it, not from "what about macOS?".
+      ...(stored.length === 1 ? { windowQuestion: shape.windowQuestion ?? previous.question } : {}),
     };
   }
   // A different value on a field already in force without a switch lead ("only the compliant ones" after the
@@ -449,6 +453,8 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     ids: previous.ids,
     // A chain that once replaced a filter of its set stays on those devices' history.
     ...(previous.shape?.subsetReplacesSet ? { historical: true as const } : {}),
+    // A window the previous answer already held was set by an earlier question; the switch after this reads it there.
+    ...(previous.filters.some((filter) => filter.field === "lastSyncDateTime") && part.predicate.field !== "lastSyncDateTime" ? { windowQuestion: previous.shape?.windowQuestion ?? previous.question } : {}),
   };
 }
 
@@ -477,13 +483,14 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
 
 /** "why is LAPTOP-07 not compliant", read whole; the name between the fixed words must be one cached managed device's, exactly. */
 // The fixed words take any run of whitespace; the name keeps its own spacing, so "Front  Desk" is not "Front Desk".
-const WHY_NOT_COMPLIANT = /^why\s+(?:is|does)\s+(?<name>[a-z0-9](?:[a-z0-9 ._'-]{0,74}?[a-z0-9._'-])?)\s+(?:not\s+compliant|noncompliant|non-compliant|non\s+compliant|marked\s+(?:as\s+)?(?:noncompliant|non-compliant)|show\s+as\s+(?:noncompliant|non-compliant)|failing\s+compliance|fail\s+compliance|out\s+of\s+compliance)$/;
+const WHY_NOT_COMPLIANT = /^why\s+(?:is|does)\s+(?<name>[a-z0-9](?:[a-z0-9 ._'’‘-]{0,74}?[a-z0-9._'’‘-])?)\s+(?:not\s+compliant|noncompliant|non-compliant|non\s+compliant|marked\s+(?:as\s+)?(?:noncompliant|non-compliant)|show\s+as\s+(?:noncompliant|non-compliant)|failing\s+compliance|fail\s+compliance|out\s+of\s+compliance)$/;
 
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
   // Read from the question as typed, not shapeText: its rewrites ("non-compliant" to "noncompliant") would change a device name.
-  // Lower case and quote marks only: normalize() would also collapse the spaces inside the device name.
-  const name = WHY_NOT_COMPLIANT.exec(question.toLowerCase().replace(/[’`]/g, "'").trim().replace(/[?!.]+$/, "").trimEnd())?.groups?.name;
+  // Lower case only: normalize() would collapse the spaces inside the device name and map its curly apostrophe,
+  // and "Alice’s iPhone" is not "Alice's iPhone".
+  const name = WHY_NOT_COMPLIANT.exec(question.toLowerCase().trim().replace(/[?!.]+$/, "").trimEnd())?.groups?.name;
   if (!name) return undefined;
   const match = resolveNamedDevice(store, tenantId, name);
   if (!match) return undefined;
@@ -679,7 +686,7 @@ export function computeStructuredResult(input: {
       label: listedLabel,
       total: listedTotal,
       ...(contextIds ? { ids: contextIds } : {}),
-      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}), ...(query.historical || (query.focus && query.filters.some((filter) => query.focus!.filters.some((focus) => focus.field === filter.field))) ? { subsetReplacesSet: true } : {}) },
+      shape: { filters: query.filters, ...(query.focus ? { focus: query.focus } : {}), breakdown: query.breakdown, list: query.list, ...(query.followUp && query.focus && query.breakdown.length > 0 ? { breakdownOnSubset: true } : {}), ...(query.historical || (query.focus && query.filters.some((filter) => query.focus!.filters.some((focus) => focus.field === filter.field))) ? { subsetReplacesSet: true } : {}), ...(query.windowQuestion ? { windowQuestion: query.windowQuestion } : {}) },
     },
   };
 }
