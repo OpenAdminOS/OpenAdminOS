@@ -52,6 +52,22 @@ it("keeps a model reply with reasoning and no answer for the script failure that
   assert.equal(broker.graphDenialFor(`Error: llm.complete: ${failure.message}`), undefined);
 });
 
+it("takes the model failure the script exited with, written last, among every brokered failure", async () => {
+  const agent = fakeAgent();
+  const tokenLimit = Object.assign(new Error('Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const onlyReasoning = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+  const replies = [tokenLimit, timeout, onlyReasoning];
+  let calls = 0;
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw replies[calls++]!; } }) });
+  for (const id of ["a", "b", "c"]) await broker.handle({ id, method: "llm.complete", params: { prompt: "Summarize." } });
+  // Logged a reasoning failure, retried, and exited on a timeout: not a reasoning failure.
+  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${timeout.message}`), undefined);
+  // Two reasoning failures: the one written last, whatever the request order.
+  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${onlyReasoning.message}\nError: llm.complete: ${tokenLimit.message}`), tokenLimit);
+  assert.equal(broker.llmFailureFor(`Warning: llm.complete: ${tokenLimit.message}\nError: llm.complete: ${onlyReasoning.message}`), onlyReasoning);
+});
+
 describe("sandbox broker", () => {
   it("allows only manifest-declared Graph GET requests", async () => {
     const graphRequests: GraphRequestInput[] = [];

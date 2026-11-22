@@ -39,8 +39,10 @@ export interface SandboxBroker {
   graphDenialFor(scriptOutput: string): Error | undefined;
   /**
    * The typed model failure (a reply with reasoning and no answer) behind a
-   * script failure: one the script received during this run whose message
-   * its output carries, also when the script made other requests after it.
+   * script failure: the brokered failure whose message comes last in the
+   * script's output, when that is a reply with reasoning and no answer. Every
+   * brokered failure of the run counts, so a script that logged one and
+   * exited on another, such as a timeout, gets the other.
    */
   llmFailureFor(scriptOutput: string): Error | undefined;
 }
@@ -72,9 +74,9 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
   // The error that answered the last brokered request, log calls aside.
   let lastFailure: unknown;
-  // Model replies with reasoning and no answer the script received, one per
-  // distinct message, so repeated failures never push out another one.
-  const reasoningFailures = new Map<string, Error>();
+  // Every failure a brokered request answered with, one per distinct message,
+  // so repeated failures never push out another one.
+  const failures = new Map<string, Error>();
 
   return {
     async handle(request) {
@@ -110,9 +112,9 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         }
       } catch (error) {
         if (request?.method !== "log") lastFailure = error;
-        if (error instanceof Error && isReasoningWithoutAnswerError(error)) {
-          reasoningFailures.delete(error.message);
-          reasoningFailures.set(error.message, error);
+        if (request?.method !== "log" && error instanceof Error && error.message.length > 0) {
+          failures.delete(error.message);
+          failures.set(error.message, error);
         }
         return failure(id, error);
       }
@@ -122,8 +124,18 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
         : undefined,
-    llmFailureFor: (scriptOutput) =>
-      [...reasoningFailures.values()].reverse().find((failure) => scriptOutput.includes(failure.message)),
+    llmFailureFor: (scriptOutput) => {
+      let terminal: Error | undefined;
+      let at = -1;
+      for (const failure of failures.values()) {
+        const position = scriptOutput.lastIndexOf(failure.message);
+        if (position >= at && position >= 0) {
+          terminal = failure;
+          at = position;
+        }
+      }
+      return terminal && isReasoningWithoutAnswerError(terminal) ? terminal : undefined;
+    },
   };
 }
 
