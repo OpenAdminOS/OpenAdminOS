@@ -101,3 +101,17 @@ it("sends the family of the model installed now when a name is replaced and rest
   }
   assert.deepEqual(thinks, ["low", false, "low"]);
 });
+
+it("reads a model list entry named only in its model field", async () => {
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ model: "model-field-only:latest", digest: "sha256:m", details: { family: "gptoss" } }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "model-field-only:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  const result = await checkOllama(provider);
+  assert.deepEqual(result.models, ["model-field-only:latest"]);
+  await createOllamaLlm({ defaultModel: "model-field-only:latest", refreshModelFamily: false }).complete({ prompt: "p" });
+  assert.deepEqual(thinks, ["low"]);
+});

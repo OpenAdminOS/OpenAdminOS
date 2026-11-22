@@ -47,6 +47,8 @@ export const providerIds = new Set<ProviderId>(
 export interface OllamaTagsResponse {
   models?: Array<{
     name?: string;
+    /** Some Ollama versions name an entry here instead of in name. */
+    model?: string;
     digest?: string;
     details?: { family?: string };
   }>;
@@ -147,7 +149,9 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const payload = (await response.json()) as OllamaTagsResponse;
     clearTimeout(timeout);
     const installed =
-      payload.models?.filter((model): model is { name: string; digest?: string } => Boolean(model.name)) ?? [];
+      payload.models
+        ?.map((model) => ({ ...model, name: model.name ?? model.model }))
+        .filter((model): model is { name: string; digest?: string; details?: { family?: string } } => Boolean(model.name)) ?? [];
     // The family sets the think value Chat and runs send to each model. The
     // list is read on every check, so a model replaced under the same name,
     // or restored to a digest seen before, never keeps an old family.
