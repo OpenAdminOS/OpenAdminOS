@@ -155,7 +155,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const learn = (value: false | "low") => {
         const key = familyKey(endpoint, model);
         if (ollamaModelFamilies.has(key) || ollamaModelDigests.get(key) !== sentDigest) return;
-        ollamaThinkLearned.set(key, value);
+        ollamaThinkLearned.set(key, { value, digest: sentDigest });
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -259,20 +259,28 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
         return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : cachedCtx !== undefined ? { size: cachedCtx, kept: true } : undefined, text));
       };
+      /**
+       * Sends once, and once more without a level when Ollama rejects the
+       * level this model was sent (a model named like gpt-oss that is not one).
+       */
+      const sendWithThinkFallback = async (numCtx: number | undefined): Promise<[Response, string]> => {
+        let sent = await send(numCtx);
+        let text = await errorDetail(sent);
+        if (sent.status === 400 && body.think !== false && rejectsThinkLevel(text)) {
+          learn(false);
+          body.think = false;
+          startAttempt(attemptLabel);
+          sent = await send(numCtx);
+          text = await errorDetail(sent);
+        }
+        return [sent, text];
+      };
       try {
         let numCtx = cachedCtx;
 
         startAttempt(cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
-        response = await send(numCtx);
-        let detail = await errorDetail(response);
-        if (response.status === 400 && body.think !== false && rejectsThinkLevel(detail)) {
-          // A model named like gpt-oss that is not one: ask again without a level.
-          learn(false);
-          body.think = false;
-          startAttempt(attemptLabel);
-          response = await send(numCtx);
-          detail = await errorDetail(response);
-        }
+        let detail: string;
+        [response, detail] = await sendWithThinkFallback(numCtx);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Less room than the kept size asked for means Ollama can no longer
@@ -301,8 +309,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           retry = { requested: overflow.requested, numCtx };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
-          response = await send(numCtx);
-          detail = await errorDetail(response);
+          [response, detail] = await sendWithThinkFallback(numCtx);
           if (response.ok) raisedCtx = numCtx;
         }
         if (!response.ok) {
@@ -446,7 +453,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
  * before; a model that both rejects a level and reasons under `false` would
  * alternate, and each of its requests still gets an answer, with one retry.
  */
-const ollamaThinkLearned = new Map<string, false | "low">();
+const ollamaThinkLearned = new Map<string, { value: false | "low"; digest: string | undefined }>();
 
 /** Model families from the provider check's /api/show, keyed by endpoint and model. */
 const ollamaModelFamilies = new Map<string, string>();
@@ -554,7 +561,11 @@ function ollamaThinkFor(endpoint: string, model: string): false | "low" {
   const key = familyKey(endpoint, model);
   const family = ollamaModelFamilies.get(key);
   if (family !== undefined) return ollamaThinkSetting(model, family);
-  return ollamaThinkLearned.get(key) ?? ollamaThinkSetting(model);
+  // An answer counts only for the version it was learned against, so one
+  // learned before any version was known does not pass to the first version seen.
+  const learned = ollamaThinkLearned.get(key);
+  if (learned && learned.digest === ollamaModelDigests.get(key)) return learned.value;
+  return ollamaThinkSetting(model);
 }
 
 /** Ollama's answer to a think level the model does not support, in old and current wording. */
