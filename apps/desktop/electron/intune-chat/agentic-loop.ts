@@ -520,7 +520,8 @@ export async function runAgenticChat(
     if (action.kind === "malformed") {
       malformedCount += 1;
       lastProblem = "malformed";
-      await settleModelStep({ kind: "repair", reason: "malformed" });
+      // The step says the loop ended when no retry follows, instead of a retry that never runs.
+      await settleModelStep({ kind: "repair", reason: "malformed", ...(malformedCount > limits.malformed || attempts >= maxAttempts ? { ends: true } : {}) });
       if (malformedCount > limits.malformed) {
         if (invalidQueries.size) return blockedAnswer();
         return {

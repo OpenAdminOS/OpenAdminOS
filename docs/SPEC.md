@@ -3869,7 +3869,8 @@ the format. Decisions:
   its own subject is its own question and goes to the planner; "list their
   names" together with a subset asks for two lists and goes to the planner;
   "what about macOS" asks the stored question again with macOS swapped in or
-  added in the same shape (its split, subset, count or list), replacing the OS
+  added in the same shape, with a relative sync window ("today", "in the last
+  7 days") read again from the stored question at the time of the switch (its split, subset, count or list), replacing the OS
   in the set and the subset alike, and a split that was over a follow-up's
   subset is not rebuilt; a split asked after the subset clause could mean
   either and goes to the planner; a turn with attached workspace context goes
@@ -3903,9 +3904,10 @@ the format. Decisions:
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,
   registration, stale-device cleanup, duplicate and deleted-record wording.
 - Row samples use structured filters for the OS and compliance state a question
-  names, and question words are no longer ANDed as text matches. A compliance
-  state filters the samples only for list and count requests; in "why is PC1
-  not compliant" it is the premise, so PC1 stays in the samples.
+  names, and question words are no longer ANDed as text matches. A "why"
+  question gets no field filter, since its state and any OS word are the
+  premise or part of a device name ("why is Windows-Lab not compliant"), so
+  the named device stays in the samples; every other question keeps both.
 - Follow-ups: the structured result of the last answer is stored per
   conversation (`chat_result_context`: resource, filters, label, total and up
   to 500 matched row ids; deleted with the conversation) and a follow-up such
@@ -3935,7 +3937,8 @@ the format. Decisions:
   ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not;
   the whole name is tried first, so "Device Lab" is never answered as "Lab";
   the name as asked is resolved again in the snapshot that answers, and when
-  a refresh made it mean another device, or none, the planner answers),
+  a refresh made it mean another device, or none, the planner answers; the
+  name keeps its own spacing, so "Front  Desk" is not "Front Desk"),
   says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. Only a failing state
   (noncompliant, conflict, error) and grace period get that guidance. A

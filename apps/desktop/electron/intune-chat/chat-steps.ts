@@ -533,7 +533,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent" }
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent"; ends?: true }
   /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
   | { kind: "context-limit" }
   /** The request did not reach the model: the loop ends with provider-unavailable. */
@@ -622,7 +622,7 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
             : outcome.kind === "unreachable" ? "Could not reach the model"
               : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
-        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : outcome.reason === "budget-spent" ? "the tool was not run; the tool loop ended here" : "asked the model to try again"}`
+        : outcome.kind === "repair" ? `${name} · ${outcome.ends ? "the tool loop ended here" : outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : outcome.reason === "budget-spent" ? "the tool was not run; the tool loop ended here" : "asked the model to try again"}`
           // The loop step says only that the loop ended; the cached-data answer step after it reports its own outcome.
           : outcome.kind === "context-limit" ? `${name} · the tool loop ended here`
             : outcome.kind === "unreachable" ? `${name} · the request did not connect` : name;

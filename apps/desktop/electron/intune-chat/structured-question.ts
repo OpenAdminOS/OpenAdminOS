@@ -400,13 +400,25 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     // A subset that replaced a filter of its set ("which of those are compliant now" after the noncompliant list)
     // was read on the previous rows' history; asked again of a fresh set it would need both values, so it is not rebuilt.
     if (!shape || shape.breakdownOnSubset || shape.subsetReplacesSet) return undefined;
+    // A sync window is relative ("today", "in the last 7 days"): the stored cutoff is from the earlier answer, so
+    // it is read again from the stored question at this answer's time. One that cannot be read again goes to the planner.
+    const stored = [...shape.filters, ...(shape.focus?.filters ?? [])].filter((filter) => filter.field === "lastSyncDateTime");
+    let window: GraphCacheQueryPredicate | undefined;
+    if (stored.length > 1) return undefined;
+    if (stored.length === 1) {
+      window = syncFilter(normalize(previous.question), generatedAt)?.predicate;
+      if (!window || window.op !== stored[0]!.op) return undefined;
+    }
+    const current = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (window && filter.field === "lastSyncDateTime" ? window : filter));
+    const shapeFilters = current(shape.filters);
+    const shapeFocus = shape.focus ? { ...shape.focus, filters: current(shape.focus.filters) } : undefined;
     const field = part.predicate.field;
-    const inFocus = shape.focus?.filters.some((filter) => filter.field === field) ?? false;
+    const inFocus = shapeFocus?.filters.some((filter) => filter.field === field) ?? false;
     const swap = (filters: readonly GraphCacheQueryPredicate[]) => filters.map((filter) => (filter.field === field ? part.predicate : filter));
     // The OS is replaced wherever the stored question holds one, in the set and in the subset; added to the set
     // only when it holds none, so no Windows filter survives next to the new macOS one.
-    const inScope = shape.filters.some((filter) => filter.field === field);
-    const filters = inScope ? swap(shape.filters) : inFocus ? [...shape.filters] : [...shape.filters, part.predicate];
+    const inScope = shapeFilters.some((filter) => filter.field === field);
+    const filters = inScope ? swap(shapeFilters) : inFocus ? [...shapeFilters] : [...shapeFilters, part.predicate];
     return {
       kind: "count",
       resource: previous.resource,
@@ -414,7 +426,7 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
       filters,
       // A per OS split of one OS says nothing; it is dropped once the set is one OS.
       breakdown: inFocus && !inScope ? shape.breakdown : shape.breakdown.filter((entry) => entry !== field),
-      ...(shape.focus ? { focus: inFocus ? { label: part.label, filters: swap(shape.focus.filters) } : shape.focus } : {}),
+      ...(shapeFocus ? { focus: inFocus ? { label: part.label, filters: swap(shapeFocus.filters) } : shapeFocus } : {}),
       list: shape.list,
     };
   }
@@ -464,12 +476,14 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
 }
 
 /** "why is LAPTOP-07 not compliant", read whole; the name between the fixed words must be one cached managed device's, exactly. */
-const WHY_NOT_COMPLIANT = /^why (?:is|does) (?<name>[a-z0-9][a-z0-9 ._'-]{0,74}?) (?:not compliant|noncompliant|non-compliant|non compliant|marked (?:as )?(?:noncompliant|non-compliant)|show as (?:noncompliant|non-compliant)|failing compliance|fail compliance|out of compliance)$/;
+// The fixed words take any run of whitespace; the name keeps its own spacing, so "Front  Desk" is not "Front Desk".
+const WHY_NOT_COMPLIANT = /^why\s+(?:is|does)\s+(?<name>[a-z0-9](?:[a-z0-9 ._'-]{0,74}?[a-z0-9._'-])?)\s+(?:not\s+compliant|noncompliant|non-compliant|non\s+compliant|marked\s+(?:as\s+)?(?:noncompliant|non-compliant)|show\s+as\s+(?:noncompliant|non-compliant)|failing\s+compliance|fail\s+compliance|out\s+of\s+compliance)$/;
 
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {
   // Read from the question as typed, not shapeText: its rewrites ("non-compliant" to "noncompliant") would change a device name.
-  const name = WHY_NOT_COMPLIANT.exec(normalize(question).replace(/[?!.]+$/, ""))?.groups?.name;
+  // Lower case and quote marks only: normalize() would also collapse the spaces inside the device name.
+  const name = WHY_NOT_COMPLIANT.exec(question.toLowerCase().replace(/[’`]/g, "'").trim().replace(/[?!.]+$/, "").trimEnd())?.groups?.name;
   if (!name) return undefined;
   const match = resolveNamedDevice(store, tenantId, name);
   if (!match) return undefined;
@@ -484,7 +498,7 @@ export function deviceComplianceReasonQuery(question: string, store: Intelligenc
  */
 function resolveNamedDevice(store: IntelligenceSqliteStore, tenantId: string, name: string): { id: string; name: string } | undefined {
   let matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name, limit: 2 });
-  const unprefixed = name.replace(/^(?:the device|device) /, "");
+  const unprefixed = name.replace(/^(?:the\s+device|device)\s+/, "");
   if (matches.length === 0 && unprefixed !== name) matches = store.findGraphRowsNamed({ tenantId, resource: "managedDevices", name: unprefixed, limit: 2 });
   return matches.length === 1 ? matches[0] : undefined;
 }
@@ -793,11 +807,11 @@ export function deviceRowFilters(question: string): GraphCacheQueryPredicate[] {
   const lower = normalize(question);
   // "Windows or noncompliant" is a union; ANDing its parts would sample the wrong rows.
   if (/\bor\b/.test(lower)) return [];
-  // A compliance state filters the rows only when the question asks for devices in it ("which are noncompliant",
-  // "how many are compliant"). In "why is PC1 not compliant" it is the question's premise: filtering on it would
-  // leave out PC1 itself when PC1 is compliant.
-  const asksForDevices = /^(?:which|list|show|how many|what are|count|give me|find)\b/.test(lower);
-  const compliance = asksForDevices ? complianceFocus(lower) : undefined;
+  // In "why is PC1 not compliant" or "why is Windows-Lab not compliant" the state and the OS word are the
+  // question's premise or part of a name, not a request for devices in them: filtering on them could leave the
+  // named device out of the rows. Such a question gets no field filter; every other one keeps both.
+  if (/^why\b/.test(lower)) return [];
+  const compliance = complianceFocus(lower);
   return [osFilter(lower), compliance === "ambiguous" ? undefined : compliance].flatMap((entry) => (entry ? [entry.predicate] : []));
 }
 

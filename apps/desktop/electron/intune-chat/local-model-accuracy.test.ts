@@ -10,7 +10,7 @@ import { AppStateStore } from "../state.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
 import { recordAgenticOutcome } from "./service.js";
-import { computeStructuredResult, deviceComplianceReasonQuery, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
+import { chatResultContextFor, computeStructuredResult, deviceComplianceReasonQuery, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
 import { buildAnswerPack, GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
 
 /**
@@ -444,6 +444,18 @@ describe("local model accuracy on the tester's tenant", () => {
           { id: "md-lab", deviceName: "Lab", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent },
           { id: "md-devlab", deviceName: "Device Lab", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: recent }] });
       assert.equal(computeStructuredResult({ store: cache, tenantId: tenant.id, query: stale, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: at }), undefined);
+
+      // The name keeps its own spacing: "Front  Desk" (two spaces) is not "Front Desk" (one).
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices,
+          { id: "md-desk-1", deviceName: "Front Desk", operatingSystem: "Windows", complianceState: "compliant", lastSyncDateTime: recent },
+          { id: "md-desk-2", deviceName: "Front  Desk", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: "2026-05-18T09:30:00.000Z" }] });
+      const twoSpaces = deviceComplianceReasonQuery("Why is Front  Desk not compliant?", cache, tenant.id)!;
+      assert.equal(twoSpaces.deviceId, "md-desk-2");
+      const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: twoSpaces, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: at })!.facts.join("\n");
+      assert.match(detail, /is marked noncompliant/);
+      assert.match(detail, /the last sync was on 2026-05-18/);
+      assert.equal(deviceComplianceReasonQuery("Why is Front Desk not compliant?", cache, tenant.id)?.deviceId, "md-desk-1");
     });
   });
 
@@ -657,6 +669,23 @@ describe("Stop during the refresh before an answer", () => {
   });
 });
 
+describe("an OS switch after a relative sync window", () => {
+  it("reads the window again at the switch, so \"today\" is the day of the switch", async () => {
+    await withHarness(async ({ cache }) => {
+      const monday = new Date(2026, 10, 16, 15, 0, 0).toISOString();
+      const tuesday = new Date(2026, 10, 17, 9, 0, 0).toISOString();
+      const question = "Which Windows devices synced today?";
+      const first = structuredQueryForQuestion({ question, generatedAt: monday })!;
+      const computed = computeStructuredResult({ store: cache, tenantId: tenant.id, query: first, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: monday })!;
+      const previous = chatResultContextFor(computed, { tenantId: tenant.id, question, computedAt: monday })!;
+      const switched = structuredQueryForQuestion({ question: "What about macOS?", generatedAt: tuesday, previous })!;
+      const sync = [...switched.filters, ...(switched.focus?.filters ?? [])].find((filter) => filter.field === "lastSyncDateTime");
+      assert.equal(sync?.value, new Date(2026, 10, 17).toISOString(), "the cutoff is Tuesday's start, not Monday's");
+      assert.ok(switched.filters.some((filter) => filter.field === "operatingSystem" && filter.value === "macOS"));
+    });
+  });
+});
+
 describe("computed answers on partial and never-synced data", () => {
   it("leads an unfiltered count with the Graph total when the cache is partial, and labels its splits", async () => {
     await withHarness(async ({ cache }) => {
@@ -767,9 +796,16 @@ describe("structured device questions", () => {
     assert.deepEqual(deviceRowFilters("Which devices are Windows or noncompliant?"), []);
     // The sample rows never get the inverse filter either.
     assert.deepEqual(deviceRowFilters("How many devices in Intune are not Windows?"), []);
-    // A compliance state in a "why" question is its premise, not a filter: the named device stays in the rows.
+    // In a "why" question the state and an OS word are the premise or part of a name: the named device stays in the rows.
     assert.deepEqual(deviceRowFilters("Why is PC1 not compliant?"), []);
-    assert.deepEqual(deviceRowFilters("Which devices are noncompliant?"), [{ field: "complianceState", op: "eq", value: "noncompliant" }]);
+    assert.deepEqual(deviceRowFilters("Why is Windows-Lab not compliant?"), []);
+    // Every other question keeps its filters, whatever its opening words.
+    const noncompliant = { field: "complianceState", op: "eq", value: "noncompliant" };
+    const windows = { field: "operatingSystem", op: "eq", value: "Windows" };
+    assert.deepEqual(deviceRowFilters("Which devices are noncompliant?"), [noncompliant]);
+    assert.deepEqual(deviceRowFilters("What devices are noncompliant?"), [noncompliant]);
+    assert.deepEqual(deviceRowFilters("Are any Windows devices noncompliant?"), [windows, noncompliant]);
+    assert.deepEqual(deviceRowFilters("Tell me the noncompliant devices"), [noncompliant]);
   });
 
   it("leaves questions it does not fully understand to the planner", () => {
