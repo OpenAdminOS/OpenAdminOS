@@ -1888,4 +1888,37 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("sends the level retry with the family Ollama reports for the model now", async () => {
+    let family: string | undefined;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "gpt-oss-plain:latest", ...(family ? { details: { family } } : {}) }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        if (thinks.length === 1) {
+          // The level is rejected; the list then reports gpt-oss, still without a version.
+          family = "gptoss";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-plain" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-plain" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });

@@ -283,7 +283,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           const key = familyKey(endpoint, model);
           const generation = ollamaModelGenerations.get(key) ?? 0;
-          body.think = generation === sentGeneration ? false : ollamaThinkFor(endpoint, model);
+          // A family Ollama reports now decides; without one, the same model
+          // gets no level and a replacement gets what is known about it.
+          const family = ollamaModelFamilies.get(key);
+          body.think = family !== undefined
+            ? ollamaThinkSetting(model, family)
+            : generation === sentGeneration ? false : ollamaThinkFor(endpoint, model);
           sentDigest = ollamaModelDigests.get(key);
           sentGeneration = generation;
           startAttempt(attemptLabel);
