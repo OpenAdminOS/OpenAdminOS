@@ -3909,8 +3909,9 @@ the format. Decisions:
   question gets no field filter, since its state and any OS word are the
   premise or part of a device name ("why is Windows-Lab not compliant"), so
   the named device stays in the samples; every other question keeps both, and
-  any cached device the question names by its whole name is added to the
-  samples whatever the filters ("is Windows-Lab compliant" about a Mac).
+  any cached device the question names by its whole name goes first in the
+  samples whatever the filters ("is Windows-Lab compliant" about a Mac), so
+  no later cap drops it.
 - Follow-ups: the structured result of the last answer is stored per
   conversation (`chat_result_context`: resource, filters, label, total and up
   to 500 matched row ids; deleted with the conversation) and a follow-up such
@@ -3942,7 +3943,9 @@ the format. Decisions:
   the name as asked is resolved again in the snapshot that answers, and when
   a refresh made it mean another device, or none, the planner answers; the
   name keeps its own spacing and punctuation, so "Front  Desk" is not "Front
-  Desk" and "Alice’s iPhone" is not "Alice's iPhone"),
+  Desk" and "Alice’s iPhone" is not "Alice's iPhone"; letters of any script
+  count and case is folded with Unicode rules, so "Élodie’s iPhone" matches
+  as typed in any case),
   says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. Only a failing state
   (noncompliant, conflict, error) and grace period get that guidance. A
@@ -3979,8 +3982,9 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  when that reply is empty, only promises work or is a bare tool request,
-  the message fails with
+  a reply in the loop's JSON shows its answer text; when the reply is empty,
+  only promises work or is a tool request (any key order), the message fails
+  with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the

@@ -2405,7 +2405,7 @@ export class IntuneChatService {
         let model: string | undefined;
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
         // After a compact loop the fallback is one model call, so the turn stays bounded.
-        const content = await completeWithPromiseNudge(async (attempt) => {
+        const reply = await completeWithPromiseNudge(async (attempt) => {
           const completion = await llm.complete({
             system,
             prompt: attempt,
@@ -2416,7 +2416,11 @@ export class IntuneChatService {
           model = completion.model;
           return completion.text.trim();
         }, buildAnswerPrompt(answerPack, documentation), afterCompactLoop ? 0 : undefined);
-        if (afterCompactLoop && (!content || looksLikeUnkeptPromise(content) || isToolProtocolReply(content))) {
+        // After a compact loop a small model may still reply in the loop's JSON: its answer text is the answer,
+        // and a tool request is no answer.
+        const protocol = afterCompactLoop ? protocolReply(reply) : undefined;
+        const content = protocol && "answer" in protocol ? protocol.answer : reply;
+        if (afterCompactLoop && (!content || looksLikeUnkeptPromise(content) || (protocol !== undefined && !("answer" in protocol)))) {
           finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
           assistantStatus = "failed";
           assistantError = LOCAL_FALLBACK_UNFINISHED;
@@ -3166,7 +3170,11 @@ export class IntuneChatService {
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
-        if (afterCompactLoop && !isCancelled() && (!assistantContent || looksLikeUnkeptPromise(assistantContent) || isToolProtocolReply(assistantContent))) {
+        // After a compact loop a small model may still reply in the loop's JSON: its answer text is the answer,
+        // and a tool request is no answer.
+        const protocol = afterCompactLoop ? protocolReply(assistantContent) : undefined;
+        if (protocol && "answer" in protocol) assistantContent = protocol.answer;
+        if (afterCompactLoop && !isCancelled() && (!assistantContent || looksLikeUnkeptPromise(assistantContent) || (protocol !== undefined && !("answer" in protocol)))) {
           assistantStatus = "failed";
           assistantError = LOCAL_FALLBACK_UNFINISHED;
           assistantContent = LOCAL_FALLBACK_UNFINISHED;
@@ -3322,7 +3330,8 @@ export class IntuneChatService {
               emitDelta(assistantContent);
             } else {
               sendProgress({
-                message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice,
+                // Said as pending: the cached-data answer does not exist yet and can still fail.
+                message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice.replace(/Answered from cached data instead\.$/, "Answering from cached data instead."),
                 stage: "building-context",
                 contextStatus: "active",
                 modelStatus: "pending",
@@ -4090,9 +4099,24 @@ export class IntuneChatService {
 }
 
 
-/** A reply that is only a tool request in the loop's JSON protocol, fenced or not: no answer to show. */
-function isToolProtocolReply(text: string): boolean {
-  return /^\s*(?:```(?:json)?\s*)?\{\s*"tool"\s*:/i.test(text);
+/**
+ * A reply in the tool loop's JSON protocol, bare or fenced, in any key order: `{ answer }` when it carries an
+ * answer text, `{ request }` when it is a tool request or a protocol object with no answer, undefined otherwise.
+ */
+function protocolReply(text: string): { answer: string } | { request: true } | undefined {
+  const body = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!body.startsWith("{")) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const record = parsed as Record<string, unknown>;
+  if ("tool" in record) return { request: true };
+  if (typeof record.answer === "string" && record.answer.trim()) return { answer: record.answer.trim() };
+  return "final" in record || "kind" in record ? { request: true } : undefined;
 }
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */

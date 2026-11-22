@@ -483,7 +483,8 @@ function dedupe(filters: GraphCacheQueryPredicate[]): GraphCacheQueryPredicate[]
 
 /** "why is LAPTOP-07 not compliant", read whole; the name between the fixed words must be one cached managed device's, exactly. */
 // The fixed words take any run of whitespace; the name keeps its own spacing, so "Front  Desk" is not "Front Desk".
-const WHY_NOT_COMPLIANT = /^why\s+(?:is|does)\s+(?<name>[a-z0-9](?:[a-z0-9 ._'’‘-]{0,74}?[a-z0-9._'’‘-])?)\s+(?:not\s+compliant|noncompliant|non-compliant|non\s+compliant|marked\s+(?:as\s+)?(?:noncompliant|non-compliant)|show\s+as\s+(?:noncompliant|non-compliant)|failing\s+compliance|fail\s+compliance|out\s+of\s+compliance)$/;
+// Letters of any script are name characters, so "Élodie’s iPhone" is read as typed.
+const WHY_NOT_COMPLIANT = /^why\s+(?:is|does)\s+(?<name>[\p{L}\p{N}](?:[\p{L}\p{M}\p{N} ._'’‘-]{0,74}?[\p{L}\p{M}\p{N}._'’‘-])?)\s+(?:not\s+compliant|noncompliant|non-compliant|non\s+compliant|marked\s+(?:as\s+)?(?:noncompliant|non-compliant)|show\s+as\s+(?:noncompliant|non-compliant)|failing\s+compliance|fail\s+compliance|out\s+of\s+compliance)$/u;
 
 /** Whether a question asks why a named managed device is not compliant. */
 export function deviceComplianceReasonQuery(question: string, store: IntelligenceSqliteStore, tenantId: string): DeviceDetailQuery | undefined {

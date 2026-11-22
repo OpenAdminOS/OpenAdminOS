@@ -1010,10 +1010,10 @@ export function readPlannedChatRows(
     const named = store.findGraphRowsNamedIn({ tenantId: input.tenantId, resource: "managedDevices", text: input.question, limit: 5 });
     if (named.length > 0) {
       const namedRows = store.countGraphCache({ tenantId: input.tenantId, resource: "managedDevices", filters: [{ field: "id", op: "in", value: named.map((entry) => entry.id) }], listLimit: named.length }).rows ?? [];
-      const sampled = rows.managedDevices ?? [];
-      const sampledIds = new Set(sampled.map((row) => (row && typeof row === "object" ? (row as { id?: unknown }).id : undefined)));
-      const missing = namedRows.filter((row) => !sampledIds.has((row as { id?: unknown }).id));
-      rows.managedDevices = [...missing, ...sampled].slice(0, Math.max(input.limitPerResource, missing.length));
+      // Every named row goes first, also one already sampled further down, so no cap after this drops it.
+      const namedIds = new Set(namedRows.map((row) => (row as { id?: unknown }).id));
+      const others = (rows.managedDevices ?? []).filter((row) => !namedIds.has(row && typeof row === "object" ? (row as { id?: unknown }).id : undefined));
+      rows.managedDevices = [...namedRows, ...others].slice(0, Math.max(input.limitPerResource, namedRows.length));
     }
   }
   return rows;

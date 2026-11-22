@@ -2513,40 +2513,51 @@ export class IntelligenceSqliteStore {
   }
 
   /**
-   * Cached rows whose display name appears in a text as a whole word, longest name first, ignoring case:
-   * the devices a question names, kept in its sample rows whatever filters the question's words set.
-   * Names shorter than three characters never match on their own.
+   * Cached rows whose display name appears in a text as a whole word, ignoring case: the devices a question
+   * names, kept in its sample rows whatever filters the question's words set. Names shorter than three
+   * characters never match on their own. SQL only narrows by length; the case-insensitive match is done here
+   * with full Unicode folding, so "Élodie’s iPhone" is found as typed in any case.
    */
   findGraphRowsNamedIn(input: { tenantId: string; resource: GraphCacheResourceKind; text: string; limit: number }): Array<{ id: string; name: string }> {
+    const text = foldName(input.text);
     const rows = this.db
       .prepare(`SELECT graph_id, display_name FROM graph_resources
-        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) >= 3
-          AND instr(lower(?), lower(display_name)) > 0
-        ORDER BY length(display_name) DESC, display_name ASC LIMIT ?`)
-      .all(input.tenantId, input.resource, input.text, Math.max(1, Math.floor(input.limit))) as unknown as Array<{ graph_id: string; display_name: string }>;
-    const lower = input.text.toLowerCase();
-    // A name must stand as its own word: "PC-1" is not found inside "PC-12".
+        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) BETWEEN 3 AND ?`)
+      // A name stored decomposed ("E" plus a combining accent) is longer than it reads, so the bound has room.
+      .all(input.tenantId, input.resource, [...input.text].length * 2) as unknown as Array<{ graph_id: string; display_name: string }>;
+    const wordChar = /[\p{L}\p{N}-]/u;
     return rows
       .filter((row) => {
-        const name = row.display_name.toLowerCase();
-        for (let index = lower.indexOf(name); index >= 0; index = lower.indexOf(name, index + 1)) {
-          const before = lower[index - 1];
-          const after = lower[index + name.length];
-          if ((!before || !/[a-z0-9-]/.test(before)) && (!after || !/[a-z0-9-]/.test(after))) return true;
+        // A name must stand as its own word: "PC-1" is not found inside "PC-12".
+        const name = foldName(row.display_name);
+        for (let index = text.indexOf(name); index >= 0; index = text.indexOf(name, index + 1)) {
+          const before = text[index - 1];
+          const after = text[index + name.length];
+          if ((!before || !wordChar.test(before)) && (!after || !wordChar.test(after))) return true;
         }
         return false;
       })
+      .sort((a, b) => b.display_name.length - a.display_name.length || a.display_name.localeCompare(b.display_name))
+      .slice(0, Math.max(1, Math.floor(input.limit)))
       .map((row) => ({ id: row.graph_id, name: row.display_name }));
   }
 
-  /** Cached rows whose display name is exactly this name, ignoring case; more than one means the name is shared. */
+  /**
+   * Cached rows whose display name is exactly this name, ignoring case with full Unicode folding (SQLite's
+   * lower() folds ASCII only); more than one means the name is shared. Spacing and punctuation must match.
+   */
   findGraphRowsNamed(input: { tenantId: string; resource: GraphCacheResourceKind; name: string; limit: number }): Array<{ id: string; name: string }> {
+    const wanted = foldName(input.name);
     const rows = this.db
       .prepare(`SELECT graph_id, display_name FROM graph_resources
-        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND lower(display_name) = lower(?)
-        ORDER BY display_name ASC LIMIT ?`)
-      .all(input.tenantId, input.resource, input.name, Math.max(1, Math.floor(input.limit))) as unknown as Array<{ graph_id: string; display_name: string }>;
-    return rows.map((row) => ({ id: row.graph_id, name: row.display_name }));
+        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) BETWEEN ? AND ?
+        ORDER BY display_name ASC`)
+      // The length only narrows the scan; a name stored decomposed is longer than it reads, so the bound has room.
+      .all(input.tenantId, input.resource, Math.ceil([...input.name.normalize("NFC")].length / 2), [...input.name.normalize("NFD")].length * 2) as unknown as Array<{ graph_id: string; display_name: string }>;
+    return rows
+      .filter((row) => foldName(row.display_name) === wanted)
+      .slice(0, Math.max(1, Math.floor(input.limit)))
+      .map((row) => ({ id: row.graph_id, name: row.display_name }));
   }
 
   /** The structured result of the last tenant answer in a conversation, for follow-ups. */
@@ -4812,4 +4823,9 @@ function randomSyntheticId(value: unknown): string {
     hash = (hash * 31 + json.charCodeAt(i)) >>> 0;
   }
   return `row-${hash.toString(16)}`;
+}
+
+/** A display name compared ignoring case: Unicode lower case of its composed form. Spacing and punctuation stay. */
+function foldName(name: string): string {
+  return name.normalize("NFC").toLowerCase();
 }

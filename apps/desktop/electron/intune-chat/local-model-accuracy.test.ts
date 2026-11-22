@@ -473,6 +473,20 @@ describe("local model accuracy on the tester's tenant", () => {
         rows: [...managedDevices, { id: "md-wlab", deviceName: "Windows-Lab", operatingSystem: "macOS", complianceState: "noncompliant", lastSyncDateTime: recent }] });
       const sampled = readPlannedChatRows(cache, { tenantId: tenant.id, question: "Is Windows-Lab compliant?", generatedAt: at, resources: ["managedDevices"], searchTerms: ["windows-lab", "compliant"], limitPerResource: 5 });
       assert.ok((sampled.managedDevices ?? []).some((row) => (row as { id?: string }).id === "md-wlab"), "the named Mac is in the samples");
+
+      // The named device goes first even when twenty longer names that start with it fill the sample before it.
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...Array.from({ length: 25 }, (_, i) => ({ id: `md-win01-${i}`, deviceName: `WIN-01-${String(i).padStart(2, "0")}`, operatingSystem: "Windows", complianceState: "compliant", lastSyncDateTime: recent })),
+          { id: "md-win01", deviceName: "WIN-01", operatingSystem: "Windows", complianceState: "compliant", lastSyncDateTime: recent }] });
+      const crowded = readPlannedChatRows(cache, { tenantId: tenant.id, question: "Is WIN-01 compliant?", generatedAt: at, resources: ["managedDevices"], searchTerms: ["win-01", "compliant"], limitPerResource: 20 });
+      assert.equal((crowded.managedDevices?.[0] as { id?: string } | undefined)?.id, "md-win01");
+      assert.equal(new Set((crowded.managedDevices ?? []).map((row) => (row as { id?: string }).id)).size, crowded.managedDevices?.length, "no duplicates");
+
+      // A name in any script is read as typed and matched ignoring case: "élodie’s iphone" is "Élodie’s iPhone".
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices, { id: "md-elodie", deviceName: "Élodie’s iPhone", operatingSystem: "iOS", complianceState: "noncompliant", lastSyncDateTime: recent }] });
+      assert.equal(deviceComplianceReasonQuery("Why is Élodie’s iPhone not compliant?", cache, tenant.id)?.deviceId, "md-elodie");
+      assert.equal(deviceComplianceReasonQuery("why is ÉLODIE’S IPHONE not compliant?", cache, tenant.id)?.deviceId, "md-elodie");
     });
   });
 
@@ -603,17 +617,36 @@ describe("The fallback after a failed compact loop", () => {
     });
   });
 
-  it("fails plainly when the one cached-data call replies with a tool request, in both send paths", async () => {
+  it("fails plainly when the one cached-data call replies with a tool request, in any key order, in both send paths", async () => {
     await withHarness(async ({ store, calls, reply }) => {
-      for (const send of ["send", "stream"] as const) {
+      for (const [send, request] of [
+        ["send", JSON.stringify({ tool: "list_cached_resources", params: {} })],
+        ["stream", JSON.stringify({ tool: "list_cached_resources", params: {} })],
+        ["send", '```json\n{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}\n```'],
+        ["stream", '{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}'],
+      ] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-        reply(() => JSON.stringify({ tool: "list_cached_resources", params: {} }));
-        const request = { content: "Which of our devices need attention?", refreshIfStale: false };
-        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
+        reply(() => request);
+        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
         assert.equal(calls.filter((call) => !call.loop).length, 1, `${send}: one fallback call`);
         assert.equal(message.status, "failed", send);
         assert.match(message.content, /^The local model did not finish an answer\./, send);
         assert.equal(message.engineNotice, undefined, send);
+      }
+    });
+  });
+
+  it("shows the answer text when the one cached-data call replies with the loop's final JSON, in both send paths", async () => {
+    await withHarness(async ({ store, reply }) => {
+      for (const send of ["send", "stream"] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : '{"final":true,"answer":"Six managed devices are not compliant."}'));
+        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+        assert.equal(message.status, "completed", send);
+        assert.equal(message.content, "Six managed devices are not compliant.", send);
+        assert.equal(message.engineNotice, LOCAL_FALLBACK_NOTICES["iteration-cap"], send);
       }
     });
   });
