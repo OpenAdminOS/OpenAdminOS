@@ -3903,7 +3903,9 @@ the format. Decisions:
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,
   registration, stale-device cleanup, duplicate and deleted-record wording.
 - Row samples use structured filters for the OS and compliance state a question
-  names, and question words are no longer ANDed as text matches.
+  names, and question words are no longer ANDed as text matches. A compliance
+  state filters the samples only for list and count requests; in "why is PC1
+  not compliant" it is the premise, so PC1 stays in the samples.
 - Follow-ups: the structured result of the last answer is stored per
   conversation (`chat_result_context`: resource, filters, label, total and up
   to 500 matched row ids; deleted with the conversation) and a follow-up such
@@ -3931,7 +3933,9 @@ the format. Decisions:
 - Questions the data cannot answer: "why is <device> not compliant" names the
   device's cached state (the device is found by its exact cached name,
   ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not;
-  the whole name is tried first, so "Device Lab" is never answered as "Lab"),
+  the whole name is tried first, so "Device Lab" is never answered as "Lab";
+  the name as asked is resolved again in the snapshot that answers, and when
+  a refresh made it mean another device, or none, the planner answers),
   says the failing rule is not in the cached data, and
   gives the last sync as the lead, with nothing invented. Only a failing state
   (noncompliant, conflict, error) and grace period get that guidance. A
