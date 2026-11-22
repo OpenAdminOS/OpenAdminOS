@@ -63,7 +63,6 @@ import {
   createMsalClient,
   defaultClientId,
   createOllamaLlm,
-  refreshOllamaModelFamily,
   createRegistryInstallCountPayload,
   createTenantSession,
   awaitWithSignal,
@@ -8885,12 +8884,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // The endpoint is resolved once and given to the adapter, so the one compared is the one used.
       const endpoint = resolveOllamaEndpoint();
       requireBound(endpoint.replace(/\/$/, ""));
-      const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
+      // The model under a name may be replaced between requests; each request
+      // reads its current family from /api/tags, which sets the think value.
+      const options: { defaultModel?: string; endpoint?: string; refreshModelFamily: boolean } = binding
+        ? { endpoint, refreshModelFamily: true }
+        : { refreshModelFamily: true };
       if (defaultModel) {
         options.defaultModel = defaultModel;
-        // The model under this name may have been replaced since the provider
-        // check; its current family sets the think value.
-        await refreshOllamaModelFamily(endpoint, defaultModel);
       }
       return createOllamaLlm(options);
     }

@@ -13,6 +13,12 @@ export interface OllamaProviderOptions {
   timeoutMs?: number;
   /** How long reading the model's context limit may take (tests). */
   lookupTimeoutMs?: number;
+  /**
+   * Read the model's entry from /api/tags (which loads no model) before each
+   * request, so a model replaced under the same name between two requests on
+   * this adapter gets its own think value. The app turns it on.
+   */
+  refreshModelFamily?: boolean;
 }
 
 interface OllamaChatChunk {
@@ -101,6 +107,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const model = opts.model ?? defaultModel;
       if (!model) {
         throw new Error("No Ollama model available. Pull a model with `ollama pull <model>`.");
+      }
+      if (options.refreshModelFamily) {
+        await refreshOllamaModelFamily(endpoint, model, undefined, opts.signal);
+        if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
       }
 
       // Each request to /api/chat gets its own controller and timeout, so a
@@ -463,11 +473,14 @@ export function recordOllamaModelFamily(endpoint: string, model: string, show: u
  * same name since the provider check gets its own think value. A failed or
  * slow read changes nothing.
  */
-export async function refreshOllamaModelFamily(endpoint: string, model: string, timeoutMs = 1500): Promise<void> {
+export async function refreshOllamaModelFamily(endpoint: string, model: string, timeoutMs = 1500, signal?: AbortSignal): Promise<void> {
   const url = `${endpoint.trim().replace(/\/$/, "")}/api/tags`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
+    if (signal?.aborted) return;
     const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
     if (!response.ok || isRefusedRedirect(response, url)) return;
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
@@ -478,6 +491,7 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
   }
 }
 

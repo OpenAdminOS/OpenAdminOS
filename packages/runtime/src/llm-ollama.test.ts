@@ -1399,4 +1399,34 @@ describe("Ollama reasoning models", () => {
     await assert.doesNotReject(refreshOllamaModelFamily("http://127.0.0.1:9", "unreachable-model", 200));
   });
 
+
+  it("reads the model's family before each request, so one adapter follows a model replaced between requests", async () => {
+    let installed = { digest: "sha256:oss", family: "gptoss" };
+    const trace: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          trace.push("tags");
+          res.end(JSON.stringify({ models: [{ name: "team-model:latest", digest: installed.digest, details: { family: installed.family } }] }));
+          return;
+        }
+        trace.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "team-model", refreshModelFamily: true });
+      await llm.complete({ prompt: "p" });
+      installed = { digest: "sha256:qwen", family: "qwen3" };
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(trace, ["tags", "low", "tags", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });
