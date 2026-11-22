@@ -76,6 +76,7 @@ export {
   ollamaEndpointOverride,
   ollamaHostEndpoint,
   recordOllamaModelFamily,
+  recordOllamaModelList,
   refreshOllamaModelFamily,
   resolveOllamaEndpoint,
   type OllamaEndpointTrust,

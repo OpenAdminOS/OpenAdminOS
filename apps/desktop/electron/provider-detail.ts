@@ -21,7 +21,7 @@ import {
   probeLemonadeLlm,
   probeLmStudioLlm,
   beginOllamaModelRead,
-  recordOllamaModelFamily,
+  recordOllamaModelList,
   resolveLemonadeEndpoint,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
@@ -151,7 +151,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     // The family sets the think value Chat and runs send to each model. The
     // list is read on every check, so a model replaced under the same name,
     // or restored to a digest seen before, never keeps an old family.
-    for (const model of installed) recordOllamaModelFamily(endpoint, model.name, model, modelRead);
+    // A model missing from the list is forgotten, so one installed later under its name starts fresh.
+    recordOllamaModelList(endpoint, installed, modelRead);
     const installedModels = installed.map((model) => model.name);
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.

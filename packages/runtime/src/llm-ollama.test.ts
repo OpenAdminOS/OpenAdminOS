@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { beginOllamaModelRead, classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, refreshOllamaModelFamily } from "./llm-ollama.js";
+import { beginOllamaModelRead, classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, recordOllamaModelList, refreshOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1784,6 +1784,74 @@ describe("Ollama reasoning models", () => {
       // A replacement under the name, again without metadata.
       await llm.complete({ prompt: "p" });
       assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("does not learn from a reply of a model the provider check saw removed while it answered", async () => {
+    let calls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "scanned-alias:latest" }] }));
+          return;
+        }
+        calls += 1;
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        // A Settings check reads a model list without the alias before this reply streams.
+        if (calls === 1) recordOllamaModelList(endpoint, [{ name: "other-model:latest" }], beginOllamaModelRead());
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "scanned-alias" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sends the level fallback to the model installed now when it was replaced by gpt-oss", async () => {
+    let family: string | undefined;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "gpt-oss-swap:latest", digest: `sha256:${family ?? "none"}`, ...(family ? { details: { family } } : {}) }] }));
+          return;
+        }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        thinks.push(think);
+        if (thinks.length === 1) {
+          // A family-less model rejects the level, and gpt-oss replaces it before the fallback.
+          family = "gptoss";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-swap" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-swap" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(thinks, ["low", "low"]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
