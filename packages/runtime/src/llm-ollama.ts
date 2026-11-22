@@ -138,7 +138,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // gpt-oss ignores `false` and always reasons, so it gets the
         // lowest effort level instead. What Ollama showed about this model
         // (it rejected the level, or reasoned anyway) overrides its name.
-        think: ollamaThinkLearned.get(`${endpoint}\0${model}`) ?? ollamaThinkSetting(model),
+        think: ollamaThinkFor(endpoint, model),
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -368,7 +368,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // does (gpt-oss under another name); later requests ask for the
               // lowest level instead. A model that already rejected a level
               // keeps `false`.
-              if (body.think === false && !ollamaThinkLearned.has(cacheKey)) ollamaThinkLearned.set(cacheKey, "low");
+              if (body.think === false && !ollamaThinkLearned.has(cacheKey) && !ollamaModelFamilies.has(familyKey(endpoint, model))) {
+                ollamaThinkLearned.set(cacheKey, "low");
+              }
             }
             accumulated += delta;
             // Reasoning is not an answer, so it is never returned as one,
@@ -419,17 +421,46 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
  */
 const ollamaThinkLearned = new Map<string, false | "low">();
 
-/** Ollama's answer to a think level the model does not support. */
+/** Model families from the provider check's /api/show, keyed by endpoint and model. */
+const ollamaModelFamilies = new Map<string, string>();
+const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${model}`;
+
+/**
+ * Records a model's family as the provider check read it from /api/show
+ * (`details.family`, or `general.architecture` in `model_info`), so a copy
+ * of a model under another name gets the right think value before its first
+ * request, without another /api/show call.
+ */
+export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown): void {
+  const data = typeof show === "object" && show !== null
+    ? show as { details?: { family?: unknown }; model_info?: Record<string, unknown> }
+    : {};
+  const family = data.details?.family ?? data.model_info?.["general.architecture"];
+  if (typeof family === "string" && family.length > 0) ollamaModelFamilies.set(familyKey(endpoint, model), family);
+}
+
+/** The think value for a request: the model's family, then what Ollama showed, then the name. */
+function ollamaThinkFor(endpoint: string, model: string): false | "low" {
+  const family = ollamaModelFamilies.get(familyKey(endpoint, model));
+  if (family !== undefined) return ollamaThinkSetting(model, family);
+  return ollamaThinkLearned.get(`${endpoint}\0${model}`) ?? ollamaThinkSetting(model);
+}
+
+/** Ollama's answer to a think level the model does not support, in old and current wording. */
 function rejectsThinkLevel(detail: string): boolean {
   // The quotes arrive escaped inside Ollama's JSON error body.
-  return /think value \\?"[^"\\]*\\?" is not supported for this model/i.test(detail);
+  return /think value \\?"[^"\\]*\\?" is not supported for this model|\\?"[^"\\]*\\?" does not support thinking/i.test(detail);
 }
 
 /**
  * Ollama's `think` value for a model. gpt-oss cannot turn reasoning off and
- * ignores `false`, so it gets the lowest effort level.
+ * ignores `false`, so it gets the lowest effort level; other models get
+ * `false`, which Ollama accepts for every model. The family decides when it
+ * is known; otherwise the name does.
  */
-export function ollamaThinkSetting(model: string): false | "low" {
+export function ollamaThinkSetting(model: string, family?: string): false | "low" {
+  // Ollama names the family "gptoss" or "gpt-oss".
+  if (family !== undefined) return family.toLowerCase().replace(/-/g, "") === "gptoss" ? "low" : false;
   return /(^|\/)gpt-oss([:-]|$)/i.test(model) ? "low" : false;
 }
 

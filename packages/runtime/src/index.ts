@@ -73,6 +73,7 @@ export {
   noopLlm,
   ollamaEndpointOverride,
   ollamaHostEndpoint,
+  recordOllamaModelFamily,
   resolveOllamaEndpoint,
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";

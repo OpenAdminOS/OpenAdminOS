@@ -20,6 +20,7 @@ import {
   type CliProbe,
   probeLemonadeLlm,
   probeLmStudioLlm,
+  recordOllamaModelFamily,
   resolveLemonadeEndpoint,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
@@ -168,6 +169,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         if (isRefusedRedirect(details, `${endpoint}/api/show`)) redirectedShow = redirectRefusedDetail("Ollama", `${endpoint}/api/show`);
         if (!details.ok) throw new Error("Model details unavailable");
         const data = await details.json() as { capabilities?: unknown };
+        // The family sets the think value Chat and runs send to this model.
+        recordOllamaModelFamily(endpoint, model, data);
         if (!Array.isArray(data.capabilities)) throw new Error("Model capabilities unavailable");
         const completion = data.capabilities.includes("completion");
         if (key) ollamaCompletionSupport.set(key, completion);

@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow } from "./llm-ollama.js";
+import { classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, parseContextOverflow, recordOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1111,6 +1111,8 @@ describe("Ollama reasoning models", () => {
     for (const model of ["qwen3:8b", "my-gpt-oss-finetune:latest"]) {
       assert.equal(ollamaThinkSetting(model), false, model);
     }
+    assert.equal(ollamaThinkSetting("office-report", "gptoss"), "low");
+    assert.equal(ollamaThinkSetting("gpt-oss:20b", "qwen3"), false);
   });
 
   it("sends the think setting and returns only the answer, not the reasoning", async () => {
@@ -1279,6 +1281,35 @@ describe("Ollama reasoning models", () => {
       await llm.complete({ prompt: "p" });
       await llm.complete({ prompt: "p" });
       assert.deepEqual(fake.thinks, ["low", false, false, false]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+
+  it("uses the family the provider check read, before the first request, for copies under any name", async () => {
+    const fake = await fakeByThink(() => ({ body: answered }));
+    try {
+      recordOllamaModelFamily(`${fake.endpoint}/`, "office-report", { details: { family: "gptoss" } });
+      recordOllamaModelFamily(fake.endpoint, "gpt-oss-office", { model_info: { "general.architecture": "qwen3" } });
+      recordOllamaModelFamily(fake.endpoint, "renamed-oss", { details: { family: "gpt-oss" } });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "office-report" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-office" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "renamed-oss" }).complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, ["low", false, "low"]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("asks again without a level when Ollama says the model does not support thinking", async () => {
+    const unsupported = { status: 400, body: JSON.stringify({ error: '"gpt-oss-plain" does not support thinking' }) };
+    const fake = await fakeByThink((think) => (think === false ? { body: answered } : unsupported));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-plain" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(fake.thinks, ["low", false, false]);
     } finally {
       await fake.close();
     }

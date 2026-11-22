@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, it, mock } from "node:test";
 import { providerCatalog } from "@openadminos/agent-sdk";
+import { createOllamaLlm } from "@openadminos/runtime";
 import { checkOllama } from "./provider-detail.js";
 
 afterEach(() => mock.restoreAll());
@@ -67,4 +68,18 @@ it("reuses capability results for an unchanged model digest", async () => {
   assert.deepEqual((await checkOllama(provider)).models, ["cached-writer"]);
   assert.deepEqual((await checkOllama(provider)).models, ["cached-writer"]);
   assert.equal(shows, 1);
+});
+
+it("gives a gpt-oss copy under another name the lowest think level from the family the check read", async () => {
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "office-report:latest" }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion", "thinking"], details: { family: "gptoss" } });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "office-report:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  const result = await checkOllama(provider);
+  assert.deepEqual(result.models, ["office-report:latest"]);
+  assert.equal((await createOllamaLlm({ defaultModel: "office-report:latest" }).complete({ prompt: "p" })).text, "ok");
+  assert.deepEqual(thinks, ["low"]);
 });
