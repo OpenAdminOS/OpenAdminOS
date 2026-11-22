@@ -403,8 +403,11 @@ first, per endpoint and model, because they are about the model installed now:
 a rejected level (`think value ... is not supported`, or `... does not support
 thinking`) is sent again once with `false`, and reasoning streamed after `false`
 switches later requests to "low". Each answer replaces the one before, and a
-check that finds another version (digest) under the name drops them. Without
-answers the family decides, then the name. A reply with reasoning and no answer
+check that finds another version (digest) under the name drops them. Before
+each send or run, the app reads the selected model's entry from `/api/tags`
+(which loads no model), so a model replaced under the name since the provider
+check gets its own family and version. Without answers the family decides,
+then the name. A reply with reasoning and no answer
 is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
