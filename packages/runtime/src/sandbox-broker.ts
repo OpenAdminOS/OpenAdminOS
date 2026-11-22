@@ -72,8 +72,9 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
   // The error that answered the last brokered request, log calls aside.
   let lastFailure: unknown;
-  // Model replies with reasoning and no answer the script received, newest last.
-  const reasoningFailures: Error[] = [];
+  // Model replies with reasoning and no answer the script received, one per
+  // distinct message, so repeated failures never push out another one.
+  const reasoningFailures = new Map<string, Error>();
 
   return {
     async handle(request) {
@@ -110,8 +111,8 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       } catch (error) {
         if (request?.method !== "log") lastFailure = error;
         if (error instanceof Error && isReasoningWithoutAnswerError(error)) {
-          reasoningFailures.push(error);
-          if (reasoningFailures.length > 8) reasoningFailures.shift();
+          reasoningFailures.delete(error.message);
+          reasoningFailures.set(error.message, error);
         }
         return failure(id, error);
       }
@@ -122,7 +123,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         ? lastFailure
         : undefined,
     llmFailureFor: (scriptOutput) =>
-      [...reasoningFailures].reverse().find((failure) => scriptOutput.includes(failure.message)),
+      [...reasoningFailures.values()].reverse().find((failure) => scriptOutput.includes(failure.message)),
   };
 }
 

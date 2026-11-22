@@ -39,6 +39,13 @@ it("keeps a model reply with reasoning and no answer for the script failure that
   assert.equal(response.ok, false);
   assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
   assert.equal(broker.llmFailureFor("Error: something else"), undefined);
+  // Repeated failures with another message do not push it out.
+  const other = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'), { name: "OllamaReasoningWithoutAnswerError" });
+  let calls = 0;
+  const again = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { calls += 1; throw calls === 1 ? failure : other; } }) });
+  await again.handle({ id: "first", method: "llm.complete", params: { prompt: "first" } });
+  for (let i = 0; i < 9; i += 1) await again.handle({ id: `next-${i}`, method: "llm.complete", params: { prompt: "next" } });
+  assert.equal(again.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
   // A request after it, such as a read in a finally block, does not erase it.
   assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path: "/users" } })).ok, false);
   assert.equal(broker.llmFailureFor(`Error: llm.complete: ${failure.message}`), failure);
