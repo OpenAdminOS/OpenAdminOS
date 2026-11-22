@@ -373,3 +373,14 @@ it("does not read a server body that mentions reasoning as a reasoning-only repl
   render(<RunFailureRemediation run={run} />);
   expect(screen.queryByText("Model reasoned without answering")).not.toBeInTheDocument();
 });
+
+it("shows only the reasoning card for a model whose name matches another playbook", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama returned only reasoning from "gpt-oss-timeout" and no answer. Retry, or pick a model that answers without reasoning.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+});
