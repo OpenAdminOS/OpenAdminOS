@@ -48,7 +48,7 @@ const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
  * the environment as the hook loads, so Workers and child processes, which
  * inherit the hook, have none. An error the script handles itself (an
  * uncaughtException listener or a capture callback) is not recorded; one
- * that escapes such a listener is.
+ * that escapes such a listener or callback is.
  */
 const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
 import { isMainThread } from "node:worker_threads";
@@ -82,6 +82,18 @@ if (isMainThread && target) {
       record(escaped);
       throw escaped;
     }
+  };
+  // The same for a capture callback that throws.
+  const setCapture = process.setUncaughtExceptionCaptureCallback;
+  process.setUncaughtExceptionCaptureCallback = function (callback) {
+    return setCapture.call(this, typeof callback !== "function" ? callback : function (error) {
+      try {
+        return callback.call(this, error);
+      } catch (escaped) {
+        record(escaped);
+        throw escaped;
+      }
+    });
   };
 }
 `;
