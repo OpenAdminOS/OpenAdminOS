@@ -4615,9 +4615,13 @@ the format. Decisions:
   that resource, only for a tenant or mixed question whose resource the tenant
   grants. "Not compliant" is Intune's `noncompliant` state, as the direct
   evidence answers count it; grace period is its own state. A failed latest
-  refresh is said in the computed answer. Chat and Nova's computed answer text
-  shows refresh times as an absolute date and time in the device's locale and
-  time zone. Evidence and audit records retain the exact timestamps.
+  refresh is said in the computed answer. Chat, Nova and the multi-tenant
+  dossier show cache refreshes as an absolute date and time. They share
+  Electron's app locale and the device time zone resolved at launch. Device
+  last-sync dates omit the time and show the year when it differs from the
+  current year in that time zone. Chat prompts ask the model to use the
+  formatted facts, and Nova formats any remaining ISO timestamps before
+  speaking them. Evidence and audit records retain the exact timestamps.
   `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,

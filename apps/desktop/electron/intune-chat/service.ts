@@ -2404,6 +2404,7 @@ export class IntuneChatService {
         usedDeterministic = true;
         provenance.add("answer-pack");
         const answerPack = buildAnswerPack({
+          timestampLocale: this.host.timestampLocale,
           question: modelQuestion,
           tenant,
           cacheStatus,
@@ -3243,6 +3244,7 @@ export class IntuneChatService {
         usedDeterministic = true;
         provenance.add("answer-pack");
         let answerPack = buildAnswerPack({
+          timestampLocale: this.host.timestampLocale,
           question: modelQuestion,
           tenant,
           cacheStatus,
@@ -3977,6 +3979,7 @@ export class IntuneChatService {
       tenantId,
       store,
       signal,
+      timestampLocale: this.host.timestampLocale,
       // Titles and follow-ups are checked for tenant names and cached values also without an MCP server.
       privateTerms: mcpPrivateTermsForTenant(tenant),
       cachedTenantValues: () => store.tenantIdentityValues(tenantId),

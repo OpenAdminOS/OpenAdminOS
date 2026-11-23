@@ -184,6 +184,7 @@ describe("local model accuracy on the tester's tenant", () => {
         computedResult: { authoritative: boolean; total: number; breakdowns: Record<string, Record<string, number>>; focus: { total: number; rows: Array<{ name: string }> }; facts: string[] };
         resources: Array<{ resource: string; sampleRows: unknown[] }>;
         instruction: string;
+        timestampInstruction: string;
       };
       assert.equal(pack.computedResult.authoritative, true);
       assert.deepEqual(pack.computedResult.facts, computed.facts);
@@ -193,6 +194,7 @@ describe("local model accuracy on the tester's tenant", () => {
       assert.deepEqual(pack.computedResult.focus.rows.map((row) => row.name).sort(), [...NONCOMPLIANT].sort());
       assert.deepEqual(pack.resources.find((block) => block.resource === "managedDevices")?.sampleRows, []);
       assert.match(pack.instruction, /computedResult is authoritative/);
+      assert.match(pack.timestampInstruction, /Never show an ISO timestamp to the user/);
       assert.ok(!planChatContext(Q1).resources.includes("entraDevices"));
     });
   });
