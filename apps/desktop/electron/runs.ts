@@ -738,12 +738,13 @@ export class RunService {
         const changed = current.providerId !== expected.providerId || current.model !== expected.model ||
           currentCloud !== expected.ollamaCloud ||
           (expected.endpointFingerprint !== undefined && target?.destination !== expected.endpointFingerprint);
-        if (changed || (expected.ollamaCloud === false && expected.model && liveCloud === undefined)) {
+        const localOllamaUnverified = expected.ollamaCloud === false && (!expected.model || liveCloud === undefined);
+        if (changed || localOllamaUnverified) {
           const reason = currentCloud && expected.ollamaCloud !== true && current.model
             ? `Skipped: ${current.model} now runs on ollama.com. Review the schedule to continue.`
             : changed
               ? "Skipped: The model destination changed. Review the schedule to continue."
-              : `Skipped: OpenAdminOS could not confirm that ${expected.model} runs on this device. Review the schedule to continue.`;
+              : `Skipped: OpenAdminOS could not confirm that ${expected.model ?? "the selected Ollama model"} runs on this device. Review the schedule to continue.`;
           this.assertTenantOpen(persisted.activeTenantId);
           const now = new Date().toISOString();
           const skippedRun: RunRecord = {

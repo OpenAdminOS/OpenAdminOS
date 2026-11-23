@@ -6279,6 +6279,12 @@ export class AppStateStore {
         const modelDestination = reviewModel || !existing.schedule?.modelDestination
           ? await this.captureScheduleModel(persisted, existing, await this.listProviders())
           : existing.schedule.modelDestination;
+        if (reviewModel && schedule.reviewModelDestination && modelDestination.ollamaCloud === false && modelDestination.model) {
+          const liveCloud = await readLocalOllamaModelCloud(modelDestination.model);
+          if (liveCloud !== false) {
+            throw new Error(`OpenAdminOS could not confirm that ${modelDestination.model} still runs on this device. Refresh Ollama in Settings, Providers, then review the schedule again.`);
+          }
+        }
         const activationAnchor = reviewModel ? updatedAt : undefined;
         const lastSkipReason = reviewModel ? undefined : existing.schedule?.lastSkipReason;
         // Ownership is decided once, when the schedule is created: it

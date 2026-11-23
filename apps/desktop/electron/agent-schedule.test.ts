@@ -219,6 +219,12 @@ describe("agent scheduling", () => {
       assert.equal(state.installedAgents[0]?.schedule?.lastSkipReason, reason);
       assert.equal(chatCalls, 0);
 
+      await assert.rejects(
+        fixture.store.updateAgentSchedule(scheduledAgent.slug, { ...scheduledAgent.schedule, reviewModelDestination: true }),
+        /Refresh Ollama in Settings, Providers/,
+      );
+      assert.equal((await fixture.store.getAgentSchedule(scheduledAgent.slug))?.lastSkipReason, reason);
+
       provider.remoteModels = [model];
       await fixture.store.updateAgentSchedule(scheduledAgent.slug, { ...scheduledAgent.schedule, reviewModelDestination: true });
       const reviewed = await fixture.store.getAgentSchedule(scheduledAgent.slug);

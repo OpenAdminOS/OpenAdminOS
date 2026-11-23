@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import type { AgentSchedule, AgentScheduleInput, AgentSummary } from "../shared/openAdminOS";
 import { ScheduleUsageForecast } from "./ScheduleUsageForecast";
 import {
@@ -114,7 +115,12 @@ export function AgentScheduleCard({
       {enabled && reviewed ? (
         <div className="space-y-2 text-sm text-[var(--color-text-muted)]">
           <p>Scheduled model {reviewed.model ?? "Provider default"} · {reviewedProvider}</p>
-          {schedule?.lastSkipReason ? <p role="status">{schedule.lastSkipReason}</p> : null}
+          {schedule?.lastSkipReason ? (
+            <div role="status">
+              <p>{schedule.lastSkipReason}</p>
+              <Link className="underline underline-offset-2" to="/settings/providers">Review provider settings</Link>
+            </div>
+          ) : null}
           <Button size="sm" variant="secondary" disabled={busy || !reviewProvider}
             onClick={() => void apply({ ...buildSchedule(currentSeconds), reviewModelDestination: true })}>
             Use {reviewModel ?? "provider default"} · {reviewProvider?.name}
