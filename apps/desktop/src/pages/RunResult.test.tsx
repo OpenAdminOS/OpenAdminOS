@@ -502,6 +502,26 @@ it("keeps a model fit dry run's safeguards when Run for real opens setup", async
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
+it("blocks Run for real when its saved on-device model is now an Ollama Cloud alias", async () => {
+  const user = userEvent.setup();
+  const alias = "original-model";
+  const run = createAwaitingConfirmationRun({
+    status: "planned", dryRun: true, providerId: "ollama", model: alias,
+    requireOnDeviceModel: true,
+    providerEndpointBinding: { endpoint: "http://127.0.0.1:11434", scope: "model-fit" },
+  });
+  const providers = mockProviders.map((provider) => provider.id === "ollama"
+    ? { ...provider, models: [alias, "other-local-model"], remoteModels: [alias] }
+    : provider);
+  const bridge = makeMockBridge({}, createMockAppState({ runs: [run], providers }));
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: "Run for real" }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the dry run provider" });
+  expect(within(dialog).getByText("The dry run model now runs in Ollama Cloud. Restore the local model, then recheck.")).toBeInTheDocument();
+  expect(readPendingIntent()).toMatchObject({ runForRealOfRunId: run.id, model: alias, safeguards: { onDevice: true } });
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});
+
 it("does not present host status text as the report while a run is live", async () => {
   const run = createAwaitingConfirmationRun({
     status: "running",
@@ -744,14 +764,17 @@ it("shows a refused Run again start inside the review (review round 3)", async (
   expect(within(dialog).getByText(/Ollama isn't reachable/)).toBeInTheDocument();
 });
 
-it("keeps Run for real on the dry run model when setup rechecks its provider", async () => {
+it.each([
+  { id: "openai", name: "Codex", readyStatus: "connected" },
+  { id: "azure-openai", name: "Azure OpenAI", readyStatus: "available" },
+] as const)("keeps Run for real on the dry run model when setup rechecks $name", async ({ id, name, readyStatus }) => {
   const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({
-    status: "planned", dryRun: true, tenantId: "tenant-1", providerId: "openai", model: "original-model",
+    status: "planned", dryRun: true, tenantId: "tenant-1", providerId: id, model: "original-model",
   });
   const buildState = (checked: number) => createMockAppState({
-    providers: mockProviders.map((provider) => provider.id === "openai"
-      ? { ...provider, status: checked ? "connected" : "error", models: [checked >= 2 ? "original-model" : "different-model"] }
+    providers: mockProviders.map((provider) => provider.id === id
+      ? { ...provider, status: checked ? readyStatus : "error", models: [checked >= 2 ? "original-model" : "different-model"] }
       : provider),
     runs: [run],
     installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
@@ -763,11 +786,13 @@ it("keeps Run for real on the dry run model when setup rechecks its provider", a
   await user.click(await screen.findByRole("button", { name: /Run for real/ }));
   const dialog = await screen.findByRole("dialog", { name: "Check the dry run provider" });
   expect(within(dialog).getByText(/with original-model/)).toBeInTheDocument();
+  expect(within(dialog).getByText(`Connect ${name} to continue.`)).toBeInTheDocument();
   expect(within(dialog).queryByRole("button", { name: /Ollama|different-model|Continue/ })).not.toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Open agent page" })).toBeInTheDocument();
   await user.click(within(dialog).getByRole("button", { name: "Recheck" }));
-  await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("openai"));
-  const recheck = await within(dialog).findByRole("button", { name: "Recheck dry run provider" });
+  await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith(id));
+  expect(await within(dialog).findByText(`${name} no longer lists original-model. Restore the model, then recheck.`)).toBeInTheDocument();
+  const recheck = within(dialog).getByRole("button", { name: "Recheck dry run provider" });
   expect(within(dialog).queryByRole("button", { name: /Review .* run/ })).not.toBeInTheDocument();
   await user.click(recheck);
   await user.click(await screen.findByRole("button", { name: /Review .* run/ }));

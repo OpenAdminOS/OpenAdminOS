@@ -30,7 +30,7 @@ import {
   writePendingIntent,
   type PendingIntent,
 } from "./pending-intent";
-import { TenantSetupDialog, type SetupStage } from "./TenantSetupDialog";
+import { TenantSetupDialog, type DryRunProviderBlock, type SetupStage } from "./TenantSetupDialog";
 
 const SOFT_TIMEOUT_MS = 180_000;
 
@@ -109,6 +109,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     selectedProvider.status === "connected" && onDeviceRerunProvider(selectedProvider).models.length === 0;
   const dryRunIntent = lockedDryRunIntent(intent);
   const dryRunProvider = state.providers.find((provider) => provider.id === dryRunIntent?.providerId);
+  const dryRunProviderBlock = dryRunIntent
+    ? dryRunProviderBlockReason(dryRunIntent, dryRunProvider, state.activeModelByProviderId)
+    : undefined;
   const providerReady = useCallback(
     (candidate: PendingIntent | null | undefined) => {
       const providerId =
@@ -117,19 +120,10 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           : state.activeProviderId;
       const dryRun = lockedDryRunIntent(candidate);
       const provider = state.providers.find((entry) => entry.id === (dryRun ? dryRun.providerId : providerId));
-      if (dryRun?.model && (!provider?.models.includes(dryRun.model) || provider.modelsFromPolicy)) return false;
-      if (dryRun?.model && dryRun.safeguards?.onDevice && provider && isRemoteBackedModel(provider, dryRun.model)) return false;
+      if (dryRun) return dryRunProviderBlockReason(dryRun, provider, state.activeModelByProviderId) === undefined;
       // A run for one request after a model fit failure never goes to a self-hosted server outside this device.
       if (isOneRunProviderIntent(candidate) && provider && !modelFitUsable(provider, state.activeModelByProviderId, candidate.safeguards?.onDevice === true)) return false;
-      return Boolean(
-        provider &&
-          isProviderImplemented(provider.id) &&
-          (provider.status === "connected" ||
-            // The host accepts a fully configured Azure deployment at
-            // "available" (its probe has no connected state). Gating on
-            // "connected" alone made every Azure send loop into setup.
-            (provider.id === "azure-openai" && provider.status === "available")),
-      );
+      return provider !== undefined && providerConnectedForSetup(provider);
     },
     [state.activeModelByProviderId, state.activeProviderId, state.providers],
   );
@@ -427,6 +421,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
             provider: dryRunProvider,
             providerId: dryRunIntent.providerId,
             model: dryRunIntent.model,
+            block: dryRunProviderBlock,
             onOpenAgent: () => {
               closeFlow();
               navigate(`/agents/${encodeURIComponent(dryRunIntent.slug)}`);
@@ -465,6 +460,30 @@ export function currentReturnTo(pathname: string, search = ""): string {
   return `${pathname}${search}`;
 }
 
+function providerConnectedForSetup(provider: ProviderSummary): boolean {
+  // A configured Azure deployment reports "available" even when it is ready.
+  return isProviderImplemented(provider.id) &&
+    (provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available"));
+}
+
+function dryRunProviderBlockReason(
+  intent: NonNullable<ReturnType<typeof lockedDryRunIntent>>,
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined,
+): DryRunProviderBlock | undefined {
+  if (!provider) return "provider-missing";
+  if (!providerConnectedForSetup(provider)) return "not-connected";
+  if (intent.model && provider.modelsFromPolicy) return "policy-model-list";
+  if (intent.model && !provider.models.includes(intent.model)) return "model-missing";
+  if (isOneRunProviderIntent(intent)) {
+    const onDevice = intent.safeguards?.onDevice === true;
+    if (!modelFitEligible(provider, onDevice)) return "off-device";
+    if (onDevice && provider.id === "ollama" && isRemoteBackedModel(provider, intent.model)) return "ollama-cloud";
+    if (!modelFitUsable(provider, activeModelByProviderId, onDevice)) return "no-usable-model";
+  }
+  return undefined;
+}
+
 /** A self-hosted server outside this device (LM Studio, Lemonade or Ollama reached elsewhere) is never a model fit choice. */
 function modelFitEligible(provider: ProviderSummary, onDevice: boolean): boolean {
   return provider.isLocal || (!onDevice && !SELF_HOSTED_PROVIDER_IDS.has(provider.id));
@@ -477,9 +496,7 @@ function modelFitEligible(provider: ProviderSummary, onDevice: boolean): boolean
  */
 function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined, onDevice: boolean): boolean {
   if (!modelFitEligible(provider, onDevice)) return false;
-  // Azure OpenAI's ready state is "available"; any other state still needs setup.
-  const ready = provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available");
-  if (!ready) return true;
+  if (!providerConnectedForSetup(provider)) return true;
   if (provider.isLocal) return onDeviceRerunProvider(provider).models.length > 0;
   return hostedModelFitModel(provider, activeModelByProviderId) !== undefined;
 }

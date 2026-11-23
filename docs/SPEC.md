@@ -2830,7 +2830,10 @@ lists keeps Start disabled, and the review says so; the host refuses it too. Whe
 provider picked there stays on that run: setup does not change the active
 provider for a model fit rerun, and checks the picked provider in full the
 way selecting it does. Run for real keeps its dry run provider and model
-through setup. The admin can recheck that provider or open the agent page to
+through setup. Setup names why it is blocked, including a missing provider,
+a disconnected provider, a missing model, a model list supplied by IT
+policy, or a required on-device model that now runs in Ollama Cloud. A configured Azure OpenAI deployment can be ready at "available".
+The admin can recheck that provider or open the agent page to
 start a new run with different settings. A run resumed
 from setup opens only its own review, and setup moves on from a provider
 picked for one run only once its full check is done. A hosted provider that

@@ -17,6 +17,7 @@ import {
   IconWarning,
 } from "../components/icons";
 import { POLICY_COPY, SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
+import { PROVIDER_TOOL_NAMES } from "../copy/providers";
 import { SetByItBadge } from "../components/ManagedPolicy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import type {
@@ -65,10 +66,20 @@ export type SetupStage =
   | "provider"
   | "ready";
 
+export type DryRunProviderBlock =
+  | "provider-missing"
+  | "not-connected"
+  | "policy-model-list"
+  | "model-missing"
+  | "off-device"
+  | "ollama-cloud"
+  | "no-usable-model";
+
 interface DryRunSetup {
   provider: ProviderSummary | undefined;
   providerId: ProviderId | undefined;
   model: string | undefined;
+  block: DryRunProviderBlock | undefined;
   onOpenAgent: () => void;
 }
 
@@ -1070,14 +1081,24 @@ function DryRunProviderStep({ setup, error, onRecheck, onCancel }: {
   onRecheck: () => void | Promise<void>;
   onCancel: () => void;
 }) {
-  const { provider, providerId, model, onOpenAgent } = setup;
-  const providerName = provider?.name ?? providerId ?? "the original provider";
-  const showSetup = provider && provider.status !== "connected";
+  const { provider, providerId, model, block, onOpenAgent } = setup;
+  const providerName = provider?.name ?? (providerId && (PROVIDER_TOOL_NAMES[providerId] ?? providerId)) ?? "the original provider";
+  const showSetup = provider && block === "not-connected";
+  const reasons: Record<DryRunProviderBlock, string> = {
+    "provider-missing": `The provider list is missing ${providerName}. Check Settings > Providers, then recheck here.`,
+    "not-connected": `Connect ${providerName} to continue.`,
+    "policy-model-list": `IT policy supplies the model list for ${providerName}. Ask IT to restore access to the dry run model, then recheck.`,
+    "model-missing": `${providerName} no longer lists ${model}. Restore the model, then recheck.`,
+    "off-device": `${providerName} now runs outside this device. Restore its local endpoint, then recheck.`,
+    "ollama-cloud": "The dry run model now runs in Ollama Cloud. Restore the local model, then recheck.",
+    "no-usable-model": `${providerName} has no usable model for this run. Check Settings > Providers, then recheck here.`,
+  };
   return (
     <>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6 text-sm text-[var(--color-text-soft)]">
         <p>Run for real uses {providerName}{model ? ` with ${model}` : ""}, as the dry run did.</p>
-        <p>If you cannot restore that provider and model, open the agent page to start a new run.</p>
+        {block ? <p role="status">{reasons[block]}</p> : null}
+        <p>Open the agent page to start a new run with different settings.</p>
         {error ? <p role="alert" className="text-[var(--color-danger)]">{error}</p> : null}
         {showSetup ? <ProviderNotReadyCard provider={provider} onRecheck={onRecheck} /> : null}
       </div>
