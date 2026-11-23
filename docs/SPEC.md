@@ -2871,14 +2871,19 @@ Mockup: `docs/mockups/34-local-reset.html`.
   stops with nothing removed and says how to keep or reset the data.
 - **Linux** keeps the safeStorage key in the desktop keyring; the reset does
   not remove keyring entries (the docs say how).
-- **Windows uninstaller.** `nsis.deleteAppDataOnUninstall` stays `false`. In
-  electron-builder 26.15 the flag applies to assisted installers too (the
-  uninstaller checks it outside any one-click guard) and never on an update
-  (the installer runs the old uninstaller with `--updated`), but it removes the
-  whole `%APPDATA%\OpenAdminOS` folder, including an IT `policy.json`, and not
-  the updater cache or the scheduled task. Turning it on is a trust decision
-  left open in `electron/local-reset.ts`. User docs: Basics > Uninstall and
-  reset.
+- **Windows uninstaller** (maintainer decision, 2026-11-23).
+  `nsis.deleteAppDataOnUninstall` is `true`: uninstalling removes the
+  uninstalling account's `%APPDATA%\OpenAdminOS`, including an IT
+  `policy.json` placed there, which IT must deploy again after a reinstall.
+  In electron-builder 26.15 this applies to assisted installers too and never
+  to an update (the installer runs the old uninstaller with `--updated`); for
+  an all-users install the uninstaller switches to the current account for
+  this step, so it removes only that account's Roaming folder. The
+  machine-wide policy (`%ProgramData%\OpenAdminOS\policy.json`) and other
+  accounts' data are not touched. It does not remove the updater cache or the
+  `OpenAdminOS Scheduler` task; Reset OpenAdminOS does. On macOS and Linux
+  removing the app removes only the app, and the guide says so. User docs:
+  Basics > Uninstall and reset.
 
 ### Code signing
 

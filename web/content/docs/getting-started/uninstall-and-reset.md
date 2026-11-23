@@ -5,10 +5,12 @@ description: "Remove OpenAdminOS and its local data from a device, and revoke it
 
 # Uninstall and reset
 
-Removing the app alone does not remove its data. The data folder, the stored
-Microsoft sign-ins and the encryption key that protects them stay on the
-device, so a reinstall opens with the same organizations already signed in.
-To start clean, reset OpenAdminOS first, then uninstall it.
+On macOS and Linux, removing the app does not remove its data: the data
+folder, the stored Microsoft sign-ins and the encryption key that protects
+them stay on the device, so a reinstall opens with the same organizations
+already signed in. On Windows the uninstaller removes the data folder of the
+account that runs it, but not the scheduled task or the update cache. To start
+clean on any system, reset OpenAdminOS first, then uninstall it.
 
 Neither a reset nor an uninstall changes anything in your tenants. The
 OpenAdminOS enterprise application and the admin consent granted to it stay in
@@ -119,6 +121,10 @@ and stop if any of these applies:
    the menu bar companion.
 2. Drag OpenAdminOS from Applications to the Bin.
 
+Moving the app to the Bin removes only the app. The data folder, the Keychain
+item, the scheduler and an IT `policy.json` in the data folder stay until you
+reset or remove them.
+
 To remove everything by hand instead, make the checks in
 [Before removing files by hand](#before-removing-files-by-hand), quit
 OpenAdminOS and run these commands in Terminal before you install or open it
@@ -162,8 +168,18 @@ if it is still listed.
 2. Open **Settings > Apps > Installed apps**, select OpenAdminOS and choose
    **Uninstall**.
 
-The uninstaller removes the app but keeps its data, and an update never
-removes it. To remove everything by hand instead, make the checks in
+The uninstaller removes the app and the data folder of the account that runs
+it (`%APPDATA%\OpenAdminOS`): organizations, sign-in tokens and the encryption
+key that protects them, provider keys, chats, history and logs. That includes
+the IT policy file `policy.json` in that folder, so if IT placed one there, IT
+must deploy it again after a reinstall. The machine-wide policy file
+(`C:\ProgramData\OpenAdminOS\policy.json`) and other accounts' data folders
+stay. An update never removes data.
+
+The uninstaller does not remove the `OpenAdminOS Scheduler` scheduled task or
+the update cache (`%LOCALAPPDATA%\@openadminosdesktop-updater`). Reset first and
+both go, or remove them by hand as below. To remove everything by hand instead
+of uninstalling, make the checks in
 [Before removing files by hand](#before-removing-files-by-hand) and quit
 OpenAdminOS.
 
@@ -239,6 +255,10 @@ files copied elsewhere without it unreadable. A backup of the whole folder
 holds the key too: delete that backup as well if the sign-ins in it must go.
 
 ## Uninstall on Linux
+
+Removing the package or the AppImage removes only the app: the data folder,
+an IT `policy.json` in it and the update cache stay. Reset OpenAdminOS in the
+app first, or remove them by hand as follows.
 
 Quit OpenAdminOS first, including any copy started from the AppImage
 (`pgrep -fl -i openadminos` lists what is still running): a running copy can

@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Windows uninstall now removes the account's local data folder, including an IT `policy.json` placed there (IT deploys it again after a reinstall); the machine-wide policy stays.
 - Reset OpenAdminOS in Settings > Data: after the typed phrase `RESET OPENADMINOS` the app closes every organization to new work, turns off background work and restarts into first run with its data folder (except the IT `policy.json`), the macOS Keychain item in the login keychain, the scheduler and the updater caches removed; a new Uninstall and reset docs page covers manual removal per OS and revoking consent in Entra.
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.
