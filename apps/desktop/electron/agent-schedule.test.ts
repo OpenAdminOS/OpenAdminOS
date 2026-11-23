@@ -217,6 +217,7 @@ describe("agent scheduling", () => {
       const reason = `Skipped: ${model} now runs on ollama.com. Review the schedule to continue.`;
       assert.equal(state.runs.length, 1);
       assert.equal(state.runs[0]?.summary, reason);
+      assert.equal(state.schedulerStatus?.lastError, undefined);
       assert.equal(state.installedAgents[0]?.schedule?.lastSkipReason, reason);
       assert.equal(chatCalls, 0);
 
