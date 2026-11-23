@@ -220,7 +220,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
 
       const cacheKey = `${endpoint}\0${model}`;
+      // The context size the latest attempt sent, none when it sent no override.
+      let lastSentCtx: number | undefined;
       const send = async (numCtx: number | undefined): Promise<Response> => {
+        lastSentCtx = numCtx;
         const payload = numCtx === undefined ? body : { ...body, options: { ...optionsPayload, num_ctx: numCtx } };
         let response: Response;
         try {
@@ -295,7 +298,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // Ollama still giving all of the size this attempt sent means the
         // prompt outgrew it (Ollama can reject a prompt that exactly fills
         // the context), not that memory ran out; that size stays.
-        const sent = retry ? retry.numCtx : cachedCtx;
+        // The size the latest attempt sent: after a think fallback to a model
+        // that replaced the one the request was built for, not the kept one.
+        const sent = retry ? retry.numCtx : lastSentCtx;
         const sentSizeGiven = counted !== undefined && sent !== undefined && counted.available >= sent;
         if (!sentSizeGiven) forgetSize(sent);
         if (memory) {
@@ -306,7 +311,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
                 : contextMemoryMessage(model, retry.requested, retry.numCtx, text),
             );
           }
-          if (cachedCtx !== undefined) return new Error(cachedContextMemoryMessage(model, cachedCtx, text, answering));
+          if (lastSentCtx !== undefined) return new Error(cachedContextMemoryMessage(model, lastSentCtx, text, answering));
           return undefined;
         }
         if (counted && opts.enforceContextWindow) {
@@ -777,13 +782,17 @@ const THINK_TAGS = { [THINK_OPEN]: /<think>/i, [THINK_CLOSE]: /<\/think>/i } as 
 /**
  * Takes reasoning a model writes inline in its content, in `<think>` blocks,
  * out of the answer as it streams: a tag split across chunks is held back
- * until it is known, and a block never closed is reasoning to the end.
+ * until it is known, and a block never closed is reasoning to the end. Models
+ * reason before they answer, so only blocks before any answer text count;
+ * once the answer has started, a tag is text it shows (code that names one).
  */
 export function createInlineThinkFilter(): { push(text: string): string; flush(): string; readonly reasoned: boolean } {
   // How many think blocks are open: a block may hold another one.
   let depth = 0;
   let pending = "";
   let reasoned = false;
+  // Whether answer text (other than white space) has been shown.
+  let answering = false;
   // The longest end of `text` that could start `tag`. Compared character by
   // character, ASCII case only, so text whose lowercase is longer (İ) never
   // shifts an offset.
@@ -801,13 +810,23 @@ export function createInlineThinkFilter(): { push(text: string): string; flush()
       pending = "";
       let visible = "";
       while (rest.length > 0) {
+        if (answering) {
+          visible += rest;
+          break;
+        }
         const open = rest.search(THINK_TAGS[THINK_OPEN]);
         const close = depth > 0 ? rest.search(THINK_TAGS[THINK_CLOSE]) : -1;
         // The first tag decides: an opening one inside a block nests.
         const next = [open, close].filter((at) => at >= 0).sort((x, y) => x - y)[0];
         if (next !== undefined) {
           if (depth === 0) {
-            visible += rest.slice(0, next);
+            const before = rest.slice(0, next);
+            if (before.trim().length > 0) {
+              // The answer started before this tag: it is the answer's text.
+              answering = true;
+              continue;
+            }
+            visible += before;
             reasoned = true;
           }
           const opening = next === open;
@@ -817,8 +836,17 @@ export function createInlineThinkFilter(): { push(text: string): string; flush()
         }
         // Hold back what could start either tag.
         const held = Math.max(partialTag(rest, THINK_OPEN), depth > 0 ? partialTag(rest, THINK_CLOSE) : 0);
+        if (depth === 0) {
+          const shown = rest.slice(0, rest.length - held);
+          visible += shown;
+          if (shown.trim().length > 0) {
+            // The answer started: nothing more is held back.
+            answering = true;
+            visible += rest.slice(rest.length - held);
+            break;
+          }
+        }
         pending = rest.slice(rest.length - held);
-        if (depth === 0) visible += rest.slice(0, rest.length - held);
         rest = "";
       }
       return visible;
@@ -1102,10 +1130,14 @@ function ollamaThinkFor(endpoint: string, model: string): false | "low" {
   return ollamaThinkSetting(model);
 }
 
-/** Ollama's answer to a think level the model does not support, in old and current wording. */
+/**
+ * Ollama's answer to a think level the model does not support, in old and
+ * current wording, or from a version whose `think` is a Boolean only and
+ * cannot read a level.
+ */
 function rejectsThinkLevel(detail: string): boolean {
   // The quotes arrive escaped inside Ollama's JSON error body.
-  return /think value \\?"[^"\\]*\\?" is not supported for this model|\\?"[^"\\]*\\?" does not support thinking/i.test(detail);
+  return /think value \\?"[^"\\]*\\?" is not supported for this model|\\?"[^"\\]*\\?" does not support thinking|cannot unmarshal string into Go struct field \S*\.think of type bool/i.test(detail);
 }
 
 /**

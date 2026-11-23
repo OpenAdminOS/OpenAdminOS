@@ -1201,8 +1201,8 @@ describe("Ollama reasoning models", () => {
   it("finds think tags in text whose lowercase is longer, before and inside a block", async () => {
     const filter = createInlineThinkFilter();
     assert.equal(filter.push("<think>İstanbul</think>4"), "4");
-    const prefixed = createInlineThinkFilter();
-    assert.equal(prefixed.push("İİİİ İstanbul: <think>secret</think> answer"), "İİİİ İstanbul:  answer");
+    const inside = createInlineThinkFilter();
+    assert.equal(inside.push("<think>İİİİ İstanbul secret</think>İİ answer"), "İİ answer");
     // A character that only lowercases to a tag letter is not one.
     const lookalike = createInlineThinkFilter();
     assert.equal(lookalike.push("x <th\u0130"), "x <th\u0130");
@@ -1247,13 +1247,31 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("returns an answer that names a think tag whole, as Chat's JSON turn", async () => {
+    const turn = JSON.stringify({ final: true, answer: "Open a template block with `<think>` and close it with `</think>`." });
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: turn.slice(0, 50) }, done: false },
+      { model: "qwen3:8b", message: { content: turn.slice(50) }, done: true, eval_count: 9 },
+    ]);
+    try {
+      assert.equal((await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" })).text, turn);
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("holds back only a possible think tag and keeps other text", () => {
     const filter = createInlineThinkFilter();
-    assert.equal(filter.push("a <b> <"), "a <b> ");
+    assert.equal(filter.push("  <"), "  ");
     assert.equal(filter.push("T"), "");
-    assert.equal(filter.push("HINK>hidden</THINK>shown <thin"), "shown ");
-    assert.equal(filter.flush(), "<thin");
+    assert.equal(filter.push("HINK>hidden</THINK>shown <thin"), "shown <thin");
+    assert.equal(filter.flush(), "");
     assert.equal(filter.reasoned, true);
+    // Once the answer started, a tag is its text: code that names one.
+    const literal = createInlineThinkFilter();
+    assert.equal(literal.push('{"final":true,"answer":"Open a block with `<think>` and close it'), '{"final":true,"answer":"Open a block with `<think>` and close it');
+    assert.equal(literal.push(' with `</think>`."}'), ' with `</think>`."}');
+    assert.equal(literal.reasoned, false);
     const unclosed = createInlineThinkFilter();
     assert.equal(unclosed.push("<think>never closed </thi"), "");
     assert.equal(unclosed.flush(), "");
@@ -2544,6 +2562,79 @@ describe("Ollama reasoning models", () => {
       assert.equal(result.text, "ok");
       // The retry asks the replacement for room above the old pin.
       assert.ok((sent.at(-1) ?? 0) > 16384, String(sent));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("names the replacement's limit, not the kept size, when a fallback resend is refused without counts", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-kept:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-kept:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", modelfile: "FROM gpt-oss", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        // The first request warms a larger kept size.
+        if (chats === 1) { res.end(answered); return; }
+        if (chats === 2) {
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-kept:latest" does not support thinking' }));
+          return;
+        }
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "the prompt is longer than the context length currently available" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "gpt-oss-kept:latest" });
+      await llm.complete({ prompt: "word ".repeat(18000), enforceContextWindow: true });
+      await assert.rejects(
+        llm.complete({ prompt: "word ".repeat(3000), maxTokens: 500, enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sends no level to an Ollama whose think field takes only true or false", async () => {
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (typeof think === "string") {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "json: cannot unmarshal string into Go struct field ChatRequest.think of type bool" }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-team:latest" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(sent, ["low", false]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
