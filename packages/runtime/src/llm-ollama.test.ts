@@ -3277,6 +3277,79 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("sizes a lone :local by the upgraded server's reading, not an alias recorded on Ollama 0.17", async () => {
+    let version = "0.17.7";
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "small:latest", digest: "sha256:small" },
+            { name: "team:latest", digest: "sha256:team" },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/experimental/aliases") {
+          if (version !== "0.17.7") { res.statusCode = 404; res.end(); return; }
+          res.end(JSON.stringify({ aliases: [{ alias: "team:local", target: "small:latest" }] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          const { model } = JSON.parse(raw) as { model?: string };
+          const pinned = (size: number) => ({ parameters: `num_ctx                        ${size}`, model_info: { "general.architecture": "llama", "llama.context_length": 131072 } });
+          if (model === "small:latest") { res.end(JSON.stringify(pinned(2048))); return; }
+          if (model === "team:latest" || (model === "team:local" && version !== "0.17.7")) { res.end(JSON.stringify(pinned(32768))); return; }
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        sent.push((JSON.parse(raw) as { model?: unknown }).model);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "team:local" });
+      await llm.complete({ prompt: "Summarize.", maxTokens: 500, enforceContextWindow: true });
+      // Upgraded: ":local" now reads as the default tag, pinned to 32,768.
+      version = "0.18.0";
+      await llm.complete({ prompt: "word ".repeat(9000), maxTokens: 500, enforceContextWindow: true });
+      assert.deepEqual(sent, ["team:local", "team:local"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("follows an alias to a model named unknown", async () => {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "unknown:latest", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.end(JSON.stringify({ aliases: [{ alias: "mystery", target: "unknown" }] })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "mystery" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
     let version: string | undefined = "0.17.7";
     const sent: unknown[] = [];

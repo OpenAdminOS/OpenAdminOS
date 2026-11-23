@@ -1143,7 +1143,10 @@ const ollamaAliasTargets = new Map<string, string>();
 
 /** The name a model lookup (/api/show) asks for: an alias's target, which /api/show knows. */
 export function ollamaLookupName(endpoint: string, model: string): string {
-  return ollamaAliasTargets.get(familyKey(endpoint, ollamaModelName(model))) ?? model;
+  // Read the way the send is: an alias only for the name as the endpoint's
+  // version reads it, else the name as given (Ollama resolves a lone :local).
+  const name = installedModelFor(ollamaModelName(model), ollamaServerVersions.get(ollamaEndpointKey(endpoint))?.version);
+  return ollamaAliasTargets.get(familyKey(endpoint, name)) ?? model;
 }
 
 /**
@@ -1208,9 +1211,10 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     }
     // /api/show does not know server aliases (Ollama 0.17), which Chat
     // resolves: such a name takes the listed entry of the model it points to.
-    const target = await resolveOllamaServerAlias(endpoint, model, controller.signal);
-    if (target === "unknown") return;
-    if (target !== undefined) {
+    const alias = await resolveOllamaServerAlias(endpoint, model, controller.signal);
+    if (alias.kind === "failed") return;
+    if (alias.kind === "alias") {
+      const target = alias.target;
       // Only which model the alias points to is kept; that model's family,
       // digest and generation are read from it right before each send.
       const key = familyKey(endpoint, model);
@@ -1236,23 +1240,25 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
  * The model a server alias points to, as Ollama 0.17 resolves it for Chat
  * (`GET /api/experimental/aliases`, removed in 0.18): an exact alias,
  * followed through aliases of aliases, else the longest prefix alias, case
- * insensitive. Undefined when the endpoint has no such alias or no alias
- * support; "unknown" when the read failed otherwise.
+ * insensitive. "none" when the endpoint has no such alias or no alias
+ * support; "failed" when the read failed otherwise.
  */
-async function resolveOllamaServerAlias(endpoint: string, model: string, signal: AbortSignal): Promise<string | undefined | "unknown"> {
+type ServerAliasLookup = { kind: "alias"; target: string } | { kind: "none" } | { kind: "failed" };
+
+async function resolveOllamaServerAlias(endpoint: string, model: string, signal: AbortSignal): Promise<ServerAliasLookup> {
   const url = `${endpoint.trim().replace(/\/$/, "")}/api/experimental/aliases`;
   let entries: Array<{ alias?: unknown; target?: unknown; prefix_matching?: unknown }>;
   try {
     const response = await fetch(url, { signal, redirect: modelServerRedirect(url) });
-    if (isRefusedRedirect(response, url)) return "unknown";
+    if (isRefusedRedirect(response, url)) return { kind: "failed" };
     // A version without aliases: the name is not one.
-    if (response.status === 404 || response.status === 405) return undefined;
-    if (!response.ok) return "unknown";
+    if (response.status === 404 || response.status === 405) return { kind: "none" };
+    if (!response.ok) return { kind: "failed" };
     const data = (await response.json()) as { aliases?: unknown };
-    if (!Array.isArray(data.aliases)) return "unknown";
+    if (!Array.isArray(data.aliases)) return { kind: "failed" };
     entries = data.aliases as typeof entries;
   } catch {
-    return "unknown";
+    return { kind: "failed" };
   }
   const aliases = entries.filter((entry): entry is { alias: string; target: string; prefix_matching?: unknown } =>
     typeof entry.alias === "string" && typeof entry.target === "string");
@@ -1265,15 +1271,15 @@ async function resolveOllamaServerAlias(endpoint: string, model: string, signal:
   // The first match is an exact alias, else the longest prefix alias; from
   // there exact aliases are followed, and a cycle resolves to nothing.
   const first = exact(model) ?? prefixMatch(model);
-  if (!first) return undefined;
+  if (!first) return { kind: "none" };
   let current = first.target;
   const seen = new Set([ollamaModelName(model)]);
   for (let next = exact(current); next; next = exact(current)) {
-    if (seen.has(ollamaModelName(current))) return undefined;
+    if (seen.has(ollamaModelName(current))) return { kind: "none" };
     seen.add(ollamaModelName(current));
     current = next.target;
   }
-  return current;
+  return { kind: "alias", target: current };
 }
 
 /**
