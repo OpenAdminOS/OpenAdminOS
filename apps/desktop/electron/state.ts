@@ -1,4 +1,4 @@
-import { activeModelProvider, providerForModel } from "@openadminos/agent-sdk";
+import { activeModelProvider, isOnDeviceModel, providerForModel } from "@openadminos/agent-sdk";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -6218,7 +6218,17 @@ export class AppStateStore {
       const installedAgents = await Promise.all(current.installedAgents.map(async (agent) => {
         if (!agent.schedule || agent.schedule.modelDestination) return agent;
         const modelDestination = await this.captureScheduleModel(current, agent, listed);
-        return { ...agent, schedule: { ...agent.schedule, modelDestination } };
+        const provider = listed.find((entry) => entry.id === modelDestination.providerId);
+        const needsReview = !provider || !isOnDeviceModel(provider, modelDestination.model);
+        const lastSkipReason = agent.schedule.lastSkipReason ?? (needsReview
+          ? modelDestination.ollamaCloud
+            ? "Skipped: This schedule uses Ollama Cloud on ollama.com. Review the schedule to continue."
+            : "Skipped: Review the schedule to continue with the current model destination."
+          : undefined);
+        return {
+          ...agent,
+          schedule: { ...agent.schedule, modelDestination, ...(lastSkipReason ? { lastSkipReason } : {}) },
+        };
       }));
       const next = { ...current, installedAgents };
       await this.write(next);
@@ -6252,6 +6262,7 @@ export class AppStateStore {
           throw new Error(`updateAgentSchedule: ${key} must be a boolean when provided.`);
         }
       }
+      if (schedule.enabled && schedule.reviewModelDestination !== true) await this.migrateScheduleDestinations();
     }
 
     await this.serialize(async () => {

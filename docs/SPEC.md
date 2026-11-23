@@ -3553,7 +3553,9 @@ a recovery message when none is available.
 When an agent schedule is enabled or its model is reviewed, the host records
 the provider, model, endpoint fingerprint and Ollama Cloud status. Existing
 schedules record their current destination on first load and keep their
-enabled state. The scheduler checks the saved destination at admission and
+enabled state. If the destination is hosted or cannot be identified, the
+schedule waits for someone to review it before the first automatic run.
+The scheduler checks the saved destination at admission and
 reads Ollama model aliases again before an automatic run. A changed or
 unverifiable local destination pauses the schedule and records why on its
 card and in run history. Reviewing the current model on the schedule card

@@ -207,6 +207,7 @@ describe("agent scheduling", () => {
       assert.equal(migrated?.modelDestination?.model, model);
       assert.equal(migrated?.modelDestination?.ollamaCloud, false);
       assert.equal(migrated?.lastScheduledRunAt, scheduledAgent.schedule.lastScheduledRunAt);
+      assert.equal(migrated?.lastSkipReason, undefined);
       assert.equal((await fixture.store.getAgentSchedule(pausedAgent.slug))?.enabled, false);
 
       cloud = true;
@@ -236,6 +237,66 @@ describe("agent scheduling", () => {
       else process.env.OPENAGENTS_OLLAMA_URL = previous;
       await fixture.close();
       server.close();
+    }
+  });
+
+  for (const [label, destination] of [
+    ["Ollama Cloud alias", { id: "ollama", model: "writer:latest", isLocal: true, remoteModels: ["writer:latest"] }],
+    ["off-device Ollama server", { id: "ollama", model: "writer:latest", isLocal: false }],
+    ["hosted provider", { id: "openai", model: "gpt-5", isLocal: false }],
+  ] as const) {
+    it(`pauses a legacy schedule using a ${label} until the destination is reviewed`, async (t) => {
+      const provider: ProviderSummary = {
+        ...providerCatalog.find((entry) => entry.id === destination.id)!,
+        status: "connected",
+        models: [destination.model],
+        defaultModel: destination.model,
+        isLocal: destination.isLocal,
+        ...("remoteModels" in destination ? { remoteModels: [...destination.remoteModels] } : {}),
+      };
+      const fixture = await makeStore({
+        activeProviderId: provider.id, tenants: [realTenant], activeTenantId: realTenant.id, installedAgents: [scheduledAgent],
+      }, [provider]);
+      const start = t.mock.method(fixture.store, "startRun", async () => undefined);
+      try {
+        // The background scheduler can be the first caller after upgrade.
+        await fixture.store.fireDueSchedules();
+        const schedule = (await fixture.store.getAppState()).installedAgents[0]?.schedule;
+        assert.equal(start.mock.callCount(), 0);
+        assert.equal(schedule?.enabled, true);
+        assert.equal(schedule?.modelDestination?.providerId, provider.id);
+        assert.equal(schedule?.modelDestination?.model, destination.model);
+        assert.match(schedule?.lastSkipReason ?? "", /Review the schedule to continue/);
+        if (provider.remoteModels) assert.match(schedule?.lastSkipReason ?? "", /ollama\.com/);
+
+        await fixture.store.updateAgentSchedule(scheduledAgent.slug, { ...scheduledAgent.schedule, reviewModelDestination: true });
+        assert.equal((await fixture.store.getAgentSchedule(scheduledAgent.slug))?.lastSkipReason, undefined);
+        await fixture.store.fireDueSchedules();
+        assert.equal(start.mock.callCount(), 0, "review starts a fresh interval");
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
+
+  it("keeps a due legacy schedule running on an on-device model", async (t) => {
+    const provider: ProviderSummary = {
+      ...providerCatalog.find((entry) => entry.id === "ollama")!,
+      status: "connected", models: ["writer:latest"], defaultModel: "writer:latest",
+    };
+    const fixture = await makeStore({
+      tenants: [realTenant], activeTenantId: realTenant.id, installedAgents: [scheduledAgent],
+    }, [provider]);
+    const start = t.mock.method(fixture.store, "startRun", async () => undefined);
+    try {
+      await fixture.store.fireDueSchedules();
+      assert.equal(start.mock.callCount(), 1);
+      const schedule = await fixture.store.getAgentSchedule(scheduledAgent.slug);
+      assert.equal(schedule?.enabled, true);
+      assert.equal(schedule?.modelDestination?.ollamaCloud, false);
+      assert.equal(schedule?.lastSkipReason, undefined);
+    } finally {
+      await fixture.close();
     }
   });
 
