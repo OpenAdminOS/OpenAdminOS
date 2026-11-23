@@ -1,4 +1,4 @@
-import type { HostedOllamaDestination, ProviderId } from "./openAdminOS";
+import type { HostedOllamaDestination, ProviderId } from "@openadminos/agent-sdk";
 
 function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId, model?: string, destination?: HostedOllamaDestination): string {
   // Tenant ids are GUIDs or the sample id, so the no-tenant key never
