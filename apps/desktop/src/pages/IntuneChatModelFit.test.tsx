@@ -304,10 +304,25 @@ describe("IntuneChat model fit (mockup 36)", () => {
     expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this request" })).toBeNull();
   });
 
+  it("lists a larger local model only after its reported context fits the request", async () => {
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, models: ["llama3.1", "small-context:12b", "unknown-context:14b", "fits:20b"] }
+      : provider);
+    const bridge = fitBridge(createMockAppState({ providers }));
+    bridge.getModelFitContextWindow = vi.fn(async (_providerId, model) =>
+      model === "fits:20b" ? 65536 : model === "small-context:12b" ? 16384 : undefined);
+    const { notice } = await sendTooLarge(bridge);
+    expect(await within(notice).findByRole("button", { name: "Use fits:20b" })).toBeInTheDocument();
+    expect(within(notice).getByText("Reported context window: 65,536 tokens.")).toBeInTheDocument();
+    expect(within(notice).queryByRole("button", { name: /Use (small-context|unknown-context)/ })).not.toBeInTheDocument();
+    expect(bridge.getModelFitContextWindow).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps the admin's narrower draft stored when a larger local model fails too", async () => {
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1:8b", "gpt-oss:20b"], defaultModel: "llama3.1:8b" } : provider));
-    // The failed model is 8B by name, so gpt-oss:20b is offered as a larger local model.
+    // The alternative reports enough context to be offered.
     const bridge = fitBridge(createMockAppState({ providers, activeModelByProviderId: { ollama: "llama3.1:8b" } }), "llama3.1:8b");
+    bridge.getModelFitContextWindow = vi.fn(async () => 65536);
     const stream = bridge.streamIntuneChatMessage;
     bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) => {
       // The larger local model fails for its size as well.
@@ -321,7 +336,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByDisplayValue(QUESTION);
     fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "List devices by owner." } });
-    await user.click(within(await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    await user.click(await within(await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" })).findByRole("button", { name: "Use gpt-oss:20b" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(readChatDraft(conversation.id)).toBe("List devices by owner."));
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("List devices by owner.");
@@ -330,6 +345,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
   it("keeps a cleared draft cleared when a larger local model fails too", async () => {
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1:8b", "gpt-oss:20b"], defaultModel: "llama3.1:8b" } : provider));
     const bridge = fitBridge(createMockAppState({ providers, activeModelByProviderId: { ollama: "llama3.1:8b" } }), "llama3.1:8b");
+    bridge.getModelFitContextWindow = vi.fn(async () => 65536);
     const stream = bridge.streamIntuneChatMessage;
     bridge.streamIntuneChatMessage = vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent, options) =>
       input.modelOverride?.providerId === "ollama" ? stream({ ...input, modelOverride: undefined }, onEvent, options) : stream(input, onEvent, options));
@@ -340,7 +356,7 @@ describe("IntuneChat model fit (mockup 36)", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await screen.findByDisplayValue(QUESTION);
     fireEvent.change(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), { target: { value: "" } });
-    await user.click(within(await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    await user.click(await within(await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" })).findByRole("button", { name: "Use gpt-oss:20b" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(2));
     await screen.findByRole("region", { name: "llama3.1:8b cannot fit this request" });
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("");

@@ -2712,8 +2712,12 @@ price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
 Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
 follows redirects; up to two installed local models with a larger parameter count in
-their name, marked as on this device and not checked against the request
-size; Split the question (a hint, and the question back in an empty
+their name. For a context overflow, local choices must report a context
+window at least as large as the request's known token count. The row shows
+the reported window. The app reads model metadata without loading the model:
+Ollama uses the window from `/api/show` (including a pinned `num_ctx`),
+LM Studio uses the loaded instance's setting, and Lemonade uses the context
+reported for its downloaded model. Split the question (a hint, and the question back in an empty
 composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
 sent. Narrow the question ... then send again." Providers the managed policy
 does not allow are not in the provider list, so they are never offered; when
@@ -2863,8 +2867,7 @@ was sent. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
-option; reading each local model's context length so only models that can
-take the request are offered; whether hosted rows should show a cost estimate.
+option and whether hosted rows should show a cost estimate.
 
 #### Agents as skills
 

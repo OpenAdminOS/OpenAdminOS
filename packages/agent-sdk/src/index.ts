@@ -3615,6 +3615,8 @@ export interface OpenAdminOSApi {
    * when it opens; the host refuses the send or run if it changed since.
    */
   getProviderDestination?(providerId: ProviderId): Promise<string>;
+  /** Reads metadata for a local model without loading it or sending a prompt. */
+  getModelFitContextWindow?(providerId: ProviderId, model: string): Promise<number | undefined>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,

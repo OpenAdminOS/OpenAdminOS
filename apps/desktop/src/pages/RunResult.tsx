@@ -7,7 +7,8 @@ import { MarkdownPreview, stripMarkdownToPlainText } from "../components/Markdow
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { ModelFitNotice } from "../components/ModelFitNotice";
-import { isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
+import { isOnDeviceModel, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
+import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
@@ -151,9 +152,9 @@ function RunResultPage({ run }: { run: RunRecord }) {
     ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
     ...(run.dryRun && (run.requireOnDeviceModel || run.providerEndpointBinding) ? { dryRun: true } : {}),
   };
-  const fitChoices = modelFit
-    ? modelFitChoices({ issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy })
-    : undefined;
+  const { choices: fitChoices, checkingLocalContext } = useModelFitChoices({
+    issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy,
+  });
 
   const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
     navigate(`/agents/${encodeURIComponent(slug)}/confirm`, { state: { runChoice } });
@@ -377,6 +378,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
             modelFit: {
               issue: modelFit,
               choices: fitChoices,
+              checkingLocalContext,
               onChoose: (choice: ModelFitChoice) => {
                 rerunOverrideRef.current = {
                   providerId: choice.providerId,
@@ -459,6 +461,7 @@ function RunPage({
   modelFit?: {
     issue: ModelFitIssue;
     choices: ModelFitChoices;
+    checkingLocalContext: boolean;
     onChoose: (choice: ModelFitChoice) => void;
     onOpenProviders: () => void;
   };
@@ -565,6 +568,7 @@ function RunPage({
             <ModelFitNotice
               issue={modelFit.issue}
               choices={modelFit.choices}
+              checkingLocalContext={modelFit.checkingLocalContext}
               surface="run"
               onChoose={modelFit.onChoose}
               onOpenProviders={modelFit.onOpenProviders}

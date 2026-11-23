@@ -13,7 +13,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelFitContextKey, modelSizeBillions } from "../../src/shared/model-fit.js";
 import { GEMINI_DEFAULT_MODEL } from "@openadminos/runtime";
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
@@ -207,10 +207,11 @@ describe("Model fit: classifying a failure", () => {
 });
 
 describe("Model fit: the choices", () => {
-  const issue = { reason: "context-too-small" as const, providerId: "ollama" as const, model: LOCAL_MODEL };
+  const issue = { reason: "context-too-small" as const, providerId: "ollama" as const, model: LOCAL_MODEL, neededTokens: 40652 };
+  const contextWindows = new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), 65536], [modelFitContextKey("ollama", LOCAL_MODEL), 49152]]);
 
   it("lists only ready hosted providers and larger local models", () => {
-    const choices = modelFitChoices({ issue, providers: [ollama, claude, codexSignedOut] });
+    const choices = modelFitChoices({ issue, contextWindows, providers: [ollama, claude, codexSignedOut] });
     assert.deepEqual(choices.hosted.map((choice) => choice.providerId), ["anthropic"]);
     assert.equal(choices.hosted[0]!.model, "claude-sonnet-5-5");
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b"]);
@@ -219,7 +220,7 @@ describe("Model fit: the choices", () => {
 
   it("offers sized local models after a context failure on a model whose size is unknown", () => {
     const apple: ProviderSummary = { id: "apple-foundation", name: "Apple Intelligence", description: "", isLocal: true, status: "connected", models: ["system-language-model"], defaultModel: "system-language-model" };
-    const choices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] });
+    const choices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "apple-foundation", model: "system-language-model", neededTokens: 40652 }, contextWindows, providers: [apple, ollama] });
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b", LOCAL_MODEL]);
     // A reasoning-only reply is about the model's size, so an unknown size still offers none.
     assert.deepEqual(modelFitChoices({ issue: { reason: "thinking-only", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] }).local, []);
@@ -229,8 +230,21 @@ describe("Model fit: the choices", () => {
     assert.equal(isOllamaCloudModel("gpt-oss:120b-cloud"), true);
     assert.equal(isOllamaCloudModel("glm-4.6:cloud"), true);
     assert.equal(isOllamaCloudModel("gpt-oss:20b"), false);
-    const choices = modelFitChoices({ issue, providers: [{ ...ollama, models: [LOCAL_MODEL, "gpt-oss:120b-cloud", "gpt-oss:20b"] }] });
+    const suffix = "gpt-oss:120b-cloud";
+    const alias = "qwen:32b";
+    const windows = new Map(contextWindows)
+      .set(modelFitContextKey("ollama", suffix), 131072)
+      .set(modelFitContextKey("ollama", alias), 131072);
+    const providers = [{ ...ollama, models: [...ollama.models, suffix, alias], remoteModels: [alias] }];
+    const choices = modelFitChoices({ issue, contextWindows: windows, providers });
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b"]);
+  });
+
+  it("requires a known request size and enough reported context for a context retry", () => {
+    const windows = new Map(contextWindows).set(modelFitContextKey("ollama", "other:30b"), 16384);
+    const providers = [{ ...ollama, models: [...ollama.models, "other:30b", "unknown:40b"] }];
+    assert.deepEqual(modelFitChoices({ issue, providers, contextWindows: windows }).local.map(({ model, contextWindow }) => [model, contextWindow]), [["gpt-oss:20b", 65536]]);
+    assert.deepEqual(modelFitChoices({ issue: { reason: issue.reason, providerId: issue.providerId, model: issue.model }, providers, contextWindows: windows }).local, []);
   });
 
   it("offers no hosted provider when the managed policy allows only local ones, and says the policy is why", () => {
@@ -347,7 +361,7 @@ describe("Model fit: the per-request override", () => {
       () => resolveChatTurnProvider({ ...base, providers: [withAlias, claude], override: { offerId: "fit_1", providerId: "ollama", model: "big-70b" }, consent: undefined }),
       /runs on another server/,
     );
-    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL, neededTokens: 40652 }, contextWindows: new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), 65536], [modelFitContextKey("ollama", "big-70b"), 65536]]), providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
   });
 
   it("keeps the active model as the anchor after a larger local model also failed", () => {

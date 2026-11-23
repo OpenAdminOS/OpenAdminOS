@@ -1,4 +1,5 @@
 import { hostedOllamaDestination, providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { readModelFitContextWindow } from "./model-fit-context.js";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
@@ -6110,6 +6111,15 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:get-provider-destination",
     handleTrusted((_event, providerId: unknown) => store.providerDestination(validateProviderId(providerId))),
+  );
+  ipcMain.handle(
+    "openadminos:get-model-fit-context-window",
+    handleTrusted(async (_event, providerId: unknown, model: unknown) => {
+      const id = validateProviderId(providerId);
+      const name = requireBoundedString(model, "model", 256);
+      const { endpoint } = await store.providerTarget(id);
+      return readModelFitContextWindow(id, name, endpoint);
+    }),
   );
   ipcMain.handle(
     "openadminos:preview-intune-chat-send",

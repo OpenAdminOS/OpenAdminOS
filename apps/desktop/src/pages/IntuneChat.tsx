@@ -103,6 +103,7 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import { ModelFitNotice, modelFitModelName } from "../components/ModelFitNotice";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { MODEL_FIT_RESEND, modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
+import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
@@ -1386,6 +1387,12 @@ function IntuneChatContent() {
   // waits for its id there; any other conversation, or a change of model or
   // organization, withdraws it.
   const modelFitOfferShown = modelFitOffer !== null && activeConversationId === modelFitOffer.conversationId;
+  const { choices: fitChoices, checkingLocalContext } = useModelFitChoices({
+    issue: modelFitOfferShown ? modelFitOffer.issue : undefined,
+    providers: state.providers,
+    activeModelByProviderId: state.activeModelByProviderId,
+    managedPolicy: state.managedPolicy,
+  });
   useEffect(() => {
     if (!modelFitOfferShown || modelFitOffer?.issue.offerExpiresAt === undefined) return;
     const delay = modelFitOffer.issue.offerExpiresAt - Date.now();
@@ -1976,15 +1983,11 @@ function IntuneChatContent() {
         onConfirm={() => void confirmModelFitAndSend()}
         onUseLocal={() => setModelFitAccept(null)}
       />
-    ) : modelFitOffer && modelFitOfferShown && !runInProgress ? (
+    ) : modelFitOffer && modelFitOfferShown && fitChoices && !runInProgress ? (
       <ModelFitNotice
         issue={modelFitOffer.issue}
-        choices={modelFitChoices({
-          issue: modelFitOffer.issue,
-          providers: state.providers,
-          activeModelByProviderId: state.activeModelByProviderId,
-          managedPolicy: state.managedPolicy,
-        })}
+        choices={fitChoices}
+        checkingLocalContext={checkingLocalContext}
         surface="chat"
         returnModel={modelFitReturnModel(modelFitOffer)}
         answered={modelFitOffer.answered === true}

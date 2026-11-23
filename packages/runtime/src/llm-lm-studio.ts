@@ -142,6 +142,11 @@ async function readLmStudioContext(endpoint: string, model: string, signal?: Abo
   }
 }
 
+/** The active context setting, which is only known for a loaded instance. */
+export async function readLmStudioLoadedContextWindow(endpoint: string, model: string): Promise<number | undefined> {
+  return (await readLmStudioContext(endpoint, model)).loaded;
+}
+
 function tokenCount<K extends string>(key: K, value: unknown): Partial<Record<K, number>> {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? ({ [key]: value } as Record<K, number>) : {};
 }

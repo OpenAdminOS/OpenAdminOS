@@ -910,9 +910,13 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "gpt-oss:20b"] } : provider));
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "openadmin-8b", tenantId: "tenant-1", error: CONTEXT_ERROR, modelFit: { ...FIT.modelFit, model: "openadmin-8b" } });
-    const bridge = makeMockBridge({}, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+    const bridge = makeMockBridge({ getModelFitContextWindow: vi.fn(async () => 65536) }, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
-    await user.click(within(await screen.findByRole("region", { name: "OpenAdmin 8B cannot fit this run" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    const notice = await screen.findByRole("region", { name: "OpenAdmin 8B cannot fit this run" });
+    const useLocalModel = await within(notice).findByRole("button", { name: "Use gpt-oss:20b" });
+    expect(within(notice).getByText("Reported context window: 65,536 tokens.")).toBeInTheDocument();
+    expect(bridge.getModelFitContextWindow).toHaveBeenCalledWith("ollama", "gpt-oss:20b");
+    await user.click(useLocalModel);
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "ollama", model: "gpt-oss:20b", requireOnDeviceModel: true })));
