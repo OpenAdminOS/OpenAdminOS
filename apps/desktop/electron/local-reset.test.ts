@@ -1720,6 +1720,10 @@ describe("local reset: end to end with the store", () => {
       assert.equal(lifecycle.isWritable(tenant.id), false);
       await store.shutdown(200);
       assert.ok(!existsSync(statePath));
+      // The shutdown leaves the databases open, as the process exit closes
+      // them; closed here, so the folder can be removed on Windows too.
+      unsealDataFolder();
+      store.close();
     } finally {
       unsealDataFolder();
       await rm(dir, { recursive: true, force: true });
@@ -2083,6 +2087,9 @@ describe("local reset: confirmations", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         if (pending() === chain) break;
       }
+      // The shutdown leaves the databases open; closed here, so the folder
+      // can be removed on Windows too.
+      store.close();
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
