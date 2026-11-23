@@ -115,6 +115,19 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
   return promised;
 }
 
+/**
+ * Whether any clause of a text announces work ("I will check the cached Intune device data now"), with no limit
+ * on length or code blocks: the prose around a tool request a model wrote instead of an answer.
+ */
+export function announcesLookup(text: string): boolean {
+  for (const clause of clauses(withoutInlineQuotes(text.trim()))) {
+    if (CHECKING_NOW.test(clause)) return true;
+    const match = PROMISE.exec(clause);
+    if (match && isFiller(clause.slice(0, match.index))) return true;
+  }
+  return false;
+}
+
 /** The repair turn for a single-call model, such as an Agent Team answer. */
 export const PROMISE_REPAIR_PROMPT =
   "Your previous reply was a progress message, not an answer. No work continues after you reply. Answer the question now from the evidence supplied above. If the evidence is not enough, say what is missing.";

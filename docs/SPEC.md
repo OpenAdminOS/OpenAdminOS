@@ -4608,15 +4608,17 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  a whole-reply object is read as the loop reads it (final with an answer or
-  content text is the answer, also when it names a tool too); elsewhere a
-  "tool" naming a Chat tool makes the reply a request when the prose around
-  the JSON is a short lead-in (before or after it, next to a JSON example,
-  cut short), while a prose answer that quotes a tool call as an example
-  stays an answer; a final answer object after prose is the answer; any
-  other JSON example inside a prose answer stays prose; a streamed reply
-  that looks like the loop's JSON is not shown live; when the reply is empty,
-  a progress message or a request, the message fails with
+  a final answer object is the answer wherever it sits (the whole reply, or
+  with prose before or after it), also when it names a tool too; otherwise a
+  "tool" naming a Chat tool makes the reply a request when the request was
+  cut short (an unclosed fence or brace), when the prose outside the JSON
+  announces a lookup, or when that prose is a short lead-in; a longer prose
+  answer that quotes a tool call as an example stays an answer, so a model
+  that writes a long preamble without announcing a lookup before a real
+  request gets that reply shown; any other JSON example inside a prose
+  answer stays prose; the fallback call is not shown live, only when
+  complete; when the reply is empty, a progress message or a request, the
+  message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the

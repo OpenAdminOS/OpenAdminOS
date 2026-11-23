@@ -645,6 +645,10 @@ describe("The fallback after a failed compact loop", () => {
         // Prose, then a request cut short.
         ["send", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
         ["stream", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
+        // A long promise before a fenced request: the prose announces the lookup.
+        ["send", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so that the answer rests on the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        // A lead-in, then an unclosed fence with a long request cut short.
+        ["stream", `I need to check:\n\`\`\`json\n{"tool":"query_cache","params":{"resource":"managedDevices","select":[${Array.from({ length: 20 }, (_, i) => `"field${i}"`).join(",")}],"where":{"complianceState":"noncompliant"`],
         // A complete request, then an unrelated JSON example.
         ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
         ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
@@ -691,6 +695,8 @@ describe("The fallback after a failed compact loop", () => {
         + '```json\n{"tool":"count_cached","params":{"resource":"managedDevices","where":{"complianceState":"noncompliant"}}}\n```';
       for (const [fallbackReply, expected] of [
         ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
+        ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"} Done.', "Six managed devices are not compliant."],
+        ['Here is the answer: {"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
         [howTo, howTo],
       ] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
