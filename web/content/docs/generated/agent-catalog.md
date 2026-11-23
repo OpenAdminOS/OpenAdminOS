@@ -8,7 +8,7 @@ description: "Catalog of OpenAdminOS agents and dashboards."
 
 This catalog lists the current OpenAdminOS agents and dashboards. Mode, scopes, tenant data access, and write behavior are taken from each agent's reviewed metadata.
 
-Last updated: 2026-11-19 · `3a7aa1ca`.
+Last updated: 2026-11-23 · `f92fc1e9`.
 
 | Agent | Mode | Tier | Category | Required Entra tier | Scopes |
 | --- | --- | --- | --- | --- | --- |
