@@ -225,7 +225,7 @@ function devicesSlot(name: string): string {
 const COUNT_HEAD = new RegExp(`^how many (?:(?<pre>noncompliant|compliant) )?${devicesSlot("os")}(?: (?:are|that are) (?<post>${STATE_WORDS})| ${SYNCED})?${THERE}${WHERE}(?<rest>.*)$`);
 const LIST_STATE_AFTER = new RegExp(`^(?:which|list|show(?: me)?|what are)(?: all)?(?: the)?(?: of)?(?: our| my| the)? ${devicesSlot("os")}(?: (?:that |which )?(?:are|is))? (?<state>${STATE_WORDS})$`);
 const LIST_STATE_BEFORE = new RegExp(`^(?:list|show(?: me)?|what are)(?: all)?(?: the| our| my)? (?<state>noncompliant|compliant) ${devicesSlot("os")}$`);
-const LIST_SYNC = new RegExp(`^(?:which|list|show(?: me)?)(?: all)?(?: the)?(?: of)?(?: our| my)? ${devicesSlot("os")} ${SYNCED}$`);
+const LIST_SYNC = new RegExp(`^(?:which|list|show(?: me)?)(?: all)?(?: the)?(?: of)?(?: our| my)? ${devicesSlot("os")} ${SYNCED}(?:,? and what evidence supports the answer)?$`);
 
 /** The clauses a count may add, each whole: a per OS or per state split, the subset to list, or "list them". */
 const CLAUSE_BREAK_OS = /^(?:show |list |give me |with )?(?:them |it |the |a )?(?:split |breakdown )?(?:per|by|split by|broken down by) (?:os|operating system|platform)s?$/;
@@ -567,9 +567,21 @@ function localDate(iso: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function rowLine(row: ComputedListedRow): string {
-  const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? (syncReported(row.lastSyncDateTime) ? `last sync ${localDate(row.lastSyncDateTime)}` : syncUnreadable(row.lastSyncDateTime) ? "no readable sync time" : "no sync reported") : undefined].filter(Boolean);
-  return `- ${row.name}${details.length ? ` (${details.join(", ")})` : ""}`;
+function rowLine(row: ComputedListedRow, generatedAt?: string): string {
+  const details = [row.operatingSystem, row.complianceState];
+  if (row.lastSyncDateTime) {
+    if (syncReported(row.lastSyncDateTime)) {
+      const days = generatedAt
+        ? Math.floor((Date.parse(generatedAt) - Date.parse(row.lastSyncDateTime)) / MS_PER_DAY)
+        : NaN;
+      const age = days >= 0 ? `, ${days} ${days === 1 ? "day" : "days"} ago` : "";
+      details.push(`last sync ${localDate(row.lastSyncDateTime)}${age}`);
+    } else {
+      details.push(syncUnreadable(row.lastSyncDateTime) ? "no readable sync time" : "no sync reported");
+    }
+  }
+  const reported = details.filter(Boolean);
+  return `- ${row.name}${reported.length ? ` (${reported.join(", ")})` : ""}`;
 }
 
 /** Runs a structured query over the cache. Every number is counted in SQL over all cached rows. */
@@ -622,6 +634,8 @@ export function computeStructuredResult(input: {
   const rows = (counted.rows ?? []).flatMap((row) => listedRow(row) ?? []);
   const focusRows = (focusCount?.rows ?? []).flatMap((row) => listedRow(row) ?? []);
 
+  const syncWindow = listedFilters.some((filter) => filter.field === "lastSyncDateTime");
+  const formatRow = (row: ComputedListedRow) => rowLine(row, syncWindow ? input.generatedAt : undefined);
   const facts: string[] = [];
   const breakdownText = query.breakdown.map((field) => `${FIELD_WORDS[field] ?? `by ${field}`}: ${groupText(counted.groups[field]) || "none reported"}`).join("; ");
   const previousSet = `the ${query.ids?.length ?? counted.total} ${query.scopeLabel} from the previous answer`;
@@ -654,10 +668,10 @@ export function computeStructuredResult(input: {
     const showOs = os && (Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 || (query.followUp !== undefined && query.breakdown.includes("operatingSystem")));
     const parts = [...(showOs ? [os] : []), ...focusBreakdown];
     facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length ? ":" : "."}`);
-    facts.push(...focusRows.map(rowLine));
+    facts.push(...focusRows.map(formatRow));
     if (focusCount.total > focusRows.length) facts.push(`${focusCount.total - focusRows.length} more match and are not listed.`);
   } else if (listSet) {
-    facts.push(...rows.map(rowLine));
+    facts.push(...rows.map(formatRow));
     if (counted.total > rows.length) facts.push(`${counted.total - rows.length} more match and are not listed.`);
   }
   // A sync window counts devices with a reported sync time; those without one are said, not silently left out.

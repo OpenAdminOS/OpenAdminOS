@@ -241,8 +241,11 @@ and dark, into `docs/screenshots/landing/`, then converted to WebP under
 `web/public/app/` and swapped with the site theme. The landing capture uses the
 single fictional Contoso tenant (with three Agent Team teammates) and demo display
 values (`gpt-oss:20b`, `admin@contoso.invalid`, the simulated Ollama endpoint) in
-place of the smoke-test fixtures; smoke tests and the layout captures are
-unchanged. Captures are taken with no focused control and the pointer parked,
+place of the smoke-test display values. Chat lists two devices from the
+fictional Intune cache, with their OS, sync age, and the snapshot used as
+evidence. Both themes reuse one conversation and capture it at the latest
+message. The mobile write confirmation shows the tenant and local provider
+in the top bar. Captures are taken with no focused control and the pointer parked,
 so no focus rings or hover states appear. Crops scale a region of a capture
 and never redraw the interface. The earlier clickable screenshot viewer, its
 captures, and its interaction contract were removed with the calm redesign

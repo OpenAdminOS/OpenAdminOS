@@ -668,6 +668,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         label: "Retire WIN-OLD-001",
         description: "Last synced 96 days ago.",
         severity: "destructive",
+        metadata: { deviceId: "device-1" },
         request: {
           method: "POST",
           path: "/deviceManagement/managedDevices/device-1/retire",
@@ -679,6 +680,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         label: "Retire WIN-OLD-002",
         description: "Last synced 104 days ago.",
         severity: "destructive",
+        metadata: { deviceId: "device-2" },
         request: {
           method: "POST",
           path: "/deviceManagement/managedDevices/device-2/retire",
@@ -925,6 +927,9 @@ function findScreenshotRegistryIndexPath(): string {
 
 let officeRehearsalRevision = 0;
 function createIntuneChatSmokeGraph(): RunGraphApi {
+  const captureTime = Date.now();
+  const syncDaysAgo = (days: number) =>
+    new Date(captureTime - (days * 24 + 1) * 60 * 60 * 1000).toISOString();
   return {
     async listManagedDevices() {
       return [];
@@ -940,13 +945,33 @@ function createIntuneChatSmokeGraph(): RunGraphApi {
               id: "managed-device-1",
               deviceName: "WIN-01",
               isEncrypted: false,
-              userPrincipalName: "user@smoke.invalid",
+              userPrincipalName: isLandingCapture ? "user@contoso.invalid" : "user@smoke.invalid",
               operatingSystem: "Windows",
               osVersion: "10.0.22631",
               complianceState: "noncompliant",
-              lastSyncDateTime: "2026-01-01T00:00:00.000Z",
+              lastSyncDateTime: isLandingCapture ? syncDaysAgo(13) : "2026-01-01T00:00:00.000Z",
               managementState: "managed",
             },
+            ...(isLandingCapture
+              ? [
+                  {
+                    id: "managed-device-2",
+                    deviceName: "MAC-02",
+                    operatingSystem: "macOS",
+                    complianceState: "compliant",
+                    lastSyncDateTime: syncDaysAgo(9),
+                    managementState: "managed",
+                  },
+                  {
+                    id: "managed-device-3",
+                    deviceName: "WIN-03",
+                    operatingSystem: "Windows",
+                    complianceState: "compliant",
+                    lastSyncDateTime: syncDaysAgo(1),
+                    managementState: "managed",
+                  },
+                ]
+              : []),
             ...(officeRehearsalRevision ? [{id:"managed-device-2",deviceName:"WIN-02",operatingSystem:"Windows",complianceState:"noncompliant",lastSyncDateTime:"2026-01-01T00:00:00.000Z",managementState:"managed"}] : []),
           ],
         };
@@ -977,29 +1002,12 @@ function officeRehearsalAnswer(prompt:string): string {
   return `REHEARSAL: Supplied compliance evidence changed between checks. Review collection freshness and the source run before deciding on remediation. The evidence does not establish policy causation. Sources: ${sources || "current collection"}.`;
 }
 
-// The landing capture shows investigative Chat the way a real model drives
-// it: read the cached Intune and Entra device rows, then answer from them.
-function landingInvestigationStep(prompt: string): string {
-  for (const resource of ["managedDevices", "entraDevices"]) {
-    if (!prompt.includes(`"resource":"${resource}"`)) {
-      return `\`\`\`json\n${JSON.stringify({ tool: "query_cache", params: { resource, limit: 25 } })}\n\`\`\``;
-    }
-  }
-  return JSON.stringify({
-    final: true,
-    answer: "WIN-01 is stale based on cached Intune and Entra device evidence.",
-  });
-}
-
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
     defaultModel: smokeModelName,
     async complete(options) {
       if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:smokeModelName};
-      if (isLandingCapture && options.prompt.includes("Admin question:")) {
-        return { text: landingInvestigationStep(options.prompt), model: smokeModelName };
-      }
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         model: smokeModelName,
@@ -1219,6 +1227,7 @@ async function runScreenshotCapture(): Promise<void> {
     {
       route: "/marketplace",
       name: "hub-grid",
+      // Historical smoke filename for Marketplace.
       file: "app/hub-grid.png",
       waitFor: ["MCP tools", "agents"],
       heading: "Marketplace",
@@ -1274,6 +1283,7 @@ async function runScreenshotCapture(): Promise<void> {
     {
       route: "/settings/providers",
       name: "settings",
+      // Historical smoke filename for Settings, Providers.
       file: "app/settings.png",
       waitFor: ["Settings", "Providers"],
       heading: "Settings",
@@ -1335,24 +1345,14 @@ async function runScreenshotCapture(): Promise<void> {
     if (actualWidth !== width) {
       throw new Error(`Screenshot width mismatch: requested ${width}px, received ${actualWidth}px.`);
     }
-    const reuseTranscript = shot.prepare === "chat-transcript" && transcriptRoute;
-    const prepare = reuseTranscript ? undefined : shot.prepare;
-    const waitFor = reuseTranscript
-        ? [
-            ...shot.waitFor,
-            "WIN-01 is stale based on cached Intune and Entra device evidence.",
-          ]
-        : shot.waitFor;
+    const route = shot.prepare === "chat-transcript" ? transcriptRoute ?? shot.route : shot.route;
     const finalHash = await runScreenshotCaptureStep(window, {
       kind: "route",
-      route: reuseTranscript ? transcriptRoute! : shot.route,
-      waitFor,
-      ...(prepare ? { prepare } : {}),
-      ...(shot.heading ? { heading: shot.heading } : {}),
-      ...(shot.selector ? { selector: shot.selector } : {}),
+      ...shot,
+      route,
       reducedMotion,
     });
-    if (prepare === "chat-transcript" && finalHash.startsWith("#/chat/")) {
+    if (shot.prepare === "chat-transcript" && finalHash.startsWith("#/chat/")) {
       transcriptRoute = finalHash.slice(1);
     }
     const mode = reducedMotion ? "reduced-motion" : "default";
@@ -1415,7 +1415,7 @@ async function runScreenshotCaptureStep(
   step: ScreenshotCaptureStep,
 ): Promise<string> {
   const result: { hash: string } | { error: string } = await window.webContents.executeJavaScript(
-    `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)}).then(
+    `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)}, ${isLandingCapture}).then(
       (hash) => ({ hash }),
       (error) => ({ error: String(error) }),
     )`,
@@ -1473,6 +1473,7 @@ type ScreenshotCaptureStep =
 
 async function screenshotCaptureStepScript(
   step: ScreenshotCaptureStep,
+  landing: boolean,
 ): Promise<string> {
   const waitFor = async (
     predicate: () => boolean,
@@ -1545,7 +1546,8 @@ async function screenshotCaptureStepScript(
   await closeModal();
   await navigateHash(step.route);
   // Settings section routes scroll their own container to the section.
-  if (!/^\/settings\/[a-z]+/.test(step.route)) resetScroll();
+  const preparingTranscript = step.kind === "route" && step.prepare === "chat-transcript";
+  if (!preparingTranscript && !/^\/settings\/[a-z]+/.test(step.route)) resetScroll();
 
   if (step.kind === "route") {
     await waitFor(
@@ -1573,26 +1575,31 @@ async function screenshotCaptureStepScript(
         "empty Chat state",
       );
     } else if (step.prepare === "chat-transcript") {
-      const newConversation = findNewChatButton();
-      if (newConversation && !newConversation.disabled) newConversation.click();
-      window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
+      if (step.route === "/chat") {
+        const newConversation = findNewChatButton();
+        if (newConversation && !newConversation.disabled) newConversation.click();
+        window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
+        await waitFor(
+          () => bodyText().includes("Run an agent with /"),
+          "new Chat transcript fixture",
+        );
+        const textarea = setTextarea(
+          "Which managed devices have not synced in the last 7 days, and what evidence supports the answer?",
+        );
+        textarea.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            bubbles: true,
+            cancelable: true,
+            key: "Enter",
+          }),
+        );
+      }
       await waitFor(
-        () => bodyText().includes("Run an agent with /"),
-        "new Chat transcript fixture",
-      );
-      const textarea = setTextarea(
-        "Which managed devices have not synced in the last 7 days, and what evidence supports the answer?",
-      );
-      textarea.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          bubbles: true,
-          cancelable: true,
-          key: "Enter",
-        }),
-      );
-      await waitFor(
-        () => bodyText().includes("WIN-01 is stale based on cached Intune and Entra device evidence."),
-        "Chat transcript answer",
+        () =>
+          bodyText().includes(`Intune managed devices not synced in the last 7 days: ${landing ? 2 : 1}.`) &&
+          bodyText().includes("Counted from the Intune device cache") &&
+          (!landing || textIncludesAll(["WIN-01 (Windows", "MAC-02 (macOS", "13 days ago", "9 days ago"])),
+        "code-computed Chat transcript answer",
       );
       await waitFor(
         () => Boolean(findButton("Send")) && !findButton("Stop"),
@@ -1602,7 +1609,6 @@ async function screenshotCaptureStepScript(
         () => Boolean(findButton("Copy response")),
         "completed Chat progress cleared",
       );
-      resetScroll();
     } else if (step.prepare === "write-confirmation") {
       await waitFor(
         () => Boolean(document.querySelector('input[placeholder="Type here to enable Apply"]')),
@@ -1617,7 +1623,7 @@ async function screenshotCaptureStepScript(
       if (confirmationInput && scrollRoot) {
         const riskReview = scrollRoot.querySelector('[aria-label="Write plan risk flags"]');
         const top = riskReview
-          ? scrollRoot.scrollTop + riskReview.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top - 12
+          ? scrollRoot.scrollTop + riskReview.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + 12
           : confirmationInput.offsetTop - scrollRoot.clientHeight / 2;
         scrollRoot.scrollTo({
           top: Math.max(0, top),
@@ -1638,6 +1644,17 @@ async function screenshotCaptureStepScript(
       }
     }
     await delay(50);
+    if (preparingTranscript) {
+      const transcript = document.querySelector<HTMLElement>('[role="log"][aria-label="Conversation"]');
+      if (!transcript) throw new Error("Chat transcript scroll container was not found.");
+      await waitFor(() => {
+        if (transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight > 1) {
+          transcript.scrollTo({ top: transcript.scrollHeight, behavior: "instant" });
+          return false;
+        }
+        return !findButton("Scroll to latest");
+      }, "Chat at the bottom with Scroll to latest hidden");
+    }
     if (document.documentElement.scrollWidth > document.documentElement.clientWidth) {
       throw new Error(
         `Horizontal overflow at ${step.route}: ${document.documentElement.scrollWidth}px > ${document.documentElement.clientWidth}px.`,

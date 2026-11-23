@@ -527,6 +527,33 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
+  it("lists stale devices with sync ages and cache evidence without asking the model", async () => {
+    await withHarness(async ({ store, cache, calls }) => {
+      const now = Date.now();
+      cache.replaceGraphResources({
+        tenantId: tenant.id,
+        resource: "managedDevices",
+        label: "Managed devices",
+        scopeSet: [],
+        refreshedAt: new Date(now).toISOString(),
+        rows: managedDevices.slice(0, 3).map((row, index) => ({
+          ...row,
+          lastSyncDateTime: new Date(now - [13, 9, 1][index]! * 86_400_000).toISOString(),
+        })),
+      });
+      const { assistantMessage } = await store.streamIntuneChatMessage({
+        content: "Which managed devices have not synced in the last 7 days, and what evidence supports the answer?",
+        refreshIfStale: false,
+      }, () => {});
+      assert.equal(calls.length, 0);
+      assert.match(assistantMessage.content, /Intune managed devices not synced in the last 7 days: 2\./);
+      assert.match(assistantMessage.content, /WIN-01 \(Windows, .*13 days ago\)/);
+      assert.match(assistantMessage.content, /WIN-02 \(Windows, .*9 days ago\)/);
+      assert.doesNotMatch(assistantMessage.content, /WIN-03/);
+      assert.match(assistantMessage.content, /Counted from the Intune device cache refreshed/);
+    });
+  });
+
   it("says how many devices have no reported sync time instead of leaving them out silently", async () => {
     await withHarness(async ({ store, cache }) => {
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),

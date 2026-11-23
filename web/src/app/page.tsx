@@ -110,9 +110,9 @@ const TOUR: readonly TourItem[] = [
   {
     id: "chat",
     title: "Chat",
-    text: "Ask about the tenant in plain language. See the answer’s scope, data age, and sources, with a suggested installed agent when one fits.",
+    text: "Ask about the tenant in plain language. See the answer’s scope, data age, and source summary, with a suggested installed agent when one fits.",
     screen: "chat-transcript",
-    alt: "Chat answer about a stale device with tenant scope, data age, a source summary, and a suggested agent",
+    alt: "Chat answer listing two devices that missed the seven-day sync window, with tenant scope, data age, a source summary, and a suggested agent",
     tone: "sage",
   },
   {
@@ -120,7 +120,7 @@ const TOUR: readonly TourItem[] = [
     title: "Marketplace",
     text: "Browse agents and MCP tools. Review what a listing reads, where its queries go, and where it runs before you install it.",
     screen: "marketplace",
-    alt: "Marketplace Discover tab with a featured public reference and tabs for agents and MCP tools",
+    alt: "Marketplace Discover tab featuring the read-only Microsoft Learn MCP tool alongside a spotlight list of MCP tools",
     tone: "sand",
     link: { href: "/registry", label: "How the registry works" },
   },
@@ -412,7 +412,7 @@ export default async function HomePage() {
             <AppWindow
               screen="write-confirmation"
               alt="Offboarding agent paused for approval with two proposed device retirements and the required confirmation phrase"
-              crop={{ x: 680, y: 120, width: 1720, aspect: "1720 / 1480" }}
+              crop={{ x: 536, y: 0, width: 2024, aspect: "2024 / 1600" }}
               className="rounded-b-none sm:hidden"
             />
             <AppWindow

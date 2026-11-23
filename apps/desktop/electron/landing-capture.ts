@@ -24,7 +24,7 @@ export interface LandingCaptureStep {
   selector?: string;
 }
 
-const SHOTS: Array<LandingCaptureStep & { name: string }> = [
+const SHOTS: Array<LandingCaptureStep & { name: string; fitBottomSelector?: string }> = [
   {
     name: "chat-transcript",
     route: "/chat",
@@ -43,6 +43,7 @@ const SHOTS: Array<LandingCaptureStep & { name: string }> = [
     route: "/office",
     waitFor: ["Agent Team", "Review inbox"],
     heading: "Agent Team",
+    fitBottomSelector: ".office-room-footer",
   },
   {
     name: "write-confirmation",
@@ -60,6 +61,7 @@ const SHOTS: Array<LandingCaptureStep & { name: string }> = [
     waitFor: ["Reads from", "This device", "Leaves this device"],
     heading: "Contoso connections",
     selector: ".reach-map",
+    fitBottomSelector: '[aria-labelledby="connections-services"] .conn-rows > .conn-row:nth-child(2)',
   },
 ];
 
@@ -120,26 +122,21 @@ export async function captureLandingShots(
     await window.webContents.executeJavaScript(
       `localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)}); window.dispatchEvent(new StorageEvent("storage", {key:"openadminos:appearance:v1"}));`,
     );
-    for (const { name, ...shot } of SHOTS) {
-      const reuse = shot.prepare === "chat-transcript" && transcriptRoute;
-      const hash = await navigate(
-        reuse
-          ? {
-              ...shot,
-              route: transcriptRoute!,
-              prepare: undefined,
-              selector: 'article button[aria-label="Copy response"]',
-              waitFor: [
-                ...shot.waitFor,
-                "WIN-01 is stale based on cached Intune and Entra device evidence.",
-              ],
-            }
-          : shot,
-      );
-      if (shot.prepare === "chat-transcript" && !reuse && hash.startsWith("#/chat/")) {
+    for (const { name, fitBottomSelector, ...shot } of SHOTS) {
+      const route = shot.prepare === "chat-transcript" ? transcriptRoute ?? shot.route : shot.route;
+      const hash = await navigate({ ...shot, route });
+      if (shot.prepare === "chat-transcript" && hash.startsWith("#/chat/")) {
         transcriptRoute = hash.slice(1);
       }
       await applyZoom();
+      if (fitBottomSelector) {
+        await window.webContents.executeJavaScript(`(() => {
+          const selector = ${JSON.stringify(fitBottomSelector)};
+          const element = document.querySelector(selector);
+          if (!element) throw new Error("Capture element missing: " + selector);
+          element.scrollIntoView({ block: "nearest", behavior: "instant" });
+        })()`);
+      }
       // No focus rings or hover states from the capture itself: blur the
       // focused control and park the pointer on an empty strip of the top bar.
       await window.webContents.executeJavaScript(
