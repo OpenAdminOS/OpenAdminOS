@@ -338,7 +338,12 @@ function AdventPrivacy() {
       </p>
       <p className="mt-3">
         We send OpenAdminOS release emails only if you opt in (Art. 6(1)(a) GDPR).
-        You can withdraw consent at any time in My Advent. To prevent abuse, a keyed
+        You can separately opt in to daily door reminders (Art. 6(1)(a) GDPR).
+        For reminders, we store the choice, consent wording version and time, and
+        a record of each send attempt, including the door, send time and Resend
+        message ID when available. Turn off reminders using the unsubscribe link
+        in an email or in My Advent. You can also withdraw release email consent
+        in My Advent. To prevent abuse, a keyed
         hash of your IP address is used for sign-in rate limiting in Upstash Redis
         for at most one hour (Art. 6(1)(f) GDPR).
       </p>
@@ -349,7 +354,7 @@ function AdventPrivacy() {
       </p>
       <p className="mt-3">
         Participants’ records are deleted 90 days after the grand draw, except winners’
-        records needed to fulfil prizes. Release email consent records are kept while
+        records needed to fulfil prizes. Email consent records are kept while
         you remain opted in and your account exists. Draw audit records retain participant
         IDs and entry counts for verification. Those IDs can no longer be linked to your
         campaign account once it is deleted. You can delete your account immediately

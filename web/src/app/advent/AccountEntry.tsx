@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { MARKETING_CONSENT_LABEL, missingLoginConfig, rulesApproved } from "~/lib/advent/config";
+import { MARKETING_CONSENT_LABEL, missingLoginConfig, REMINDERS_CONSENT_LABEL, rulesApproved } from "~/lib/advent/config";
 import { CAMPAIGN_CLOSE, campaignNow } from "~/lib/advent/time";
 import { ActionForm } from "./ActionForm";
 import { AdventTitle, BackToCalendar, field, Notice, textLink } from "./shared";
@@ -40,6 +40,7 @@ export function AccountEntry({ signup = false, referral = "" }: { signup?: boole
                 <span><label htmlFor="accept-rules">I accept the campaign rules.</label>{" "}<Link href="/advent/rules" className={textLink}>Read the rules</Link></span>
               </div>
               <label className="flex items-baseline gap-2 text-sm"><input type="checkbox" name="marketing" />{MARKETING_CONSENT_LABEL}</label>
+              <label className="flex items-baseline gap-2 text-sm"><input type="checkbox" name="reminders" />{REMINDERS_CONSENT_LABEL}</label>
               <input type="hidden" name="ref" value={referral} />
             </>
           )}

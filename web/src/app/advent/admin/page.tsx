@@ -1,14 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { SITE_URL } from "~/app/seo";
 import { doors } from "~/content/advent/doors";
 import { drawOpens, draws, RETENTION_MS } from "~/lib/advent/admin";
-import { currentAdmin, doorStats } from "~/lib/advent/db";
+import { currentAdmin, doorStats, rpc } from "~/lib/advent/db";
 import type { Draw } from "~/lib/advent/db";
-import { campaignNow } from "~/lib/advent/time";
+import { renderReminder } from "~/lib/advent/reminders";
+import { campaignDoorForDate, campaignNow } from "~/lib/advent/time";
 import { ActionForm } from "../ActionForm";
 import { LocalTime } from "../LocalTime";
 import { AdventTitle, field, heading, Notice, STORAGE_UNAVAILABLE, textLink } from "../shared";
+
+type ReminderStats = {
+  optedIn: number;
+  days: { day: number; sent: number; failed: number; unconfirmed: number }[];
+};
 
 export const metadata = { title: "Campaign admin | Advent of Admin", robots: { index: false, follow: false } };
 
@@ -20,12 +27,13 @@ export default async function AdminPage() {
   const state = await loadAdmin();
   const grand = state.records?.find((record) => record.kind === "grand");
   const purgeAt = grand ? Date.parse(grand.created_at) + RETENTION_MS : null;
+  const reminders = new Map(state.reminders?.days.map((day) => [day.day, day]));
 
   return (
     <div className="mx-auto max-w-5xl space-y-9">
       <Link href="/advent/me" className={textLink}>My Advent</Link>
       <AdventTitle title="Campaign admin" label="Advent of Admin" />
-      {!state.stats || !state.records ? <Notice tone="error">{STORAGE_UNAVAILABLE}</Notice> : (
+      {!state.stats || !state.records || !state.reminders ? <Notice tone="error">{STORAGE_UNAVAILABLE}</Notice> : (
         <>
           <section id="answers" className="scroll-mt-24 space-y-4" aria-labelledby="answers-title">
             <h2 id="answers-title" className={heading}>Accepted answers</h2>
@@ -56,6 +64,7 @@ export default async function AdminPage() {
                     <th scope="col" className="p-2">Done</th>
                     <th scope="col" className="p-2">On time</th>
                     <th scope="col" className="p-2">Answers</th>
+                    <th scope="col" className="p-2">Reminders sent</th>
                     <th scope="col" className="p-2">Draw</th>
                   </tr>
                 </thead>
@@ -66,17 +75,20 @@ export default async function AdminPage() {
                       <td className="p-2 font-mono">{stat.completed}</td>
                       <td className="p-2 font-mono">{stat.on_time}</td>
                       <td className="p-2 font-mono">{stat.day === 22 || stat.day === 24 ? <span aria-label="No written check">·</span> : stat.answer_count}</td>
+                      <td className="p-2 font-mono">{reminders.get(stat.day)?.sent ?? 0}</td>
                       <td className="p-2"><DrawControls day={stat.day} now={now} record={state.records.find((item) => item.day === stat.day)} /></td>
                     </tr>
                   ))}
                   <tr className="border-b border-brand-line align-top">
-                    <th scope="row" colSpan={4} className="p-2 font-medium">Grand draw</th>
+                    <th scope="row" colSpan={5} className="p-2 font-medium">Grand draw</th>
                     <td className="p-2"><DrawControls day={null} now={now} record={grand} /></td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </section>
+
+          <ReminderPreview now={now} reminders={state.reminders} />
 
           <section className="space-y-4 border-t border-brand-line pt-6" aria-labelledby="purge">
             <h2 id="purge" className={heading}>Participant retention</h2>
@@ -130,10 +142,44 @@ function DrawControls({ day, now, record }: { day: number | null; now: number; r
   );
 }
 
+function ReminderPreview({ now, reminders }: { now: number; reminders: ReminderStats }) {
+  const day = campaignDoorForDate(now);
+  const door = day === null ? undefined : doors[day - 1];
+  const message = door ? renderReminder(door, SITE_URL, `${SITE_URL}/advent/me#settings`) : null;
+  const issues = reminders.days.filter((stat) => stat.failed > 0 || stat.unconfirmed > 0);
+  return (
+    <section className="space-y-4 border-t border-brand-line pt-6" aria-labelledby="reminders">
+      <h2 id="reminders" className={heading}>Door reminders</h2>
+      <p className="text-sm text-brand-muted">{reminders.optedIn} participants opted in.</p>
+      {issues.length > 0 && (
+        <details className="text-sm text-brand-muted">
+          <summary className="cursor-pointer font-medium">Delivery issues</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {issues.map(({ day, failed, unconfirmed }) => <li key={day}>Door {day} · {failed} failed · {unconfirmed} unconfirmed</li>)}
+          </ul>
+        </details>
+      )}
+      {message ? (
+        <details className="max-w-2xl space-y-3">
+          <summary className="cursor-pointer text-sm font-medium">Preview today’s reminder</summary>
+          <p className="text-sm text-brand-muted">{message.subject}</p>
+          <iframe title="Reminder email preview" sandbox="" referrerPolicy="no-referrer" srcDoc={message.html} className="h-96 w-full rounded-[10px] border border-brand-line bg-brand-card" />
+          <details>
+            <summary className="cursor-pointer text-sm font-medium">Plain-text version</summary>
+            <pre className="whitespace-pre-wrap break-all rounded-[10px] bg-brand-surface p-3 text-sm text-brand-muted">{message.text}</pre>
+          </details>
+        </details>
+      ) : <p className="text-sm text-brand-muted">There is no reminder to preview today.</p>}
+    </section>
+  );
+}
+
 async function loadAdmin() {
   try {
-    const [stats, records] = await Promise.all([doorStats(), draws()]);
-    return { stats, records };
+    const [stats, records, reminders] = await Promise.all([
+      doorStats(), draws(), rpc<ReminderStats>("advent_reminder_stats"),
+    ]);
+    return { stats, records, reminders };
   } catch {
     return {};
   }

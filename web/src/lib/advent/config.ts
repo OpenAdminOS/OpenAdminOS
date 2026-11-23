@@ -8,6 +8,8 @@ export function rulesApproved() {
 
 export const RULES_VERSION = "2026-11-23";
 export const MARKETING_CONSENT_VERSION = "2026-11-23";
+export const REMINDERS_CONSENT_VERSION = "2026-11-23";
+export const REMINDERS_CONSENT_LABEL = "Email me when each door opens (optional)";
 export const MARKETING_CONSENT_LABEL = "Email me about OpenAdminOS releases (optional)";
 
 export function sessionSecret() {

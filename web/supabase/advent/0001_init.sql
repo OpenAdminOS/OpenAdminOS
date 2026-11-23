@@ -23,6 +23,9 @@ create table public.advent_participants (
   marketing_opt_in boolean not null default false,
   marketing_consent_text_version text,
   marketing_consent_at timestamptz,
+  reminders_opt_in boolean not null default false,
+  reminders_consent_text_version text,
+  reminders_consent_at timestamptz,
   ref_code text not null unique check (ref_code ~ '^[2-9A-HJ-NP-Z]{8}$'),
   referred_by uuid references public.advent_participants on delete set null,
   badge_public boolean not null default false,
@@ -30,8 +33,13 @@ create table public.advent_participants (
   check (
     (marketing_opt_in and marketing_consent_text_version is not null and marketing_consent_at is not null)
     or (not marketing_opt_in and marketing_consent_text_version is null and marketing_consent_at is null)
+  ),
+  check (
+    (reminders_opt_in and reminders_consent_text_version is not null and reminders_consent_at is not null)
+    or (not reminders_opt_in and reminders_consent_text_version is null and reminders_consent_at is null)
   )
 );
+create index advent_reminders_opt_in_idx on public.advent_participants (id) where reminders_opt_in;
 create index advent_referrer_idx on public.advent_participants (referred_by) where referred_by is not null;
 
 create table public.advent_login_tokens (
@@ -96,6 +104,23 @@ create table public.advent_draws (
 create unique index advent_daily_draw_once on public.advent_draws (day) where kind = 'daily';
 create unique index advent_grand_draw_once on public.advent_draws (kind) where kind = 'grand';
 
+create table public.advent_reminder_sends (
+  day int not null check (day between 1 and 24),
+  participant_id uuid not null references public.advent_participants on delete cascade,
+  claimed_at timestamptz not null default now(),
+  sent_at timestamptz,
+  resend_message_id text,
+  status text not null default 'claimed' check (status in ('claimed', 'sent', 'failed', 'unconfirmed')),
+  failure_code text,
+  primary key (day, participant_id),
+  check (
+    (status = 'sent' and sent_at is not null and resend_message_id is not null and failure_code is null)
+    or (status = 'claimed' and sent_at is null and resend_message_id is null and failure_code is null)
+    or (status in ('failed', 'unconfirmed') and sent_at is null and resend_message_id is null and failure_code is not null)
+  )
+);
+create index advent_reminder_participant_idx on public.advent_reminder_sends (participant_id);
+
 alter table public.advent_participants enable row level security;
 alter table public.advent_login_tokens enable row level security;
 alter table public.advent_answers enable row level security;
@@ -103,9 +128,11 @@ alter table public.advent_completions enable row level security;
 alter table public.advent_attempts enable row level security;
 alter table public.advent_feedback enable row level security;
 alter table public.advent_draws enable row level security;
+alter table public.advent_reminder_sends enable row level security;
 
 revoke all on table public.advent_participants, public.advent_login_tokens, public.advent_answers,
-  public.advent_completions, public.advent_attempts, public.advent_feedback, public.advent_draws
+  public.advent_completions, public.advent_attempts, public.advent_feedback, public.advent_draws,
+  public.advent_reminder_sends
   from public, anon, authenticated, service_role;
 grant select, insert, update, delete on table public.advent_participants, public.advent_login_tokens
   to service_role;
@@ -113,6 +140,7 @@ grant select, insert, update on table public.advent_answers to service_role;
 grant select, insert on table public.advent_completions, public.advent_feedback, public.advent_draws
   to service_role;
 grant select, insert, delete on table public.advent_attempts to service_role;
+grant select, insert, update on table public.advent_reminder_sends to service_role;
 
 create function public.advent_consume_token(
   p_hash text, p_now timestamptz, p_created_at timestamptz, p_ref_code text, p_allow_signup boolean
@@ -142,12 +170,15 @@ begin
       begin
         insert into public.advent_participants (
           email, handle, created_at, rules_version, rules_accepted_at, age_confirmed,
-          marketing_opt_in, marketing_consent_text_version, marketing_consent_at, ref_code, referred_by
+          marketing_opt_in, marketing_consent_text_version, marketing_consent_at,
+          reminders_opt_in, reminders_consent_text_version, reminders_consent_at, ref_code, referred_by
         ) values (
           signup->>'email', signup->>'handle', p_created_at, signup->>'rules_version',
           (signup->>'accepted_at')::timestamptz, true, (signup->>'marketing')::boolean,
           signup->>'marketing_version',
           case when (signup->>'marketing')::boolean then (signup->>'accepted_at')::timestamptz end,
+          coalesce((signup->>'reminders')::boolean, false), signup->>'reminders_version',
+          case when (signup->>'reminders')::boolean then (signup->>'accepted_at')::timestamptz end,
           p_ref_code, referrer
         ) on conflict (email) do nothing returning id into account_id;
       exception when unique_violation then
@@ -223,7 +254,8 @@ end;
 $$;
 
 create function public.advent_update_settings(
-  p_id uuid, p_handle text, p_badge boolean, p_marketing boolean, p_consent_version text
+  p_id uuid, p_handle text, p_badge boolean, p_marketing boolean, p_consent_version text,
+  p_reminders boolean, p_reminders_consent_version text
 ) returns boolean language plpgsql security invoker set search_path = public, pg_temp as $$
 begin
   update public.advent_participants
@@ -231,7 +263,14 @@ begin
       marketing_consent_text_version = case when p_marketing
         then coalesce(marketing_consent_text_version, p_consent_version) end,
       marketing_consent_at = case when p_marketing
-        then coalesce(marketing_consent_at, clock_timestamp()) end
+        then coalesce(marketing_consent_at, clock_timestamp()) end,
+      reminders_opt_in = coalesce(p_reminders, reminders_opt_in),
+      reminders_consent_text_version = case
+        when p_reminders is null then reminders_consent_text_version
+        when p_reminders then coalesce(reminders_consent_text_version, p_reminders_consent_version) end,
+      reminders_consent_at = case
+        when p_reminders is null then reminders_consent_at
+        when p_reminders then coalesce(reminders_consent_at, clock_timestamp()) end
     where id = p_id;
   return found;
 end;
@@ -296,17 +335,86 @@ begin
 end;
 $$;
 
+create function public.advent_reminder_eligible(p_day int)
+returns setof uuid language sql stable security invoker set search_path = public, pg_temp as $$
+  select p.id from public.advent_participants as p
+  where p.reminders_opt_in
+    and not exists (
+      select 1 from public.advent_completions as c where c.participant_id = p.id and c.day = p_day
+    )
+    and not exists (
+      select 1 from public.advent_reminder_sends as s where s.participant_id = p.id and s.day = p_day
+    );
+$$;
+
+create function public.advent_reminder_count(p_day int)
+returns int language sql stable security invoker set search_path = public, pg_temp as $$
+  select count(*)::int from public.advent_reminder_eligible(p_day);
+$$;
+
+create function public.advent_reminder_claim(p_day int, p_limit int)
+returns jsonb language sql security invoker set search_path = public, extensions, pg_temp as $$
+  with recipients as (
+    select p.id, p.email from public.advent_participants as p
+    where p.reminders_opt_in and p.id in (select * from public.advent_reminder_eligible(p_day))
+    order by p.id
+    limit greatest(0, least(p_limit, 100))
+    for update of p skip locked
+  ), claimed as (
+    insert into public.advent_reminder_sends (day, participant_id)
+    select p_day, id from recipients
+    on conflict (day, participant_id) do nothing
+    returning participant_id
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'email', r.email) order by r.id), '[]'::jsonb)
+  from recipients as r
+  join claimed as c on c.participant_id = r.id;
+$$;
+
+create function public.advent_reminder_record(p_day int, p_outcomes jsonb)
+returns void language sql security invoker set search_path = public, pg_temp as $$
+  update public.advent_reminder_sends as s
+  set status = outcome.status,
+    sent_at = case when outcome.status = 'sent' then clock_timestamp() end,
+    resend_message_id = outcome.message_id, failure_code = outcome.code
+  from jsonb_to_recordset(p_outcomes) as outcome(id uuid, status text, message_id text, code text)
+  where s.day = p_day and s.participant_id = outcome.id and s.status = 'claimed'
+    and outcome.status in ('sent', 'failed', 'unconfirmed');
+$$;
+
+create function public.advent_reminder_stats()
+returns jsonb language sql stable security invoker set search_path = public, pg_temp as $$
+  select jsonb_build_object(
+    'optedIn', (select count(*) from public.advent_participants where reminders_opt_in),
+    'days', coalesce(jsonb_agg(jsonb_build_object(
+      'day', day, 'sent', sent, 'failed', failed, 'unconfirmed', unconfirmed
+    ) order by day), '[]'::jsonb)
+  )
+  from (
+    select day, count(*) filter (where status = 'sent') as sent,
+      count(*) filter (where status = 'failed') as failed,
+      count(*) filter (where status in ('claimed', 'unconfirmed')) as unconfirmed
+    from public.advent_reminder_sends group by day
+  ) as counts;
+$$;
+
 revoke execute on function public.advent_consume_token(text, timestamptz, timestamptz, text, boolean),
   public.advent_complete_door(uuid, int, timestamptz, boolean, text, text),
-  public.advent_update_settings(uuid, text, boolean, boolean, text),
+  public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
-  public.advent_draw_candidates(int), public.advent_purge(timestamptz)
+  public.advent_draw_candidates(int), public.advent_purge(timestamptz),
+  public.advent_reminder_eligible(int), public.advent_reminder_count(int),
+  public.advent_reminder_claim(int, int), public.advent_reminder_record(int, jsonb),
+  public.advent_reminder_stats()
   from public, anon, authenticated;
 grant execute on function public.advent_consume_token(text, timestamptz, timestamptz, text, boolean),
   public.advent_complete_door(uuid, int, timestamptz, boolean, text, text),
-  public.advent_update_settings(uuid, text, boolean, boolean, text),
+  public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
-  public.advent_draw_candidates(int), public.advent_purge(timestamptz)
+  public.advent_draw_candidates(int), public.advent_purge(timestamptz),
+  public.advent_reminder_eligible(int), public.advent_reminder_count(int),
+  public.advent_reminder_claim(int, int), public.advent_reminder_record(int, jsonb),
+  public.advent_reminder_stats()
   to service_role;
 
 commit;

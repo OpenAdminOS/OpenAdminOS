@@ -6,7 +6,7 @@ import { SESSION_COOKIE, SESSION_SECONDS, signSession } from "~/lib/advent/auth"
 import { hashAnswer, normalizeAnswer } from "~/lib/advent/answers";
 import {
   adventEnabled, isAdventAdmin, MARKETING_CONSENT_VERSION, missingLoginConfig,
-  rulesApproved, sessionSecret, storageConfig,
+  REMINDERS_CONSENT_VERSION, rulesApproved, sessionSecret, storageConfig,
 } from "~/lib/advent/config";
 import { AdventStorageError, currentAdmin, currentParticipant, db, rpc } from "~/lib/advent/db";
 import type { Participant } from "~/lib/advent/db";
@@ -120,14 +120,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const email = parseEmail(value(body, "email"));
     if (!email) return fail(400, "Enter a valid email address.");
-    let signup: { handle: string; ref: string; marketing: boolean; acceptedAt: string } | undefined;
+    let signup: { handle: string; ref: string; marketing: boolean; reminders: boolean; acceptedAt: string } | undefined;
     if (action === "sign-up") {
       if (!rulesApproved()) return fail(409, "Rules are being finalised. Registration will open once they are available.");
       if (now >= CAMPAIGN_CLOSE) return fail(409, "Campaign registration is closed.");
       const handle = value(body, "handle").trim();
       if (!validHandle(handle)) return fail(400, "Choose a handle using 3 to 24 lowercase letters, digits or internal hyphens. Some names are reserved.");
       if (body.age !== "on" || body.rules !== "on") return fail(400, "Confirm that you are 18 or older and accept the campaign rules.");
-      signup = { handle, ref: value(body, "ref"), marketing: body.marketing === "on", acceptedAt: new Date().toISOString() };
+      signup = {
+        handle,
+        ref: value(body, "ref"),
+        marketing: body.marketing === "on",
+        reminders: body.reminders === "on",
+        acceptedAt: new Date().toISOString(),
+      };
     }
 
     try {
@@ -192,12 +198,15 @@ async function updateSettings(account: Participant, body: Payload) {
   const handle = value(body, "handle").trim();
   if (!validHandle(handle)) return fail(400, "Choose a handle using 3 to 24 lowercase letters, digits or internal hyphens. Some names are reserved.");
   try {
+    const reminders = body.reminders === "on";
     const saved = await rpc<boolean>("advent_update_settings", {
       p_id: account.id,
       p_handle: handle,
       p_badge: body.badge === "on",
       p_marketing: body.marketing === "on",
       p_consent_version: MARKETING_CONSENT_VERSION,
+      p_reminders: reminders === (body.reminders_initial === "on") ? null : reminders,
+      p_reminders_consent_version: REMINDERS_CONSENT_VERSION,
     });
     if (!saved) return fail(401, "Sign in to Advent of Admin and try again.");
   } catch (error) {

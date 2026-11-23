@@ -19,6 +19,17 @@ function berlinTime(day: number, hour: number) {
 }
 
 export const CAMPAIGN_CLOSE = berlinTime(32, 0);
+const campaignDayFormatter = new Intl.DateTimeFormat("en-GB", { timeZone: CAMPAIGN_ZONE, day: "numeric" });
+
+export function campaignDoorForDate(now: number) {
+  if (now < berlinTime(1, 0) || now >= berlinTime(DOOR_COUNT + 1, 0)) return null;
+  return Number(campaignDayFormatter.format(now));
+}
+
+export function reminderDoorAt(now: number) {
+  const day = campaignDoorForDate(now);
+  return day !== null && now >= doorUnlock(day) ? day : null;
+}
 
 export function parseDay(value: string) {
   return /^(?:[1-9]|1[0-9]|2[0-4])$/.test(value) ? Number(value) : null;

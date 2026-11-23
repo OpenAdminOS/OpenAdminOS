@@ -11,6 +11,7 @@ export type Participant = {
   ref_code: string;
   badge_public: boolean;
   marketing_opt_in: boolean;
+  reminders_opt_in: boolean;
 };
 
 export type Completion = { day: number; completed_at: string; on_time: boolean };
@@ -88,7 +89,7 @@ export async function currentParticipant() {
   const id = secret && session ? verifySession(session, Date.now(), secret) : null;
   if (!id) return null;
   const [account] = await db<Participant[]>("advent_participants", {
-    select: "id,email,handle,ref_code,badge_public,marketing_opt_in",
+    select: "id,email,handle,ref_code,badge_public,marketing_opt_in,reminders_opt_in",
     id: `eq.${id}`,
   });
   return account ?? null;

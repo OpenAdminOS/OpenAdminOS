@@ -13,6 +13,7 @@ export const env = createEnv({
     ADVENT_ADMIN_EMAILS: z.string().optional(),
     ADVENT_NOW: z.string().optional(),
     ADVENT_RULES_APPROVED: z.string().optional(),
+    ADVENT_REMINDERS_SEND: z.string().optional(),
     NODE_ENV: z.enum(["development", "test", "production"]),
     // Stats API — only required at runtime for the /api/install + /api/flush routes.
     // Validation is per-handler (so a request without these set fails 500 with a
@@ -40,6 +41,7 @@ export const env = createEnv({
     ADVENT_ADMIN_EMAILS: process.env.ADVENT_ADMIN_EMAILS,
     ADVENT_NOW: process.env.ADVENT_NOW,
     ADVENT_RULES_APPROVED: process.env.ADVENT_RULES_APPROVED,
+    ADVENT_REMINDERS_SEND: process.env.ADVENT_REMINDERS_SEND,
     UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
     UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
     OPENADMINOS_GITHUB_TOKEN: process.env.OPENADMINOS_GITHUB_TOKEN,

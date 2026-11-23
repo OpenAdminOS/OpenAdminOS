@@ -145,6 +145,13 @@ Accepted answers are stored only as hashes in the database. The campaign is
 disabled by default behind `ADVENT_ENABLED`, and registration also requires
 `ADVENT_RULES_APPROVED`.
 
+Participants can opt in to daily reminders separately from release emails.
+An authenticated scheduled POST checks the current Berlin date after the door
+opens, skips participants who already completed it, and claims each participant
+once per door before calling Resend. The default is a count-only dry run.
+`ADVENT_REMINDERS_SEND` explicitly enables delivery. Reminder emails use a signed
+unsubscribe link and a sender domain with open and click tracking disabled.
+
 ### Marketing website canonical host
 
 The product domain remains `openadminos.com`. The deployed marketing site

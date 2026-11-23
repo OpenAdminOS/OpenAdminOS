@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { SITE_URL } from "~/app/seo";
-import { MARKETING_CONSENT_LABEL, isAdventAdmin, sessionSecret, storageConfig } from "~/lib/advent/config";
+import { MARKETING_CONSENT_LABEL, REMINDERS_CONSENT_LABEL, isAdventAdmin, sessionSecret, storageConfig } from "~/lib/advent/config";
 import { completions, currentParticipant, rpc } from "~/lib/advent/db";
 import { BADGE_DOORS, GRAND_DOORS, REFERRAL_CAP, earnsBadge, grandEntries } from "~/lib/advent/eligibility";
 import { campaignNow } from "~/lib/advent/time";
@@ -60,6 +60,10 @@ export default async function MyAdventPage() {
                 <label className="flex items-baseline gap-2 text-sm">
                   <input type="checkbox" name="marketing" defaultChecked={account.marketing_opt_in} /> {MARKETING_CONSENT_LABEL}
                 </label>
+                <label className="flex items-baseline gap-2 text-sm">
+                  <input type="checkbox" name="reminders" defaultChecked={account.reminders_opt_in} /> {REMINDERS_CONSENT_LABEL}
+                </label>
+                <input type="hidden" name="reminders_initial" value={account.reminders_opt_in ? "on" : "off"} />
               </ActionForm>
             </div>
             <ActionForm action="sign-out" label="Sign out" quiet />

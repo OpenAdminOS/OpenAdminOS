@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 
 export const SESSION_COOKIE = "__Host-openadminos-advent";
 export const SESSION_SECONDS = 30 * 24 * 60 * 60;
+export const REMINDER_LINK_SECONDS = 90 * 24 * 60 * 60;
 export const TOKEN_MS = 15 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const DIGEST = /^[A-Za-z0-9_-]{43}$/;
@@ -15,15 +16,31 @@ function matchesSignature(value: string, expected: string) {
 }
 
 export function signSession(participantId: string, now: number, secret: string) {
-  const payload = `${participantId}.${Math.floor(now / 1000) + SESSION_SECONDS}`;
-  return `${payload}.${signature("advent-session", payload, secret)}`;
+  return signParticipant("advent-session", participantId, now, SESSION_SECONDS, secret);
 }
 
 export function verifySession(value: string, now: number, secret: string) {
+  return verifyParticipant("advent-session", value, now, secret);
+}
+
+export function signReminderUnsubscribe(participantId: string, now: number, secret: string) {
+  return signParticipant("advent-reminders-unsubscribe", participantId, now, REMINDER_LINK_SECONDS, secret);
+}
+
+export function verifyReminderUnsubscribe(value: string, now: number, secret: string) {
+  return verifyParticipant("advent-reminders-unsubscribe", value, now, secret);
+}
+
+function signParticipant(purpose: string, participantId: string, now: number, lifetime: number, secret: string) {
+  const payload = `${participantId}.${Math.floor(now / 1000) + lifetime}`;
+  return `${payload}.${signature(purpose, payload, secret)}`;
+}
+
+function verifyParticipant(purpose: string, value: string, now: number, secret: string) {
   const [participantId, expires, mac, extra] = value.split(".");
   if (!participantId || !UUID.test(participantId) || !expires || !/^\d{1,12}$/.test(expires)
     || !mac || extra !== undefined || Number(expires) * 1000 <= now) return null;
-  return matchesSignature(mac, signature("advent-session", `${participantId}.${expires}`, secret))
+  return matchesSignature(mac, signature(purpose, `${participantId}.${expires}`, secret))
     ? participantId
     : null;
 }

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { getRedis, keys } from "../stats/redis";
 import { createLoginToken, redeemLoginToken } from "./auth";
-import { MARKETING_CONSENT_VERSION, RULES_VERSION } from "./config";
+import { MARKETING_CONSENT_VERSION, REMINDERS_CONSENT_VERSION, RULES_VERSION } from "./config";
 import { db, rpc } from "./db";
 import { newReferralCode, parseReferral } from "./identity";
 
@@ -46,7 +46,7 @@ export async function allowLoginEmail(request: Request, email: string, secret: s
 
 export async function issueLoginLink(
   origin: string, email: string, secret: string,
-  signup?: { handle: string; ref: string; marketing: boolean; acceptedAt: string },
+  signup?: { handle: string; ref: string; marketing: boolean; reminders: boolean; acceptedAt: string },
 ) {
   const [account] = await db<{ id: string }[]>("advent_participants", {
     select: "id",
@@ -62,6 +62,8 @@ export async function issueLoginLink(
     ref: parseReferral(signup.ref),
     marketing: signup.marketing,
     marketing_version: signup.marketing ? MARKETING_CONSENT_VERSION : null,
+    reminders: signup.reminders,
+    reminders_version: signup.reminders ? REMINDERS_CONSENT_VERSION : null,
     accepted_at: signup.acceptedAt,
     rules_version: RULES_VERSION,
   } : null;
