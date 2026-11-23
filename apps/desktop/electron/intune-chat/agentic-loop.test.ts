@@ -594,6 +594,12 @@ describe("compact budget for a local model in Chat", () => {
       }
       // Without the compact budget the provider error is the provider's, as before.
       await assert.rejects(runAgenticChat(baseInput(store, overflow)), /context size too small/);
+      // The agent runtime's typed prompt fit refusal (PR #214) is a context limit too.
+      const typedError = Object.assign(new Error("llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384."), { code: "context-too-small" });
+      const typed: RunLlmApi = { available: true, async complete() { throw typedError; }, async *stream() {} };
+      const typedResult = await runAgenticChat({ ...baseInput(store, typed), budget: "compact" });
+      assert.equal(typedResult.ok, false);
+      if (!typedResult.ok) assert.equal(typedResult.failureReason, "context-too-small");
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });

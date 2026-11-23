@@ -482,15 +482,17 @@ export async function runAgenticChat(
     } catch (caught) {
       // A local prompt that overflowed the context window falls back; any other error is the provider's.
       const detail = caught instanceof Error ? caught.message : String(caught);
+      // The agent runtime's own prompt fit refusal (ContextTooSmallError, PR #214) is a context limit too.
+      const typedContextLimit = (caught as { code?: unknown } | null)?.code === "context-too-small" || /tokens of context \(\S+ for the prompt and \S+ for the answer\)/i.test(detail);
       // A local model that could not be reached ends the loop with a reason, as an overflow does; the fallback
       // then meets the same provider and shows its designed error.
-      if (compact && !input.signal?.aborted && PROVIDER_UNREACHABLE.test(detail) && !CONTEXT_TOO_SMALL.test(detail)) {
+      if (compact && !input.signal?.aborted && PROVIDER_UNREACHABLE.test(detail) && !CONTEXT_TOO_SMALL.test(detail) && !typedContextLimit) {
         input.modelStep?.finish({ kind: "unreachable" });
         withdrawAnswer();
         if (invalidQueries.size) return blockedAnswer();
         return { ok: false, reason: "provider-unavailable", failureReason: "provider-unavailable", failureDetail: detail, fallbackNotice: LOCAL_FALLBACK_NOTICES["provider-unavailable"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };
       }
-      if (!compact || input.signal?.aborted || !CONTEXT_TOO_SMALL.test(detail)) throw caught;
+      if (!compact || input.signal?.aborted || !(CONTEXT_TOO_SMALL.test(detail) || typedContextLimit)) throw caught;
       input.modelStep?.finish({ kind: "context-limit" });
       withdrawAnswer();
       if (invalidQueries.size) return blockedAnswer();
