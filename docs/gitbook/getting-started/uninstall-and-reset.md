@@ -174,7 +174,9 @@ key that protects them, provider keys, chats, history and logs. That includes
 the IT policy file `policy.json` in that folder, so if IT placed one there, IT
 must deploy it again after a reinstall. The machine-wide policy file
 (`C:\ProgramData\OpenAdminOS\policy.json`) and other accounts' data folders
-stay. An update never removes data.
+stay. It also removes `%APPDATA%\@openadminos\desktop` if that folder exists
+(it is named after the package; OpenAdminOS does not normally create it). An
+update never removes data.
 
 The uninstaller does not remove the `OpenAdminOS Scheduler` scheduled task or
 the update cache (`%LOCALAPPDATA%\@openadminosdesktop-updater`). Reset first and
