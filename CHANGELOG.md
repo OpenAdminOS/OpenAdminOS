@@ -6,6 +6,26 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [0.8.0] - 2026-11-23
 
+### Highlights
+
+- Manage each company as an organization. Use Connections to connect Intune, Entra, and Defender individually and see what each connection reads or sends.
+- Open Chat without signing in to Microsoft 365. Choose a model, ask documentation questions, and connect a service when a question needs tenant data.
+- Deploy `policy.json` to set the provider and model, allow specific public references, and lock settings for managed installs.
+- Chat and agent runs handle local model limits more clearly. When a request outgrows the selected model, model fit offers recovery options, including a larger local model or an approved one-time hosted request in Chat.
+- Use Lemonade Server locally or GitHub Copilot Fusion through the Copilot provider. Marketplace adds references such as Microsoft Learn, KQL Search, and Splashtop Docs.
+
+**Changed.** Runs open on a full page with live progress and data destinations. Chat shows the sources it used, and agent write plans are checked again before changes are applied.
+
+**Removed.** Pilot mode and its sample data.
+
+**Fixed.** Local model context and timeout errors give specific recovery steps. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs.
+
+### Upgrading from 0.7.2
+
+The first launch after updating removes any leftover pilot sample tenant and its data once. Existing schedules move to the active tenant's organization or stay paused and unassigned. Existing gateway clients need to pair again. On Windows, uninstalling now removes the user's local data folder, including a user-level `policy.json`.
+
+With a local model provider, tenant data and prompts sent to the model stay on this device.
+
 ### Added
 
 - Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review (mockup 36).
