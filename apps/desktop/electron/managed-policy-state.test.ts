@@ -18,6 +18,7 @@ import type { ConfigurationAuditEvent } from "./configuration-audit.js";
 import { MCP_CATALOG, type McpCatalogEntry } from "./mcp/catalog.js";
 import { McpHost, McpHostError } from "./mcp/host.js";
 import { ManagedPolicyError, loadManagedPolicy } from "./managed-policy.js";
+import { checkOllama } from "./provider-detail.js";
 import { AppStateStore } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -66,7 +67,7 @@ const catalog: McpCatalogEntry[] = [
  * with it, there is no state file, so the first-run scan is pending.
  */
 async function makeFixture(
-  options: { policy?: ManagedPolicyStatus; initial?: Record<string, unknown>; fresh?: boolean; providers?: () => ProviderSummary[]; useRuntimeAdapter?: boolean } = {},
+  options: { policy?: ManagedPolicyStatus; initial?: Record<string, unknown>; fresh?: boolean; providers?: () => Promise<ProviderSummary[]> | ProviderSummary[]; useRuntimeAdapter?: boolean } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-managed-policy-"));
   const statePath = join(dir, "state.json");
@@ -96,12 +97,12 @@ async function makeFixture(
       appVersion: "0.8.0",
       mcpCatalog: catalog,
       providerListFactory: options.providers ?? (() => readyProviders()),
-      ...(!options.useRuntimeAdapter ? {
+      ...(options.useRuntimeAdapter ? { userDataPath: dir } : {
         llmFactory: async (providerId, model) => {
           llmCalls.push([providerId, model]);
           return { available: true } as never;
         },
-      } : {}),
+      }),
       interactiveSignIn: async (request) => {
         signIns.push(request);
         throw new Error("sign-in is not part of this test");
@@ -168,39 +169,22 @@ describe("managed policy: providers", () => {
     }
   });
 
-  it("blocks cloud aliases under a local-only list unless IT locks that model", async () => {
+  it("offers Ollama Cloud aliases under the allowlist and requires hosted Chat consent", async (t) => {
     const alias = "cloud-writer:latest";
-    const providers = () => readyProviders().map((provider) => provider.id === "ollama" ? {
-      ...provider, models: [alias, "writer:latest"], defaultModel: alias, remoteModels: [alias],
-    } : provider);
-    const fixture = await makeFixture({ policy: await policyOf(LOCAL_ONLY), providers });
-    try {
-      const ollama = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
-      assert.deepEqual(ollama?.models, ["writer:latest"]);
-      assert.equal(ollama?.defaultModel, "writer:latest");
-      await assert.rejects(fixture.store.setActiveModel("ollama", alias), /policy\.json.*cloud-writer:latest/);
-      await assert.rejects(buildLlm(fixture.store, "ollama", alias), /policy\.json.*cloud-writer:latest/);
-      assert.deepEqual(fixture.llmCalls, []);
-
-      await fixture.relaunch(await policyOf({ ...LOCAL_ONLY, defaultProvider: "ollama", defaultModel: alias }));
-      const locked = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
-      assert.deepEqual(locked?.models, [alias]);
-      assert.equal(locked?.defaultModel, alias);
-      await buildLlm(fixture.store, "ollama", alias);
-      assert.deepEqual(fixture.llmCalls, [["ollama", alias]]);
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("refuses to send when a previously local alias is now cloud-backed", async () => {
-    const alias = "writer:latest";
-    let chatSends = 0;
-    const server = createServer((request, response) => {
+    const local = "writer:latest";
+    const chatModels: string[] = [];
+    const server = createServer(async (request, response) => {
       if (request.url === "/api/tags") {
-        response.end(JSON.stringify({ models: [{ name: alias, remote_model: "cloud-writer" }] }));
+        response.end(JSON.stringify({ models: [{ name: alias, remote_model: "cloud-writer" }, { name: local }] }));
+      } else if (request.url === "/api/show") {
+        response.end(JSON.stringify({ capabilities: ["completion"] }));
+      } else if (request.url === "/api/chat") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const { model } = JSON.parse(Buffer.concat(chunks).toString()) as { model: string };
+        chatModels.push(model);
+        response.end(JSON.stringify({ model, message: { role: "assistant", content: "Pre-provisioning runs the device phase first." }, done: true }) + "\n");
       } else {
-        if (request.url === "/api/chat") chatSends++;
         response.writeHead(404).end();
       }
     });
@@ -209,22 +193,53 @@ describe("managed policy: providers", () => {
     assert.ok(address && typeof address !== "string");
     const previous = process.env.OPENAGENTS_OLLAMA_URL;
     process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${address.port}`;
-    const fixture = await makeFixture({
-      policy: await policyOf(LOCAL_ONLY), useRuntimeAdapter: true,
-      providers: () => readyProviders().map((provider) => provider.id === "ollama"
-        ? { ...provider, models: [alias], defaultModel: alias }
-        : provider),
-    });
-    try {
-      const llm = await buildLlm(fixture.store, "ollama", alias);
-      await assert.rejects(llm.complete({ prompt: "Reviewed local request" }), /policy\.json.*writer:latest/);
-      assert.equal(chatSends, 0);
-    } finally {
+    t.after(() => {
       if (previous === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
       else process.env.OPENAGENTS_OLLAMA_URL = previous;
       server.close();
-      await fixture.close();
-    }
+    });
+
+    const policy = { allowedProviders: ["ollama", "lm-studio"], allowedPublicReferences: [] };
+    const fixture = await makeFixture({
+      policy: await policyOf(policy),
+      useRuntimeAdapter: true,
+      providers: async () => Promise.all(readyProviders().map((provider) =>
+        provider.id === "ollama" ? checkOllama(provider) : provider)),
+    });
+    t.after(() => fixture.close());
+
+    const ollama = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
+    assert.deepEqual(ollama?.models, [alias, local]);
+    assert.equal(ollama?.defaultModel, local);
+    assert.deepEqual(ollama?.remoteModels, [alias]);
+    const state = await fixture.store.setActiveModel("ollama", alias);
+    assert.equal(state.activeModelByProviderId?.ollama, alias);
+
+    const input = { content: "How does Windows Autopilot pre-provisioning work?" };
+    await assert.rejects(
+      fixture.store.streamIntuneChatMessage(input, () => undefined),
+      /Hosted provider confirmation is required/,
+    );
+    assert.deepEqual(chatModels, []);
+    await fixture.store.streamIntuneChatMessage({
+      ...input,
+      hostedProviderConsent: {
+        noTenant: true,
+        providerId: "ollama",
+        model: alias,
+        acknowledgedAt: new Date().toISOString(),
+        ollamaDestination: "ollama-cloud",
+      },
+    }, () => undefined);
+    assert.ok(chatModels.length > 0);
+    assert.ok(chatModels.every((model) => model === alias));
+
+    await fixture.relaunch(await policyOf({ ...policy, defaultProvider: "ollama", defaultModel: local, lock: ["defaultModel"] }));
+    const locked = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
+    assert.deepEqual(locked?.models, [local]);
+    assert.equal(locked?.defaultModel, local);
+    await assert.rejects(fixture.store.setActiveModel("ollama", alias), ManagedPolicyError);
+    await assert.rejects(buildLlm(fixture.store, "ollama", alias), ManagedPolicyError);
   });
 
   it("sets and locks the provider and model on a fresh install", async () => {

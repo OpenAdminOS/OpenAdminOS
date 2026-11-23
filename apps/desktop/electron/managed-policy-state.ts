@@ -1,7 +1,6 @@
 import {
   MANAGED_POLICY_SETTING_KEYS,
   isManagedSettingLocked,
-  isRemoteBackedModel,
   managedLockedModel,
   managedProviderAllowed,
   providerCatalog,
@@ -118,16 +117,6 @@ export function applyManagedPolicy<T extends PolicyApplicableState>(state: T, st
   return next;
 }
 
-export function policyRestrictsOllamaCloud(status: ManagedPolicyStatus | undefined): boolean {
-  const allowed = status?.values.allowedProviders;
-  // TODO(ugur): confirm allowedProviders without a hosted provider also blocks Ollama Cloud models
-  return allowed !== undefined && !providerCatalog.some((provider) => !provider.isLocal && allowed.includes(provider.id));
-}
-
-export function managedOllamaCloudMessage(model?: string): string {
-  return `Your IT policy (policy.json) allows only on-device Ollama models. ${model ? `OpenAdminOS could not confirm that ${model} runs on this device. ` : ""}Choose an on-device Ollama model or ask IT to update the policy.`;
-}
-
 /**
  * The providers the renderer and every main-process caller see. Providers
  * the policy does not allow are left out. A locked model is the only model
@@ -141,21 +130,8 @@ export function applyManagedPolicyToProviders(
   if (!status) return [...providers];
   return providers
     .filter((provider) => managedProviderAllowed(status, provider.id))
-    .map((original) => {
-      const model = managedLockedModel(status, original.id);
-      let provider = original;
-      if (original.id === "ollama" && original.isLocal && policyRestrictsOllamaCloud(status)) {
-        const allowed = (name: string) => name === model || !isRemoteBackedModel(original, name);
-        const models = original.models.filter(allowed);
-        const { defaultModel, ...rest } = original;
-        provider = {
-          ...rest,
-          models,
-          ...(defaultModel && allowed(defaultModel) ? { defaultModel } : models[0] ? { defaultModel: models[0] } : {}),
-          ...(original.models.length > 0 && models.length === 0
-            ? { status: "error", detail: managedOllamaCloudMessage() } : {}),
-        };
-      }
+    .map((provider) => {
+      const model = managedLockedModel(status, provider.id);
       // Not checked yet (the first-run scan is pending), or the check failed: nothing is
       // known about its models, and the check's own reason is the one to show.
       // A failed check is the scan's rule: `checkFailed`, or a CLI whose status request failed.
