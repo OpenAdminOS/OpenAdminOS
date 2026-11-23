@@ -379,7 +379,10 @@ definition:
     );
     const carried = JSON.stringify(`llm.complete: ${reasoning.message}`);
     const caretNote = JSON.stringify("config.json:3\n  \"model\": gpt-oss\n           ^\n");
-    const cases: Array<{ agent: string; cause: boolean }> = [
+    const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+    const carriedTimeout = JSON.stringify(`llm.complete: ${timeout.message}`);
+    // With reuse, the script sent llm-1 twice: a timeout, then the reasoning failure.
+    const cases: Array<{ agent: string; cause: boolean; reuse?: boolean }> = [
       // Throws the brokered failure.
       { agent: `throw new Error(${carried});`, cause: true },
       // A rejected promise carrying it.
@@ -400,6 +403,10 @@ definition:
       { agent: `import { Worker } from "node:worker_threads"; const worker = new Worker(new URL("./worker.mjs", import.meta.url)); worker.on("error", () => setTimeout(() => process.exit(1), 50));`, cause: false },
       // Logs the failure, then ends on an error of its own.
       { agent: `console.error(new Error(${carried})); throw new Error("ENOSPC: no space left on device, write");`, cause: false },
+      // A reused id, the reasoning failure wrapped: the error carrying the id decides.
+      { agent: `throw new Error("Could not write summary", { cause: Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }) });`, cause: true, reuse: true },
+      // A reused id, the earlier timeout wrapped and rethrown.
+      { agent: `throw new Error("Could not write summary", { cause: Object.assign(new Error(${carriedTimeout}), { brokerRequestId: "llm-1" }) });`, cause: false, reuse: true },
     ];
     for (const testCase of cases) {
       const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-exit-"));
@@ -411,6 +418,10 @@ definition:
         id: "mxc",
         probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
         run: async (input) => {
+          if (testCase.reuse) {
+            const first = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+            assert.equal(first.ok, false);
+          }
           const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
           assert.equal(llm.ok, false);
           // The command line the app builds, run by a real Node process.
@@ -447,7 +458,8 @@ definition:
 `);
       const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
       const ctx = fakeRunContext();
-      ctx.llm.complete = async () => { throw reasoning; };
+      const replies = testCase.reuse ? [timeout, reasoning] : [reasoning];
+      ctx.llm.complete = async () => { throw replies.length > 1 ? replies.shift()! : replies[0]!; };
       const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
       assert.ok(error instanceof Error, testCase.agent);
       assert.equal(reasoningWithoutAnswerInChain(error), testCase.cause, testCase.agent);

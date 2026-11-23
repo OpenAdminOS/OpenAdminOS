@@ -78,6 +78,9 @@ it("keeps every failure of a reused request id and needs the ended message to pi
   for (let i = 0; i < 2; i += 1) await broker.handle({ id: "same", method: "llm.complete", params: { prompt: "Summarize." } });
   assert.equal(broker.llmFailureFor({ message: `llm.complete: ${timeout.message}`, brokerRequestId: "same" }), undefined);
   assert.equal(broker.llmFailureFor({ message: "wrapped by the script", brokerRequestId: "same" }), undefined);
+  // A wrapper around the failure carrying the id: its message decides.
+  assert.equal(broker.llmFailureFor({ message: "Could not write summary", brokerRequestId: "same", brokerErrorMessage: `llm.complete: ${onlyReasoning.message}` }), onlyReasoning);
+  assert.equal(broker.llmFailureFor({ message: "Could not write summary", brokerRequestId: "same", brokerErrorMessage: `llm.complete: ${timeout.message}` }), undefined);
   // It ends with the reasoning failure itself: that one is the cause.
   assert.equal(broker.llmFailureFor({ message: `llm.complete: ${onlyReasoning.message}`, brokerRequestId: "same" }), onlyReasoning);
 });

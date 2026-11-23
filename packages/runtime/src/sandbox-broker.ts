@@ -53,6 +53,8 @@ export interface ScriptExitRecord {
   message: string;
   /** The broker request whose failure the error, or one in its cause chain, carries. */
   brokerRequestId?: string;
+  /** The message of the error that carries `brokerRequestId`, which may be a cause of the one the script ended with. */
+  brokerErrorMessage?: string;
 }
 
 export interface SandboxBrokerInput {
@@ -135,14 +137,18 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         ? lastFailure
         : undefined,
     llmFailureFor: (endedWith) => {
-      const isBrokerFailure = ({ method, error }: { method: string; error: Error }) =>
-        endedWith.message === error.message || endedWith.message === `${method}: ${error.message}`;
+      const matches = (message: string) => ({ method, error }: { method: string; error: Error }) =>
+        message === error.message || message === `${method}: ${error.message}`;
+      const isBrokerFailure = matches(endedWith.message);
       let candidates: Array<{ method: string; error: Error }>;
       if (endedWith.brokerRequestId !== undefined) {
         const forId = failures.get(endedWith.brokerRequestId) ?? [];
         // One failure under the id is the one the script ended with. With a
-        // reused id, only the failures whose message the script ended with.
-        candidates = forId.length === 1 ? forId : forId.filter(isBrokerFailure);
+        // reused id, only the failures whose message the error carrying the
+        // id has, which may be a cause the script wrapped.
+        candidates = forId.length === 1
+          ? forId
+          : forId.filter(matches(endedWith.brokerErrorMessage ?? endedWith.message));
       } else {
         // Without an id, only an error that is the broker failure itself.
         candidates = [...failures.values()].flat().filter(isBrokerFailure);

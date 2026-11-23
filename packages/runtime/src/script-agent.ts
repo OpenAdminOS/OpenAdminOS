@@ -40,8 +40,9 @@ const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
 /**
  * Loaded into the script's Node process before its entrypoint: records the
  * error the script ends with (an uncaught exception or an unhandled
- * rejection), without changing how Node reports it or exits: its message and
- * the broker request id it or an error in its cause chain carries. Only the
+ * rejection), without changing how Node reports it or exits: its message, and
+ * the broker request id it or an error in its cause chain carries with the
+ * message of the error that carries it. Only the
  * launched process's main thread records: the destination is taken out of
  * the environment as the hook loads, so Workers and child processes, which
  * inherit the hook, have none. An error the script handles itself (an
@@ -56,11 +57,13 @@ if (isMainThread && target) {
     if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
     try {
       const message = error instanceof Error ? String(error.message) : String(error);
-      let brokerRequestId;
+      let carrier;
       for (let current = error, depth = 0; current && depth < 8; current = current.cause, depth += 1) {
-        if (typeof current.brokerRequestId === "string") { brokerRequestId = current.brokerRequestId; break; }
+        if (typeof current.brokerRequestId === "string") { carrier = current; break; }
       }
-      writeFileSync(target, JSON.stringify(brokerRequestId ? { message, brokerRequestId } : { message }));
+      writeFileSync(target, JSON.stringify(carrier
+        ? { message, brokerRequestId: carrier.brokerRequestId, brokerErrorMessage: String(carrier.message) }
+        : { message }));
     } catch {}
   });
 }
@@ -243,11 +246,14 @@ async function runScriptAgent(
 /** The error the script ended with, when its process recorded one. */
 async function readExitRecord(recordPath: string): Promise<ScriptExitRecord | undefined> {
   try {
-    const record = JSON.parse(await readFile(recordPath, "utf8")) as { message?: unknown; brokerRequestId?: unknown };
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as { message?: unknown; brokerRequestId?: unknown; brokerErrorMessage?: unknown };
     if (typeof record.message !== "string") return undefined;
     return {
       message: record.message,
       ...(typeof record.brokerRequestId === "string" ? { brokerRequestId: record.brokerRequestId } : {}),
+      ...(typeof record.brokerRequestId === "string" && typeof record.brokerErrorMessage === "string"
+        ? { brokerErrorMessage: record.brokerErrorMessage }
+        : {}),
     };
   } catch {
     return undefined;
