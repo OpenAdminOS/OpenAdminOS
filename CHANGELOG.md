@@ -4,6 +4,16 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.8.0] - 2026-11-23
 
 ### Highlights
@@ -11,27 +21,27 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Manage each company as an organization. Use Connections to connect Intune, Entra, and Defender individually and see what each connection reads or sends.
 - Open Chat without signing in to Microsoft 365. Choose a model, ask documentation questions, and connect a service when a question needs tenant data.
 - Deploy `policy.json` to set the provider and model, allow specific public references, and lock settings for managed installs.
-- Chat and agent runs handle local model limits more clearly. When a request outgrows the selected model, model fit offers recovery options, including a larger local model or an approved one-time hosted request in Chat.
+- Chat and agent runs handle local model limits more clearly. When a request outgrows the selected model, model fit offers recovery options, including a larger local model, or sending that one Chat request to a hosted provider you pick after the app names where the data goes.
 - Use Lemonade Server locally or GitHub Copilot Fusion through the Copilot provider. Marketplace adds references such as Microsoft Learn, KQL Search, and Splashtop Docs.
 
 **Changed.** Runs open on a full page with live progress and data destinations. Chat shows the sources it used, and agent write plans are checked again before changes are applied.
 
-**Removed.** Pilot mode and its sample data.
+**Removed.** Pilot mode and its sample data, which were only in 0.7.3 nightlies.
 
 **Fixed.** Local model context and timeout errors give specific recovery steps. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs.
 
 ### Upgrading from 0.7.2
 
-The first launch after updating removes any leftover pilot sample tenant and its data once. Existing schedules move to the active tenant's organization or stay paused and unassigned. Existing gateway clients need to pair again. On Windows, uninstalling now removes the user's local data folder, including a user-level `policy.json`.
+If you ran a nightly with pilot mode, the first launch after updating removes the pilot sample tenant and its data once. Existing schedules move to the active tenant's organization or stay paused and unassigned. Existing gateway clients need to pair again. On Windows, uninstalling now removes the user's local data folder, including a user-level `policy.json`.
 
-With a local model provider, tenant data and prompts sent to the model stay on this device.
+With a model running on this device, prompts sent to that model stay on this device. Connections shows which services and public references receive data.
 
 ### Added
 
-- Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review (mockup 36).
+- Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review.
 - Windows uninstall now removes the account's local data folder, including an IT `policy.json` placed there (IT deploys it again after a reinstall); the machine-wide policy stays.
 - Reset OpenAdminOS in Settings > Data: after the typed phrase `RESET OPENADMINOS` the app closes every organization to new work, turns off background work and restarts into first run with its data folder (except the IT `policy.json`), the macOS Keychain item in the login keychain, the scheduler and the updater caches removed; a new Uninstall and reset docs page covers manual removal per OS and revoking consent in Entra.
-- Agent runs check the prompt size before sending: when a local model's context window is known (Ollama reads it from the model), a request that does not fit stops with the size needed, the limit and the ways out instead of a raw HTTP 400, and an Ollama model without a pinned context gets room for a long prompt on its first request. Agents send counts instead of whole device and user records in their breakdowns, an installed agent keeps running when only its registry update needs a newer app, and the runtime can now summarize Conditional Access policies compactly for the explainer's next version.
+- Agent runs check the prompt size before sending: when a local model's context window is known (Ollama reads it from the model), a request that does not fit stops with the size needed, the limit and the ways out instead of a raw HTTP 400, and an Ollama model without a pinned context gets room for a long prompt on its first request. Agents send counts instead of whole device and user records in their breakdowns, and an installed agent keeps running when only its registry update needs a newer app.
 - GitHub Copilot Fusion: the Copilot provider offers Copilot Fusion Standard, High and Max from the CLI's catalog, shows tiers your plan does not include greyed out with the reason, says when several models may see a prompt, and makes Copilot Free accounts usable (they list only Fusion Standard). Copilot models now show their catalog names, such as MAI Code 2 for Microsoft's MAI models, and models your organization's Copilot policy turns off are greyed out with the reason.
 - Lemonade Server as a local provider: the model scan, Settings and the model choice find it on its loopback port (13305), offer its downloaded chat models (never embedding, speech, image or cloud-routed ones) and keep prompts on this device; LM Studio and Lemonade share one OpenAI-compatible adapter.
 - Website: a Book a demo button in the header, hero and closing section, and a new /book page and homepage band for a free 60-minute call where we build an agent for one of your tasks, both booked on Cal.com.
@@ -127,8 +137,8 @@ With a local model provider, tenant data and prompts sent to the model stay on t
 - Chat offers model-written follow-ups only when the answering prompt held nothing but the current question, public documentation and the app's instructions; after conversation memory, workspace context or tenant data it offers only follow-ups the app builds. A docs question that names a service the tenant has not connected is answered from documentation instead of the "not connected" line.
 - Chat steps appear in the order they ran, one per model call; the answer header names what the answer used, source cards merge chunks of one article, citation chips are ordered, tenant questions skip the local docs index, answers no longer describe their own sources or provider, and follow-ups and agent suggestions only offer what can be answered.
 - Chat shows the scope line and a first step from the moment of sending, also after Chat is opened again during a run, streams the final answer with providers that stream, asks Microsoft Learn before the local docs index, cites Learn results by their real titles and links, and words follow-ups as requests the admin would type.
-- An invalid local agent manifest no longer stops tenants, agents and history from loading. The agent shows as unavailable with the validation reason and Edit manifest or Uninstall, and cannot run or be scheduled. A license check that signs in as another account keeps the stored tier and licenses and shows a tenant warning in Settings, Tenants and the tenant switcher.
-- Check again, Add access and the license check can be cancelled from Settings, the add access dialog or the tenant switcher, and stop after five minutes. Granted access is kept when the license check is cancelled, the message says what changed, a check from an earlier connection saves nothing after a reconnect and says so, a sign-in that answers after a cancel is not used, and Retry license check runs it again.
+- An invalid local agent manifest no longer stops tenants, agents and history from loading. The agent shows as unavailable with the validation reason and Edit manifest or Uninstall, and cannot run or be scheduled. A license check that signs in as another account keeps the stored tier and licenses and shows a tenant warning on Connections and in the organization switcher.
+- Check again, Add access and the license check can be cancelled from Connections, the add access dialog or the organization switcher, and stop after five minutes. Granted access is kept when the license check is cancelled, the message says what changed, a check from an earlier connection saves nothing after a reconnect and says so, a sign-in that answers after a cancel is not used, and Retry license check runs it again.
 - The app registration setup script checks for every Microsoft Graph PowerShell module it uses before changing anything, and removes the application it created if admin consent cannot be granted. Before, a machine without `Microsoft.Graph.Identity.SignIns` was left with a registration that had no consent.
 - The Agent Team sidebar row now highlights across the full width on hover like the other rows, and its findings tooltip (and other sidebar tooltips) is no longer cut off at the sidebar edge.
 - Run history no longer keeps failed scheduled runs that were saved without a tenant. Schedules now wait while no tenant is active and say so, and a scheduled run that fails to start is removed with its tenant.
