@@ -37,17 +37,19 @@ it("keeps a model reply with reasoning and no answer for the script failure that
   const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw failure; } }) });
   const response = await broker.handle({ id: "llm", method: "llm.complete", params: { prompt: "Summarize." } });
   assert.equal(response.ok, false);
-  // By the request id the error carries with its message, and without one by its exact message.
+  // By the request id the error carries with its message.
   assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}`, brokerRequestId: "llm" }), failure);
   assert.equal(broker.llmFailureFor({ message: "Could not write summary", brokerRequestId: "llm", brokerErrorMessage: `llm.complete: ${failure.message}` }), failure);
   // An error carrying the id with another message, such as a refused request file answered outside the broker.
   assert.equal(broker.llmFailureFor({ message: "llm.complete: Broker request file id must match the JSON request id.", brokerRequestId: "llm" }), undefined);
-  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}` }), failure);
-  assert.equal(broker.llmFailureFor({ message: failure.message }), failure);
-  assert.equal(broker.llmFailureFor({ message: "result file could not be written" }), undefined);
+  assert.equal(broker.llmFailureFor({ message: failure.message, brokerRequestId: "llm" }), failure);
+  // Without an id the error is the script's own, even with the same text as the failure it handled.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}` }), undefined);
+  assert.equal(broker.llmFailureFor({ message: failure.message }), undefined);
+  assert.equal(broker.failuresEndedWith({ message: failure.message }).length, 0);
   // Later requests, such as a read in a finally block, do not erase it.
   assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path: "/users" } })).ok, false);
-  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}` }), failure);
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}`, brokerRequestId: "llm" }), failure);
   assert.equal(broker.graphDenialFor(`Error: llm.complete: ${failure.message}`), undefined);
 });
 

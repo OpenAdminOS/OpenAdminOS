@@ -438,8 +438,9 @@ unless the script handles it itself, with the broker
 request id it or its cause carries, which the bundled scripts set, and the
 message of the error carrying it; only a failure under that id with that
 message counts, also when the script wrapped it or reused the id, so an
-answer the broker never handled (a refused request file) is none; without an
-id only an error that is exactly the broker failure counts, so the output is never parsed for it, and every matching failure must
+answer the broker never handled (a refused request file) is none; an error
+without an id is the script's own, even with the same text as a failure it
+handled, so the output is never parsed for it, and every matching failure must
 be this cause; that recorded failure also decides before the output is read
 for a context size refusal), and the failure panel shows only the
 "Model reasoned without answering" card; such a run gets no model fit offer

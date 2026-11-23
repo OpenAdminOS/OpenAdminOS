@@ -47,10 +47,9 @@ export interface SandboxBroker {
    * The typed model failure (a reply with reasoning and no answer) behind a
    * script failure, from the error the script's own process recorded it ended
    * with: a failure of the broker request id that error (or its cause chain)
-   * carries whose message the error carrying the id has; without an id, a
-   * failure whose message is exactly that error's message, or the
-   * "<method>: <message>" the bundled scripts throw. Returned only when every
-   * such failure is a reply with reasoning and no answer.
+   * carries whose message, or the "<method>: <message>" the bundled scripts
+   * throw, the error carrying the id has; none without an id. Returned only
+   * when every such failure is a reply with reasoning and no answer.
    */
   llmFailureFor(endedWith: ScriptExitRecord): Error | undefined;
   /**
@@ -159,16 +158,15 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
     failuresEndedWith(endedWith) {
       const matches = (message: string) => ({ method, error }: { method: string; error: Error }) =>
         message === error.message || message === `${method}: ${error.message}`;
-      if (endedWith.brokerRequestId !== undefined) {
-        // Only a failure under the id whose message the error carrying the id
-        // has, which may be a cause the script wrapped. An answer the broker
-        // never handled, such as a refused request file, reuses no failure.
-        return (failures.get(endedWith.brokerRequestId) ?? [])
-          .filter(matches(endedWith.brokerErrorMessage ?? endedWith.message))
-          .map(({ error }) => error);
-      }
-      // Without an id, only an error that is the broker failure itself.
-      return [...failures.values()].flat().filter(matches(endedWith.message)).map(({ error }) => error);
+      // Without a request id the error is the script's own, even with the
+      // same text as a failure it handled before.
+      if (endedWith.brokerRequestId === undefined) return [];
+      // Only a failure under the id whose message the error carrying the id
+      // has, which may be a cause the script wrapped. An answer the broker
+      // never handled, such as a refused request file, reuses no failure.
+      return (failures.get(endedWith.brokerRequestId) ?? [])
+        .filter(matches(endedWith.brokerErrorMessage ?? endedWith.message))
+        .map(({ error }) => error);
     },
   };
 }

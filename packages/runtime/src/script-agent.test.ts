@@ -35,10 +35,12 @@ import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
 
 /**
  * Stderr as Node writes it for an uncaught exception with this header and
- * message, and the exit record the run's hook writes for it.
+ * message, and the exit record the run's hook writes for it, with the broker
+ * request id the error carries, as the bundled scripts set it.
  */
-const uncaught = (input: SandboxRunInput, text: string) => {
-  writeFileSync(input.env!.OPENADMINOS_EXIT_RECORD!, JSON.stringify({ message: text.replace(/^[A-Za-z]*Error: /, "") }));
+const uncaught = (input: SandboxRunInput, text: string, brokerRequestId?: string) => {
+  const message = text.replace(/^[A-Za-z]*Error: /, "");
+  writeFileSync(input.env!.OPENADMINOS_EXIT_RECORD!, JSON.stringify(brokerRequestId ? { message, brokerRequestId, brokerErrorMessage: message } : { message }));
   return `file:///agent.mjs:1\nthrow error;\n^\n\n${text}\n    at main (file:///agent.mjs:1:1)\n\nNode.js v22.0.0`;
 };
 
@@ -396,7 +398,7 @@ definition:
           const one = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
           // A later request is refused for its size; the script ends on the first failure.
           await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-2", method: "llm.complete", params: { prompt: "Summarize more." } } satisfies SandboxBrokerRequest);
-          const stderr = uncaught(input, `Error: llm.complete: ${one.ok ? "" : one.error.message}`);
+          const stderr = uncaught(input, `Error: llm.complete: ${one.ok ? "" : one.error.message}`, "llm-1");
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -464,7 +466,7 @@ definition:
           assert.equal(llm.ok, false);
           // A brokered read after the model failure, as in a finally block.
           if (readAfter) await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "read-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices" } } satisfies SandboxBrokerRequest);
-          const stderr = uncaught(input, exitOnModel ? `Error: llm.complete: ${llm.error?.message}` : "Error: result file could not be written");
+          const stderr = exitOnModel ? uncaught(input, `Error: llm.complete: ${llm.error?.message}`, "llm-1") : uncaught(input, "Error: result file could not be written");
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -525,7 +527,7 @@ definition:
           const model = `llm.complete: ${llm.error?.message}`;
           const read = `graph.request: ${graph.error?.message}`;
           // The cleanup read's denial is logged, then the script rethrows its error, or the other way round.
-          const stderr = exitOn === "model" ? `Warning: ${read}\n${uncaught(input, `Error: ${model}`)}` : `Warning: ${model}\n${uncaught(input, `Error: ${read}`)}`;
+          const stderr = exitOn === "model" ? `Warning: ${read}\n${uncaught(input, `Error: ${model}`, "llm-1")}` : `Warning: ${model}\n${uncaught(input, `Error: ${read}`, "graph-1")}`;
           return { exitCode: 1, signal: null, stdout: "", stderr };
         },
       };
@@ -581,10 +583,12 @@ definition:
     const carriedTimeout = JSON.stringify(`llm.complete: ${timeout.message}`);
     // With reuse, the script sent llm-1 twice: a timeout, then the reasoning failure.
     const cases: Array<{ agent: string; cause: boolean; reuse?: boolean }> = [
-      // Throws the brokered failure.
-      { agent: `throw new Error(${carried});`, cause: true },
+      // Throws the brokered failure with its request id.
+      { agent: `throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
       // A rejected promise carrying it.
-      { agent: `await Promise.reject(new Error(${carried}));`, cause: true },
+      { agent: `await Promise.reject(Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }));`, cause: true },
+      // The failure was handled; a fresh error of the script's own has the same text but no request id.
+      { agent: `throw new Error(${carried});`, cause: false },
       // The script prints a diagnostic with a caret, then throws the failure carrying the request id, as the bundled scripts set it.
       { agent: `console.error(${caretNote}); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
       // An error carrying the request id with a message of its own is not the failure.
