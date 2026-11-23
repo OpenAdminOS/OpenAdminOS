@@ -120,7 +120,9 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
  * on length or code blocks: the prose around a tool request a model wrote instead of an answer.
  */
 export function announcesLookup(text: string): boolean {
-  for (const clause of clauses(withoutInlineQuotes(text.trim()))) {
+  // An offer that depends on the admin ("If you want, I will check the policy next.") announces no lookup.
+  const sentences = withoutInlineQuotes(text.trim()).split(/(?<=[.!?…])\s+|\n+/).filter((sentence) => !CONDITIONAL.test(sentence));
+  for (const clause of clauses(sentences.join("\n"))) {
     if (CHECKING_NOW.test(clause)) return true;
     const match = PROMISE.exec(clause);
     if (match && isFiller(clause.slice(0, match.index))) return true;

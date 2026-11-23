@@ -698,6 +698,10 @@ describe("The fallback after a failed compact loop", () => {
         ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"} Done.', "Six managed devices are not compliant."],
         ['Here is the answer: {"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
         [howTo, howTo],
+        // A result, then an offer that depends on the admin, and a quoted call: still an answer.
+        [`${howTo}\n\nIf you want, I will check the compliance policy next.`, `${howTo}\n\nIf you want, I will check the compliance policy next.`],
+        // A brace inside a JSON string value does not make the quoted call cut short.
+        [howTo.replace('"noncompliant"', '"WIN-{01"'), howTo.replace('"noncompliant"', '"WIN-{01"')],
       ] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
         reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : fallbackReply));

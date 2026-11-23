@@ -3290,7 +3290,8 @@ export class IntuneChatService {
         if (!isCancelled()) engineNotice = notice;
         // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
         if (computed && assistantContent.trim()) computedShown = true;
-        emitDelta(assistantContent, "");
+        // A stopped fallback shows nothing of the text held back: the stopped answer replaces it.
+        if (!(afterCompactLoop && isCancelled())) emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
 
@@ -4243,11 +4244,33 @@ export class IntuneChatService {
 }
 
 
-/** Tool names the Chat loop offers: a "tool" naming one of these is a request wherever it sits in a reply. */
+/** Tool names the Chat loop offers; protocolReply says when a "tool" naming one makes a reply a request. */
 const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
 
 /** Prose this long around a quoted tool call is an answer that shows the call, not a lead-in to a request. */
 const PROSE_AROUND_REQUEST_LIMIT = 160;
+
+/** Whether a reply leaves a brace open, counting braces outside JSON strings only (a "WIN-{01" value is not one). */
+function leavesBraceOpen(text: string): boolean {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && depth > 0) depth -= 1;
+  }
+  return depth > 0;
+}
 
 /**
  * The prose of a reply outside its JSON: closed and unclosed code fences and balanced brace spans are cut out,
@@ -4267,7 +4290,8 @@ function proseOutsideJson(text: string): string {
  * is a tool request or a protocol object with no answer, undefined for prose. Read in this order:
  * - A whole-reply object (bare or in one fence) is read as the loop reads it: final with an answer or content
  *   text is the answer, also when it names a tool too; otherwise a tool, final or kind key makes it a request.
- * - A final answer object found anywhere else (prose before or after it) is the answer, as the loop reads it.
+ * - Otherwise the object the loop reads (the last fenced block or balanced object) is the answer when it is a
+ *   final answer, with prose before or after it.
  * - A "tool" naming a Chat tool makes the reply a request when the request was cut short, when the prose
  *   outside the JSON announces a lookup ("I will check the cached data now"), or when that prose is a short
  *   lead-in ("I need to check:"). A longer prose answer that quotes a tool call as an example stays an answer.
@@ -4309,7 +4333,7 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
   }
   if (namesChatTool) {
     const unclosedFence = ((text.match(/```/g) ?? []).length % 2) === 1;
-    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || text.split("{").length !== text.split("}").length;
+    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || leavesBraceOpen(text);
     const outside = proseOutsideJson(text);
     if (cutShort || outside.length < PROSE_AROUND_REQUEST_LIMIT || announcesLookup(outside)) return { request: true };
   }
