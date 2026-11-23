@@ -160,6 +160,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       // request runs changes its generation.
       if (!ollamaModelGenerations.has(familyKey(endpoint, installedModel))) ollamaModelGenerations.set(familyKey(endpoint, installedModel), 0);
       let sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
+      // The family the think value was chosen with.
+      let sentFamily = ollamaModelFamilies.get(familyKey(endpoint, installedModel));
       const learn = (value: false | "low") => {
         const key = familyKey(endpoint, installedModel);
         // Only about the model this request went to: not one removed or
@@ -277,12 +279,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const sendWithThinkFallback = async (numCtx: number | undefined): Promise<[Response, string]> => {
         let sent = await send(numCtx);
         let text = await errorDetail(sent);
-        if (sent.status === 400 && body.think !== false && rejectsThinkLevel(text)) {
-          learn(false);
-          // The model may have been replaced since the request was built, or
-          // the server upgraded so the name resolves to another one; the
-          // fallback goes to the model installed now.
-          const previous = installedModel;
+        // At most two resends: a model replaced or upgraded since the request
+        // was built gets its own value first, and if it rejects that too, none.
+        for (let resend = 0; resend < 2 && sent.status === 400 && body.think !== false && rejectsThinkLevel(text); resend += 1) {
+          const previous = { model: installedModel, generation: sentGeneration, family: sentFamily };
           installedModel = await resolveOllamaModel(endpoint, model, opts.signal);
           if (opts.signal?.aborted) throw stoppedByUser();
           if (options.refreshModelFamily !== false) {
@@ -291,14 +291,19 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           const key = familyKey(endpoint, installedModel);
           const generation = ollamaModelGenerations.get(key) ?? 0;
-          // A family Ollama reports now decides; without one, the same model
-          // gets no level and a replacement gets what is known about it.
           const family = ollamaModelFamilies.get(key);
-          body.think = family !== undefined
-            ? ollamaThinkSetting(model, family)
-            : generation === sentGeneration && installedModel === previous ? false : ollamaThinkFor(endpoint, installedModel);
+          if (installedModel === previous.model && generation === previous.generation && family === previous.family) {
+            // The model that rejected the level is still the one installed:
+            // it gets none, and that is remembered for it.
+            learn(false);
+            body.think = false;
+          } else {
+            // Another model, or one Ollama now reports a family for.
+            body.think = family !== undefined ? ollamaThinkSetting(model, family) : ollamaThinkFor(endpoint, installedModel);
+          }
           sentDigest = ollamaModelDigests.get(key);
           sentGeneration = generation;
+          sentFamily = family;
           startAttempt(attemptLabel);
           sent = await send(numCtx);
           text = await errorDetail(sent);
@@ -334,6 +339,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           body.think = ollamaThinkFor(endpoint, installedModel);
           sentDigest = ollamaModelDigests.get(familyKey(endpoint, installedModel));
           sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
+          sentFamily = ollamaModelFamilies.get(familyKey(endpoint, installedModel));
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));

@@ -2065,4 +2065,51 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+
+  it("keeps a rejection for the model that gave it when an upgrade switches models mid-request, and rolls back cleanly", async () => {
+    let version = "0.17.7";
+    let chats = 0;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          // gpt-oss tagged local; a Qwen under the default tag that reports no family.
+          res.end(JSON.stringify({ models: [
+            { name: "gpt-oss-team:local", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "gpt-oss-team:latest", digest: "sha256:qwen" },
+          ] }));
+          return;
+        }
+        chats += 1;
+        if (chats === 2) version = "0.18.0";
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        // From 0.18 ":local" runs the Qwen, which rejects any level.
+        if (version === "0.18.0" && think !== false) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-team:local" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "gpt-oss-team:local" });
+      await llm.complete({ prompt: "p" });
+      // Upgraded as this request arrives: the Qwen gets the name's guess, then no level.
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      // Rolled back: the gpt-oss copy runs again and still gets the lowest level.
+      version = "0.17.7";
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(sent, ["low", "low", "low", false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });
