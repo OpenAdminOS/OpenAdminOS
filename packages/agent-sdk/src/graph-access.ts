@@ -246,8 +246,9 @@ const APP_FAILURE_WRAPPERS = [
   /^Nothing was applied: /,
 ];
 
-function storedText(error: unknown): string {
-  let raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
+/** Remove the wrappers the app adds before saving an operation failure. */
+export function unwrapAppFailure(error: string): string {
+  let raw = error.trimStart();
   // Wrappers nest, for example "Nothing was applied: Connector 'teams' failed its health check: ...".
   for (let unwrapped = true; unwrapped;) {
     unwrapped = false;
@@ -259,7 +260,11 @@ function storedText(error: unknown): string {
       }
     }
   }
-  return unwrapScriptAgentGraphError(raw);
+  return raw;
+}
+
+function storedText(error: unknown): string {
+  return unwrapScriptAgentGraphError(unwrapAppFailure(error instanceof Error ? error.message : String(error ?? "")));
 }
 
 /**

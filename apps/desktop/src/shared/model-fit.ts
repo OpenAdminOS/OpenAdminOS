@@ -1,5 +1,6 @@
 import { managedLockedModel, managedProviderAllowed, providerCatalog, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type { ManagedPolicyStatus, ModelFitIssue, ModelFitReason, ProviderId, ProviderSummary } from "./openAdminOS.js";
+import { ollamaFailureOwnText } from "./ollama-failure.js";
 import { isProviderReady } from "./provider-detection.js";
 
 /**
@@ -127,13 +128,14 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
   // Ollama could not run the model at a context size for lack of memory: the size kept from an
   // earlier request, or the retry's, before or partway through an answer.
   // Not anchored, so a wrapper that adds words in front (such as "Agent failed:") keeps the reason.
-  const memorySize = /\bOllama (?:could not load|failed partway through an answer from) .+? (?:with the|on the retry with a) ([\d,]+) token context size(?: kept from an earlier request)?, usually because free memory ran out/i.exec(text);
+  const ownText = ollamaFailureOwnText(text);
+  const memorySize = /\bOllama (?:could not load|failed partway through an answer from) .+? (?:with the|on the retry with a) ([\d,]+) token context size(?: kept from an earlier request)?, usually because free memory ran out/i.exec(ownText);
   if (memorySize) {
     const limitTokens = count(memorySize[1]);
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens, limitIsMemory: true as const } : {}) };
   }
   // A size this request did not fit in: one kept from an earlier request, or the retry's.
-  const kept = /context size too small: This request did not fit in the ([\d,]+) token context (?:kept from an earlier request|of the retry)/i.exec(text);
+  const kept = /context size too small: This request did not fit in the ([\d,]+) token context (?:kept from an earlier request|of the retry)/i.exec(ownText);
   if (kept) {
     const limitTokens = count(kept[1]);
     return { reason: "context-too-small", ...(limitTokens ? { limitTokens } : {}) };

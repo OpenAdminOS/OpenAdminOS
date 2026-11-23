@@ -233,6 +233,8 @@ it.each([
   "Ollama failed partway through an answer from gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: runner terminated",
   "Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request. Ollama said: prompt is too long",
   'MXC script agent "test" failed: Error: llm.complete: Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: out of memory',
+  "The proposal could not be checked against the tenant before applying, so nothing was applied. Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.",
+  "Nothing was applied: Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.",
 ])("gives a kept context failure only its own playbook: %s", (error) => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
   render(<RunFailureRemediation run={run} />);

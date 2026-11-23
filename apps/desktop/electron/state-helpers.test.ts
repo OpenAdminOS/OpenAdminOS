@@ -681,6 +681,16 @@ describe("humanizeScheduledRunError", () => {
     assert.doesNotMatch(text, /Graph/);
   });
 
+  for (const wrapper of [
+    "The proposal could not be checked against the tenant before applying, so nothing was applied. ",
+    "Nothing was applied: ",
+  ]) {
+    it(`keeps the Ollama recovery after "${wrapper.trim()}"`, () => {
+      const error = wrapper + "Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.";
+      assert.match(humanizeScheduledRunError(error), /^Ollama failed with a kept context size\. Rerun the schedule to try without it\./);
+    });
+  }
+
   it("ignores a Graph denial an older build saved from what Ollama said", () => {
     const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
     // Older builds stored denials without a source.

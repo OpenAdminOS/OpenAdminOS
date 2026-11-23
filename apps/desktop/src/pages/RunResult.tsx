@@ -136,7 +136,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
   // device then; a provider that is not on this device now is not offered from either.
   const modelFit =
     run.status === "failed" && !isSystemRun && !run.officeContext && run.modelFit && run.failureCause !== "reasoning-without-answer"
-      && run.failureReason?.ollamaKeptContext !== true && !isOllamaKeptContextFailure(run.error) && runProvider && isOnDeviceModel(runProvider, run.model)
+      && !isOllamaKeptContextFailure(run.error, run.failureReason) && runProvider && isOnDeviceModel(runProvider, run.model)
       ? run.modelFit
       : undefined;
   // Run again of a model fit rerun keeps its safeguards: the on-device check and the endpoint binding.
