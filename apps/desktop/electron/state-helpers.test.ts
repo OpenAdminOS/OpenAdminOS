@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  buildMultiTenantDossierMarkdown,
   canonicalClientId,
   graphCacheRequestFromNextLink,
   humanizeMsalError,
@@ -696,4 +697,39 @@ describe("humanizeScheduledRunError", () => {
   it("still reads a Graph 403 in the app's own words", () => {
     assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: reconnect to grant scopes"), /Graph/);
   });
+});
+
+it("localizes generation, cache refresh, and device sync timestamps in the dossier", () => {
+  const locale = "de-DE";
+  const timeZone = "Europe/Berlin";
+  const generatedAt = "2020-04-03T00:30:00.000Z";
+  const lastRefresh = "2020-04-02T23:15:00.000Z";
+  const lastSyncDateTime = "2020-03-31T22:30:00.000Z";
+  const dateOptions = { timeZone, year: "numeric", month: "short", day: "numeric" } as const;
+  const dateTime = new Intl.DateTimeFormat(locale, { ...dateOptions, hour: "2-digit", minute: "2-digit" });
+  const dateOnly = new Intl.DateTimeFormat(locale, dateOptions);
+  const counts = { windowsDevices: 1, compliant: 1, nonCompliant: 0, unknown: 0 };
+  const tenant = { tenantId: "tenant-1", tenantName: "Contoso" };
+
+  const markdown = buildMultiTenantDossierMarkdown({
+    timestampLocale: { locale, timeZone },
+    generatedAt,
+    prompt: "List Windows devices",
+    providerName: "Ollama",
+    summary: { ...counts, tenantsScanned: 1, failedTenants: 0, skippedTenants: 0, staleTenants: 0 },
+    comparisons: [{ ...tenant, ...counts, status: "ready", lastRefresh, warnings: [] }],
+    rows: [{
+      ...tenant,
+      deviceName: "WIN-01",
+      complianceState: "compliant",
+      operatingSystem: "Windows",
+      lastSyncDateTime,
+      stale: false,
+    }],
+  });
+
+  const lines = markdown.split("\n");
+  assert.ok(lines.includes(`Generated: ${dateTime.format(new Date(generatedAt))}`));
+  assert.ok(lines.includes(`| Contoso | ready | 1 | 1 | 0 | 0 | ${dateTime.format(new Date(lastRefresh))} |`));
+  assert.ok(lines.includes(`| Contoso | WIN-01 | compliant | Windows |  | ${dateOnly.format(new Date(lastSyncDateTime))} |  |`));
 });
