@@ -58,8 +58,8 @@ Format:
 
 ## Never load a local model on the maintainer's Mac
 
-**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models; live app checks use a hosted provider (Claude Code or Codex CLI).
+**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models, and tokenizer or model metadata work uses recorded counts or mocked `/api/show` and `/api/tags`. Live app checks use a hosted provider (Claude Code or Codex CLI).
 
-**Why:** Loading a local model makes the machine unusable (maintainer, 2026-11-19, during the local model accuracy work for the 8B demos).
+**Why:** Loading a local model makes the machine unusable. On 2026-11-19 the prompt size estimator was calibrated by sending synthetic prompts to OpenAdmin 8B and gpt-oss 20B through the local Ollama, and the maintainer forbade it during the local model accuracy work for the 8B demos.
 
-**How to apply:** Before an end-to-end or smoke run, confirm its provider is a mock or a hosted CLI. Run `ollama ps` afterwards (it reads status and loads nothing); if a model is listed, run `ollama stop <model>` at once. Name the provider and model used in every hand-back.
+**How to apply:** Before an end-to-end or smoke run, confirm its provider is a mock or a hosted CLI. Run `ollama ps` afterwards (it reads status and loads nothing); if a model is listed, run `ollama stop <model>` at once. Name the provider and model used in every hand-back, and pass this rule to every delegated child and reviewer.

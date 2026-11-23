@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 11,
+  "revision": 12,
   "agents": [
     {
       "id": "compliance-overview",
@@ -57,7 +57,7 @@
       "slug": "dormant-app-registrations",
       "name": "Dormant app registrations",
       "description": "Reviews app registrations for stale experiments, risky exposure, credentials, and cleanup candidates with evidence-backed recommendations.",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "mode": "read",
       "category": "apps",
       "tier": "agent",
@@ -75,14 +75,14 @@
       ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml",
-      "manifestSha256": "2b4cb2b7222ad939878a0bcd8d3d32b409de05363ccecfd31823a773d7ed17fd"
+      "manifestSha256": "afc91b0ee52f3f2a1ee74220c7c0a24c3c83b02cc795c4ef5f4582aa0ad88ba4"
     },
     {
       "id": "find-inactive-devices",
       "slug": "find-inactive-devices",
       "name": "Find inactive devices",
       "description": "Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "mode": "read",
       "category": "devices",
       "tier": "agent",
@@ -100,7 +100,7 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml",
-      "manifestSha256": "6f22dfd3f048072719bfa01e93545dc1f017a96d53183de425541f61723dfd84"
+      "manifestSha256": "ca12b30c4537fe10355c5ba5d7e585b4510f4e455717cc65485018dfa655ffa1"
     },
     {
       "id": "intune-device-posture-auditor",
@@ -139,7 +139,7 @@
       "slug": "offboarding-agent",
       "name": "Offboarding agent",
       "description": "Builds a conservative stale-device offboarding plan from Intune sync, Entra sign-in, ownership, compliance, and trust signals, then retires devices after typed confirmation.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "mode": "write",
       "category": "devices",
       "tier": "agent",
@@ -159,14 +159,14 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml",
-      "manifestSha256": "5680bf98914b2cfbf43c6d9d9d01b065a692644a57b0576230a6235bf6addba6"
+      "manifestSha256": "71bb2119313e24c62a4a1ec987fce795f878bfce0e6617b8cfaca37f5c3017da"
     },
     {
       "id": "os-update-posture",
       "slug": "os-update-posture",
       "name": "OS update posture",
       "description": "Reviews Intune OS version distribution, compliance, ownership, enrollment, and stale inventory signals so admins can prioritize update work.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "mode": "read",
       "category": "updates",
       "tier": "dashboard",
@@ -184,7 +184,7 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml",
-      "manifestSha256": "1477047a64f0c4f5024f6b1abdee4db804b8c4255127261b642cfdad4dd15dd7"
+      "manifestSha256": "34b0ea962a5d21bee7f7c0086e6d5f8254c7712fce5c0356354ab4c501a24b2f"
     },
     {
       "id": "risky-sign-in-triage",
@@ -241,7 +241,7 @@
       "slug": "sign-in-failure-explainer",
       "name": "Sign-in failure explainer",
       "description": "Clusters recent failed sign-ins by error, app, user, client app, Conditional Access status, and location signals.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "mode": "read",
       "category": "policies",
       "tier": "agent",
@@ -259,7 +259,7 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/sign-in-failure-explainer/manifest.yaml",
-      "manifestSha256": "3e4b94c55d2457a199b12b5036ab20558f3e689038b81f5c74fdb727178bf452"
+      "manifestSha256": "dcabb0098dce16ed6850378d71bc0b649a9230f8b41fad994c42949e2350484e"
     },
     {
       "id": "stale-guest-cleanup",
@@ -335,7 +335,7 @@
       "slug": "tenant-change-audit",
       "name": "Tenant change audit",
       "description": "Reviews recent directory audit entries by activity, category, result, actor, and target context to flag changes worth checking.",
-      "version": "1.1.1",
+      "version": "1.2.0",
       "mode": "read",
       "category": "policies",
       "tier": "agent",
@@ -354,7 +354,7 @@
       ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml",
-      "manifestSha256": "e3898252d4f3730c338c7a2c84771a98149e68e6cb98b2bacc4b299723bffa12"
+      "manifestSha256": "2585368df74d30ac799ee3f076dbd62b7e166124e49279129b67b40a90940c0e"
     },
     {
       "id": "tenant-health-report",
@@ -386,7 +386,7 @@
       "slug": "user-license-overview",
       "name": "User license overview",
       "description": "Reviews tenant user licensing hygiene by usage location, account state, and assigned-license presence.",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "mode": "read",
       "category": "apps",
       "tier": "dashboard",
@@ -404,7 +404,7 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/user-license-overview/manifest.yaml",
-      "manifestSha256": "a1a52c3f21ed7fca21b6a76e84d4721e790c64abaa8c7fa3bc148f464730f856"
+      "manifestSha256": "12380fdd71fb96634179c2f0a9d7835c12b2e6249bb99f4cca1c23f849fb41d7"
     }
   ]
 }

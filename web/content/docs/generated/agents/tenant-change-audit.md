@@ -13,7 +13,7 @@ Reviews recent directory audit entries by activity, category, result, actor, and
 | Field | Value |
 | --- | --- |
 | Agent ID | `tenant-change-audit` |
-| Version | `1.1.1` |
+| Version | `1.2.0` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `policies` |
@@ -21,7 +21,7 @@ Reviews recent directory audit entries by activity, category, result, actor, and
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.6.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `46d71704` |
+| Last changed | 2026-11-19 · `e7327592` |
 
 ## Execution
 
