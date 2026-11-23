@@ -429,9 +429,10 @@ after reasoning is not an answer. The model list is read before context
 sizing; when the sizing lookup saw another revision (`modified_at`) than the
 list (compared to the nanosecond), the list is read and the request sized
 again, once. A think level resend to another model than the one the request
-was sized for sizes it again first and is refused when that model cannot take
-it; the retry after a context overflow reads its lookup again when the list
-then names another revision. The think value,
+was sized for sizes it again first, with its own timeout, and is refused when
+that model cannot take it; its think value is chosen after that lookup. The
+retry after a context overflow reads its lookup again when the list then
+names another revision or the name resolves to another installed model. The think value,
 version and family a send uses are taken right before it, and the chat
 request's timeout starts only then; the last
 resend after a rejected level always sends `false`, without remembering it
