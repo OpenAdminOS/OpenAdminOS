@@ -140,7 +140,6 @@ async function makeStore(state: Record<string, unknown>) {
   return {
     store,
     filePath,
-    raw,
     read: () => internal.read(),
     file: async () => JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown> & {
       organizations?: OrganizationRecord[];
@@ -187,8 +186,11 @@ describe("organization migration", () => {
       assert.deepEqual(state.tenants.map((tenant) => tenant.id), [woodgrove.id, fabrikam.id]);
       assert.equal(state.tenants[1]?.appRegistration?.label, "Fabrikam OpenAdminOS");
       assert.equal(state.savedAppRegistrations?.length, 1);
-      // Reading does not touch the file.
-      assert.equal(await readFile(fixture.filePath, "utf8"), fixture.raw);
+      // The first-load model destination migration also persists the organization move.
+      const written = await fixture.file();
+      assert.deepEqual(written.organizations, state.organizations);
+      assert.equal(scheduleOf(written.installedAgents, "find-inactive-devices")?.modelDestination?.providerId, "ollama");
+      assert.equal(scheduleOf(written.installedAgents, "compliance-overview")?.enabled, false);
     } finally {
       await fixture.close();
     }
