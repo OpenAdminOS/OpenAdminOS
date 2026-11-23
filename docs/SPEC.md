@@ -424,9 +424,11 @@ handled the same way, at most two resends per request.
 Without either, the name decides. Reasoning a model writes inline in its
 content, in `<think>` blocks (also split across chunks, or never closed),
 is taken out of the answer as it streams; a tag start the token limit cut off
-after reasoning is not an answer. The model list is read, and the think
-value, version and family a send uses are taken, right before the first send,
-after context sizing; the last
+after reasoning is not an answer. The model list is read before context
+sizing; when the sizing lookup saw another revision (`modified_at`) than the
+list, the list is read and the request sized again, once. The think value,
+version and family a send uses are taken right before it, and the chat
+request's timeout starts only then; the last
 resend after a rejected level always sends `false`, without remembering it
 when the model could not be confirmed. A reply with reasoning and no answer
 is never returned as the answer: it fails with
@@ -437,7 +439,7 @@ before apply or a sandboxed script's exit (when the error the script ended with
 carries it; the script's Node process records that error through a hook the
 app loads with `--import`, in the launched process's main thread only and
 unless the script handles it itself (an error that escapes its
-`uncaughtException` listener is recorded), with the broker
+`uncaughtException` listener or capture callback is recorded), with the broker
 request id it or its cause carries, which the bundled scripts set, and the
 message of the error carrying it; only a failure under that id with that
 message counts, also when the script wrapped it or reused the id, so an
