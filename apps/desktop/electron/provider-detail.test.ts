@@ -115,3 +115,19 @@ it("reads a model list entry named only in its model field", async () => {
   await createOllamaLlm({ defaultModel: "model-field-only:latest", refreshModelFamily: false }).complete({ prompt: "p" });
   assert.deepEqual(thinks, ["low"]);
 });
+
+it("keeps a known family when a check reads a reply without a model list", async () => {
+  let tags: unknown = { models: [{ name: "renamed-oss:latest", digest: "sha256:r", details: { family: "gptoss" } }] };
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json(tags);
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "renamed-oss:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  await checkOllama(provider);
+  tags = {};
+  await checkOllama(provider);
+  await createOllamaLlm({ defaultModel: "renamed-oss:latest", refreshModelFamily: false }).complete({ prompt: "p" });
+  assert.deepEqual(thinks, ["low"]);
+});

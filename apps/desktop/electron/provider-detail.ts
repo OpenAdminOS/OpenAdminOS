@@ -156,7 +156,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     // list is read on every check, so a model replaced under the same name,
     // or restored to a digest seen before, never keeps an old family.
     // A model missing from the list is forgotten, so one installed later under its name starts fresh.
-    recordOllamaModelList(endpoint, installed, modelRead);
+    // A reply without a model list is no inventory, so what is known stays.
+    if (Array.isArray(payload.models)) recordOllamaModelList(endpoint, installed, modelRead);
     const installedModels = installed.map((model) => model.name);
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.
