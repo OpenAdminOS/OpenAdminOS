@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { after, type NextRequest, NextResponse } from "next/server";
 
 import { SITE_URL } from "~/app/seo";
 import { drawCsv, drawOpens, recordDraw } from "~/lib/advent/admin";
@@ -11,7 +11,8 @@ import {
 import { AdventStorageError, currentAdmin, currentParticipant, db, rpc } from "~/lib/advent/db";
 import type { Participant } from "~/lib/advent/db";
 import { validHandle } from "~/lib/advent/identity";
-import { allowLoginEmail, consumeLogin, issueLoginLink, parseEmail } from "~/lib/advent/login";
+import { allowLoginEmail, consumeLogin, issueLoginLink, parseEmail, previewLogin } from "~/lib/advent/login";
+import type { SignupConfirmation, SignupDraft } from "~/lib/advent/login";
 import { CAMPAIGN_CLOSE, campaignNow, doorState, isOnTime, parseDay } from "~/lib/advent/time";
 import { doors } from "~/content/advent/doors";
 
@@ -20,7 +21,7 @@ type Payload = Record<string, unknown>;
 
 const PRIVATE = { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" };
 const SIGN_IN_MESSAGE = "If that address can sign in, a link will arrive shortly. It expires in 15 minutes.";
-const ANONYMOUS = new Set(["sign-in", "sign-up", "verify"]);
+const ANONYMOUS = new Set(["sign-in", "sign-up", "verify", "verify-preview"]);
 const PARTICIPANT = new Set(["complete", "settings", "sign-out", "delete"]);
 const ADMIN = new Set(["set-answers", "draw", "purge"]);
 
@@ -61,6 +62,7 @@ function setSession(response: NextResponse, cookie: string, maxAge = SESSION_SEC
 
 export async function POST(request: NextRequest, context: RouteContext) {
   if (!adventEnabled()) return missing();
+  const requestedAt = new Date().toISOString();
   const { action } = await context.params;
   if (!ANONYMOUS.has(action) && !PARTICIPANT.has(action) && !ADMIN.has(action)) return missing();
   const origin = trustedOrigin(request);
@@ -90,7 +92,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       switch (action) {
         case "complete": return await completeDoor(account, body, now);
         case "settings": return await updateSettings(account, body);
-        case "sign-out": return setSession(success(undefined, "/advent"), "", 0);
+        case "sign-out":
+          await rpc<void>("advent_sign_out", { p_id: account.id, p_version: account.session_version });
+          return setSession(success(undefined, "/advent"), "", 0);
         case "delete": return await deleteAccount(account, body);
         case "set-answers": return await setAnswers(body);
         case "draw": return await runDraw(account, body, now);
@@ -106,13 +110,38 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const secret = sessionSecret();
     if (!secret || !storageConfig()) return fail(503, "Campaign accounts are not configured yet.");
+    if (action === "verify-preview") {
+      const preview = await previewLogin(value(body, "token"), secret);
+      if (!preview) return fail(400, "This link is expired or already used. Request a new sign-in link.");
+      return NextResponse.json({ preview }, { headers: PRIVATE });
+    }
     if (action === "verify") {
-      const result = await consumeLogin(value(body, "token"), secret, now, rulesApproved() && now < CAMPAIGN_CLOSE);
+      let intent: "signin" | SignupConfirmation;
+      if (body.intent === "signin") {
+        intent = "signin";
+      } else if (body.intent === "signup") {
+        const handle = value(body, "handle").trim();
+        if (!validHandle(handle)) return fail(400, "Choose a handle using 3 to 24 lowercase letters, digits or internal hyphens. Some names are reserved.");
+        if (body.age !== "on" || body.rules !== "on") {
+          return fail(400, "Confirm that you are 18 or older and accept the campaign rules.");
+        }
+        intent = {
+          handle,
+          discardReferral: body.discard_referral === "on",
+          marketing: body.marketing === "on",
+          reminders: body.reminders === "on",
+        };
+      } else {
+        return fail(400, "Review the link details and confirm to continue.");
+      }
+
+      const result = await consumeLogin(value(body, "token"), secret, now, rulesApproved() && now < CAMPAIGN_CLOSE, intent);
       if (!result || result.status === "invalid") return fail(400, "This link is expired or already used. Request a new sign-in link.");
+      if (result.status === "confirmation_required") return fail(400, "Review the link details and confirm to continue.");
       if (result.status === "signup_closed") return fail(409, "Campaign registration is closed or unavailable.");
-      if (result.status === "handle_taken") return fail(409, "That handle was taken. Start a new signup with a different handle.");
+      if (result.status === "handle_taken") return fail(409, "That handle is taken. Choose a different handle and try again.");
       if (result.status !== "ok") return fail(503, "A referral code could not be assigned. Try the link again.");
-      return setSession(success(undefined, "/advent/me"), signSession(result.id, Date.now(), secret));
+      return setSession(success(undefined, "/advent/me"), signSession(result.id, result.version, Date.now(), secret));
     }
 
     const configuration = missingLoginConfig();
@@ -120,7 +149,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const email = parseEmail(value(body, "email"));
     if (!email) return fail(400, "Enter a valid email address.");
-    let signup: { handle: string; ref: string; marketing: boolean; reminders: boolean; acceptedAt: string } | undefined;
+    let signup: SignupDraft | undefined;
     if (action === "sign-up") {
       if (!rulesApproved()) return fail(409, "Rules are being finalised. Registration will open once they are available.");
       if (now >= CAMPAIGN_CLOSE) return fail(409, "Campaign registration is closed.");
@@ -132,7 +161,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         ref: value(body, "ref"),
         marketing: body.marketing === "on",
         reminders: body.reminders === "on",
-        acceptedAt: new Date().toISOString(),
       };
     }
 
@@ -143,9 +171,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
     } catch {
       return fail(503, "Sign-in rate limiting is temporarily unavailable. Try again later.");
     }
-    return await issueLoginLink(origin, email, secret, signup)
-      ? success(SIGN_IN_MESSAGE)
-      : fail(503, "The sign-in email could not be sent. Try again later.");
+    after(async () => {
+      try {
+        if (!(await issueLoginLink(origin, email, secret, requestedAt, signup))) {
+          console.error("[advent] Sign-in email could not be sent");
+        }
+      } catch {
+        console.error("[advent] Sign-in link could not be issued");
+      }
+    });
+    return success(SIGN_IN_MESSAGE);
   } catch (error) {
     if (error instanceof AdventStorageError) {
       return fail(503, "Campaign storage is temporarily unavailable. Try again later.");
@@ -198,12 +233,13 @@ async function updateSettings(account: Participant, body: Payload) {
   const handle = value(body, "handle").trim();
   if (!validHandle(handle)) return fail(400, "Choose a handle using 3 to 24 lowercase letters, digits or internal hyphens. Some names are reserved.");
   try {
+    const marketing = body.marketing === "on";
     const reminders = body.reminders === "on";
     const saved = await rpc<boolean>("advent_update_settings", {
       p_id: account.id,
       p_handle: handle,
       p_badge: body.badge === "on",
-      p_marketing: body.marketing === "on",
+      p_marketing: marketing === (body.marketing_initial === "on") ? null : marketing,
       p_consent_version: MARKETING_CONSENT_VERSION,
       p_reminders: reminders === (body.reminders_initial === "on") ? null : reminders,
       p_reminders_consent_version: REMINDERS_CONSENT_VERSION,

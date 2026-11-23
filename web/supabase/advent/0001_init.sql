@@ -23,20 +23,30 @@ create table public.advent_participants (
   marketing_opt_in boolean not null default false,
   marketing_consent_text_version text,
   marketing_consent_at timestamptz,
+  marketing_withdrawn_at timestamptz,
   reminders_opt_in boolean not null default false,
   reminders_consent_text_version text,
   reminders_consent_at timestamptz,
+  reminders_withdrawn_at timestamptz,
+  reminder_unsubscribe_id uuid not null unique default gen_random_uuid(),
+  session_version int not null default 0 check (session_version >= 0),
   ref_code text not null unique check (ref_code ~ '^[2-9A-HJ-NP-Z]{8}$'),
   referred_by uuid references public.advent_participants on delete set null,
   badge_public boolean not null default false,
   check (referred_by is distinct from id),
   check (
-    (marketing_opt_in and marketing_consent_text_version is not null and marketing_consent_at is not null)
-    or (not marketing_opt_in and marketing_consent_text_version is null and marketing_consent_at is null)
+    (marketing_opt_in and marketing_consent_text_version is not null and marketing_consent_at is not null and marketing_withdrawn_at is null)
+    or (not marketing_opt_in and (
+      num_nonnulls(marketing_consent_text_version, marketing_consent_at, marketing_withdrawn_at) = 0
+      or (num_nonnulls(marketing_consent_text_version, marketing_consent_at, marketing_withdrawn_at) = 3 and marketing_withdrawn_at >= marketing_consent_at)
+    ))
   ),
   check (
-    (reminders_opt_in and reminders_consent_text_version is not null and reminders_consent_at is not null)
-    or (not reminders_opt_in and reminders_consent_text_version is null and reminders_consent_at is null)
+    (reminders_opt_in and reminders_consent_text_version is not null and reminders_consent_at is not null and reminders_withdrawn_at is null)
+    or (not reminders_opt_in and (
+      num_nonnulls(reminders_consent_text_version, reminders_consent_at, reminders_withdrawn_at) = 0
+      or (num_nonnulls(reminders_consent_text_version, reminders_consent_at, reminders_withdrawn_at) = 3 and reminders_withdrawn_at >= reminders_consent_at)
+    ))
   )
 );
 create index advent_reminders_opt_in_idx on public.advent_participants (id) where reminders_opt_in;
@@ -46,6 +56,8 @@ create table public.advent_login_tokens (
   token_hash text primary key check (token_hash ~ '^[0-9a-f]{64}$'),
   participant_id uuid references public.advent_participants on delete cascade,
   pending_signup jsonb,
+  pending_email citext generated always as ((pending_signup->>'email')::citext) stored unique,
+  requested_at timestamptz not null default clock_timestamp(),
   expires_at timestamptz not null,
   used_at timestamptz,
   check (num_nonnulls(participant_id, pending_signup) = 1)
@@ -142,67 +154,128 @@ grant select, insert on table public.advent_completions, public.advent_feedback,
 grant select, insert, delete on table public.advent_attempts to service_role;
 grant select, insert, update on table public.advent_reminder_sends to service_role;
 
+create function public.advent_issue_signup_token(
+  p_hash text, p_expires_at timestamptz, p_requested_at timestamptz, p_pending jsonb
+) returns boolean language plpgsql security invoker set search_path = public, extensions, pg_temp as $$
+begin
+  insert into public.advent_login_tokens (token_hash, pending_signup, requested_at, expires_at)
+  values (p_hash, p_pending, p_requested_at, p_expires_at)
+  on conflict (pending_email) do update set
+    token_hash = excluded.token_hash, pending_signup = excluded.pending_signup,
+    requested_at = excluded.requested_at, expires_at = excluded.expires_at
+  where advent_login_tokens.requested_at <= excluded.requested_at;
+  return found;
+end;
+$$;
+
+create function public.advent_preview_token(p_hash text, p_now timestamptz)
+returns jsonb language sql stable security invoker set search_path = public, pg_temp as $$
+  select case when login.pending_signup is not null then
+    jsonb_build_object(
+      'kind', 'signup', 'email', login.pending_signup->>'email', 'handle', login.pending_signup->>'handle',
+      'referral', (select ref_code from public.advent_participants where ref_code = login.pending_signup->>'ref'),
+      'marketing', (login.pending_signup->>'marketing')::boolean,
+      'reminders', (login.pending_signup->>'reminders')::boolean
+    )
+  else
+    jsonb_build_object(
+      'kind', 'signin', 'handle', account.handle,
+      'maskedEmail', left(account.email::text, 1) || '•••@' || split_part(account.email::text, '@', 2)
+    )
+  end
+  from public.advent_login_tokens as login
+  left join public.advent_participants as account on account.id = login.participant_id
+  where login.token_hash = p_hash and login.used_at is null and login.expires_at > p_now;
+$$;
+
 create function public.advent_consume_token(
-  p_hash text, p_now timestamptz, p_created_at timestamptz, p_ref_code text, p_allow_signup boolean
+  p_hash text, p_now timestamptz, p_created_at timestamptz, p_ref_code text,
+  p_allow_signup boolean, p_confirmation jsonb, p_signin boolean
 ) returns jsonb language plpgsql security invoker set search_path = public, extensions, pg_temp as $$
 declare
   login public.advent_login_tokens;
-  signup jsonb;
   account_id uuid;
+  account_version int;
   referrer uuid;
   conflict_constraint text;
+  marketing boolean;
+  reminders boolean;
 begin
   select * into login from public.advent_login_tokens where token_hash = p_hash for update;
   if not found or login.used_at is not null or login.expires_at <= p_now then
     return jsonb_build_object('status', 'invalid');
   end if;
 
-  account_id := login.participant_id;
-  signup := login.pending_signup;
-  if signup is not null then
+  if login.pending_signup is not null then
     if not p_allow_signup then
       return jsonb_build_object('status', 'signup_closed');
     end if;
-    select id into account_id from public.advent_participants where email = (signup->>'email')::citext;
-    if account_id is null then
+    if p_confirmation is null or p_signin then
+      return jsonb_build_object('status', 'confirmation_required');
+    end if;
+
+    account_id := gen_random_uuid();
+    if not (p_confirmation->>'discard_referral')::boolean then
       select id into referrer from public.advent_participants
-        where ref_code = signup->>'ref' and created_at < p_created_at;
-      begin
-        insert into public.advent_participants (
-          email, handle, created_at, rules_version, rules_accepted_at, age_confirmed,
-          marketing_opt_in, marketing_consent_text_version, marketing_consent_at,
-          reminders_opt_in, reminders_consent_text_version, reminders_consent_at, ref_code, referred_by
-        ) values (
-          signup->>'email', signup->>'handle', p_created_at, signup->>'rules_version',
-          (signup->>'accepted_at')::timestamptz, true, (signup->>'marketing')::boolean,
-          signup->>'marketing_version',
-          case when (signup->>'marketing')::boolean then (signup->>'accepted_at')::timestamptz end,
-          coalesce((signup->>'reminders')::boolean, false), signup->>'reminders_version',
-          case when (signup->>'reminders')::boolean then (signup->>'accepted_at')::timestamptz end,
-          p_ref_code, referrer
-        ) on conflict (email) do nothing returning id into account_id;
-      exception when unique_violation then
-        get stacked diagnostics conflict_constraint = constraint_name;
-        if conflict_constraint = 'advent_participants_handle_key' then
-          delete from public.advent_login_tokens where token_hash = p_hash;
-          return jsonb_build_object('status', 'handle_taken');
-        end if;
-        if conflict_constraint = 'advent_participants_ref_code_key' then
-          return jsonb_build_object('status', 'ref_collision');
-        end if;
-        raise;
-      end;
-      if account_id is null then
-        select id into account_id from public.advent_participants where email = (signup->>'email')::citext;
+        where ref_code = login.pending_signup->>'ref' and created_at <= p_created_at and id <> account_id;
+    end if;
+    marketing := (p_confirmation->>'marketing')::boolean;
+    reminders := (p_confirmation->>'reminders')::boolean;
+    begin
+      insert into public.advent_participants (
+        id, email, handle, created_at, rules_version, rules_accepted_at, age_confirmed,
+        marketing_opt_in, marketing_consent_text_version, marketing_consent_at,
+        reminders_opt_in, reminders_consent_text_version, reminders_consent_at, ref_code, referred_by
+      ) values (
+        account_id, login.pending_signup->>'email', p_confirmation->>'handle', p_created_at,
+        p_confirmation->>'rules_version', p_now, true,
+        marketing, case when marketing then p_confirmation->>'marketing_version' end,
+        case when marketing then p_now end,
+        reminders, case when reminders then p_confirmation->>'reminders_version' end,
+        case when reminders then p_now end,
+        p_ref_code, referrer
+      ) returning session_version into account_version;
+    exception when unique_violation then
+      get stacked diagnostics conflict_constraint = constraint_name;
+      if conflict_constraint = 'advent_participants_handle_key' then
+        return jsonb_build_object('status', 'handle_taken');
       end if;
+      if conflict_constraint = 'advent_participants_ref_code_key' then
+        return jsonb_build_object('status', 'ref_collision');
+      end if;
+      if conflict_constraint = 'advent_participants_email_key' then
+        return jsonb_build_object('status', 'invalid');
+      end if;
+      raise;
+    end;
+  else
+    if not p_signin then
+      return jsonb_build_object('status', 'confirmation_required');
+    end if;
+    account_id := login.participant_id;
+    select session_version into account_version from public.advent_participants where id = account_id;
+    if not found then
+      return jsonb_build_object('status', 'invalid');
     end if;
   end if;
 
   update public.advent_login_tokens
     set used_at = p_now, participant_id = account_id, pending_signup = null
     where token_hash = p_hash;
-  return jsonb_build_object('status', 'ok', 'id', account_id);
+  return jsonb_build_object('status', 'ok', 'id', account_id, 'version', account_version);
 end;
+$$;
+
+create function public.advent_unsubscribe_reminders(p_unsubscribe_id uuid)
+returns void language sql security invoker set search_path = public, pg_temp as $$
+  update public.advent_participants set reminders_opt_in = false, reminders_withdrawn_at = clock_timestamp()
+  where reminder_unsubscribe_id = p_unsubscribe_id and reminders_opt_in;
+$$;
+
+create function public.advent_sign_out(p_id uuid, p_version int)
+returns void language sql security invoker set search_path = public, pg_temp as $$
+  update public.advent_participants set session_version = session_version + 1
+    where id = p_id and session_version = p_version;
 $$;
 
 create function public.advent_complete_door(
@@ -257,20 +330,25 @@ create function public.advent_update_settings(
   p_id uuid, p_handle text, p_badge boolean, p_marketing boolean, p_consent_version text,
   p_reminders boolean, p_reminders_consent_version text
 ) returns boolean language plpgsql security invoker set search_path = public, pg_temp as $$
+declare
+  changed_at timestamptz := clock_timestamp();
 begin
   update public.advent_participants
-    set handle = p_handle, badge_public = p_badge, marketing_opt_in = p_marketing,
-      marketing_consent_text_version = case when p_marketing
-        then coalesce(marketing_consent_text_version, p_consent_version) end,
-      marketing_consent_at = case when p_marketing
-        then coalesce(marketing_consent_at, clock_timestamp()) end,
+    set handle = p_handle, badge_public = p_badge,
+      marketing_opt_in = coalesce(p_marketing, marketing_opt_in),
+      marketing_consent_text_version = case when p_marketing and not marketing_opt_in
+        then p_consent_version else marketing_consent_text_version end,
+      marketing_consent_at = case when p_marketing and not marketing_opt_in
+        then changed_at else marketing_consent_at end,
+      marketing_withdrawn_at = case when p_marketing then null
+        when not p_marketing and marketing_opt_in then changed_at else marketing_withdrawn_at end,
       reminders_opt_in = coalesce(p_reminders, reminders_opt_in),
-      reminders_consent_text_version = case
-        when p_reminders is null then reminders_consent_text_version
-        when p_reminders then coalesce(reminders_consent_text_version, p_reminders_consent_version) end,
-      reminders_consent_at = case
-        when p_reminders is null then reminders_consent_at
-        when p_reminders then coalesce(reminders_consent_at, clock_timestamp()) end
+      reminders_consent_text_version = case when p_reminders and not reminders_opt_in
+        then p_reminders_consent_version else reminders_consent_text_version end,
+      reminders_consent_at = case when p_reminders and not reminders_opt_in
+        then changed_at else reminders_consent_at end,
+      reminders_withdrawn_at = case when p_reminders then null
+        when not p_reminders and reminders_opt_in then changed_at else reminders_withdrawn_at end
     where id = p_id;
   return found;
 end;
@@ -296,7 +374,7 @@ returns int language sql stable security invoker set search_path = public, pg_te
   from public.advent_participants as referrer
   join public.advent_participants as referred on referred.referred_by = referrer.id
   join public.advent_completions as first_door on first_door.participant_id = referred.id and first_door.day = 1
-  where referrer.id = p_id and referred.id <> referrer.id and referred.created_at > referrer.created_at;
+  where referrer.id = p_id and referred.id <> referrer.id and referred.created_at >= referrer.created_at;
 $$;
 
 create function public.advent_draw_candidates(p_day int)
@@ -355,7 +433,7 @@ $$;
 create function public.advent_reminder_claim(p_day int, p_limit int)
 returns jsonb language sql security invoker set search_path = public, extensions, pg_temp as $$
   with recipients as (
-    select p.id, p.email from public.advent_participants as p
+    select p.id, p.email, p.reminder_unsubscribe_id from public.advent_participants as p
     where p.reminders_opt_in and p.id in (select * from public.advent_reminder_eligible(p_day))
     order by p.id
     limit greatest(0, least(p_limit, 100))
@@ -366,7 +444,7 @@ returns jsonb language sql security invoker set search_path = public, extensions
     on conflict (day, participant_id) do nothing
     returning participant_id
   )
-  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'email', r.email) order by r.id), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'email', r.email, 'unsubscribeId', r.reminder_unsubscribe_id) order by r.id), '[]'::jsonb)
   from recipients as r
   join claimed as c on c.participant_id = r.id;
 $$;
@@ -398,7 +476,10 @@ returns jsonb language sql stable security invoker set search_path = public, pg_
   ) as counts;
 $$;
 
-revoke execute on function public.advent_consume_token(text, timestamptz, timestamptz, text, boolean),
+revoke execute on function public.advent_issue_signup_token(text, timestamptz, timestamptz, jsonb),
+  public.advent_preview_token(text, timestamptz),
+  public.advent_consume_token(text, timestamptz, timestamptz, text, boolean, jsonb, boolean),
+  public.advent_sign_out(uuid, int), public.advent_unsubscribe_reminders(uuid),
   public.advent_complete_door(uuid, int, timestamptz, boolean, text, text),
   public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
@@ -407,7 +488,10 @@ revoke execute on function public.advent_consume_token(text, timestamptz, timest
   public.advent_reminder_claim(int, int), public.advent_reminder_record(int, jsonb),
   public.advent_reminder_stats()
   from public, anon, authenticated;
-grant execute on function public.advent_consume_token(text, timestamptz, timestamptz, text, boolean),
+grant execute on function public.advent_issue_signup_token(text, timestamptz, timestamptz, jsonb),
+  public.advent_preview_token(text, timestamptz),
+  public.advent_consume_token(text, timestamptz, timestamptz, text, boolean, jsonb, boolean),
+  public.advent_sign_out(uuid, int), public.advent_unsubscribe_reminders(uuid),
   public.advent_complete_door(uuid, int, timestamptz, boolean, text, text),
   public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),

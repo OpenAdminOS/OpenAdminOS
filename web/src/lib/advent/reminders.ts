@@ -36,7 +36,7 @@ export function renderReminder(door: ReminderDoor, site: string, unsubscribe: st
   return { subject, text, html };
 }
 
-export type Recipient = { id: string; email: string };
+export type Recipient = { id: string; email: string; unsubscribeId: string };
 export type SendOutcome =
   | { id: string; status: "sent"; messageId: string }
   | { id: string; status: "failed" | "unconfirmed"; code: string };

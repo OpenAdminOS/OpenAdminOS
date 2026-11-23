@@ -15,16 +15,23 @@ function matchesSignature(value: string, expected: string) {
   return DIGEST.test(value) && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
 }
 
-export function signSession(participantId: string, now: number, secret: string) {
-  return signParticipant("advent-session", participantId, now, SESSION_SECONDS, secret);
+export function signSession(participantId: string, version: number, now: number, secret: string) {
+  const payload = `${participantId}.${version}.${Math.floor(now / 1000) + SESSION_SECONDS}`;
+  return `${payload}.${signature("advent-session", payload, secret)}`;
 }
 
 export function verifySession(value: string, now: number, secret: string) {
-  return verifyParticipant("advent-session", value, now, secret);
+  const [id, version, expires, mac, extra] = value.split(".");
+  if (!id || !UUID.test(id) || !version || !/^\d{1,10}$/.test(version) || Number(version) > 2147483647
+    || !expires || !/^\d{1,12}$/.test(expires) || Number(expires) * 1000 <= now || !mac || extra !== undefined) return null;
+  return matchesSignature(mac, signature("advent-session", `${id}.${version}.${expires}`, secret))
+    ? { id, version: Number(version) }
+    : null;
 }
 
-export function signReminderUnsubscribe(participantId: string, now: number, secret: string) {
-  return signParticipant("advent-reminders-unsubscribe", participantId, now, REMINDER_LINK_SECONDS, secret);
+// The URL carries a separate random unsubscribe ID, never the participant UUID.
+export function signReminderUnsubscribe(unsubscribeId: string, now: number, secret: string) {
+  return signParticipant("advent-reminders-unsubscribe", unsubscribeId, now, REMINDER_LINK_SECONDS, secret);
 }
 
 export function verifyReminderUnsubscribe(value: string, now: number, secret: string) {

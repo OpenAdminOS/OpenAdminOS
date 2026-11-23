@@ -78,7 +78,7 @@ test("the reminder eligibility query skips opt-outs, same-door completions and p
 
 test("send runs reserve at most 100 recipients per batch and reruns only send unclaimed day records", async () => {
   const people = Array.from({ length: 205 }, (_, index) => ({
-    id: `participant-${index}`, email: `participant-${index}@example.test`,
+    id: `participant-${index}`, email: `participant-${index}@example.test`, unsubscribeId: `opaque-${index}`,
   }));
   const claims = new Map<number, Set<string>>();
   const batchSizes: number[] = [];
@@ -152,6 +152,6 @@ test("unsubscribe tokens are purpose-bound, tamper resistant, and expire after 9
   assert.equal(verifyReminderUnsubscribe(token, now + REMINDER_LINK_SECONDS * 1000, secret), null);
   assert.equal(verifyReminderUnsubscribe(token.replace(/^0/, "9"), now, secret), null);
   assert.equal(verifyReminderUnsubscribe(token, now, "wrong test secret"), null);
-  assert.equal(verifyReminderUnsubscribe(signSession(id, now, secret), now, secret), null);
+  assert.equal(verifyReminderUnsubscribe(signSession(id, 0, now, secret), now, secret), null);
   assert.equal(verifySession(token, now, secret), null);
 });

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { primary, secondary } from "./shared";
+
+const subscribe = () => () => {};
 
 export function ActionForm({
   action, children, label, disabled, quiet, refreshOnSuccess = false,
@@ -17,13 +19,14 @@ export function ActionForm({
   refreshOnSuccess?: boolean;
 }) {
   const router = useRouter();
+  const ready = useSyncExternalStore(subscribe, () => true, () => false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || disabled) return;
+    if (!ready || busy || disabled) return;
     const values = Object.fromEntries(new FormData(event.currentTarget));
     setError("");
     setNotice("");
@@ -41,6 +44,10 @@ export function ActionForm({
       }
       if (body.redirect) {
         const destination = new URL(body.redirect, window.location.origin);
+        if (destination.origin !== window.location.origin || !["https:", "http:"].includes(destination.protocol)) {
+          setError("The campaign returned an invalid destination. Reload the page and try again.");
+          return;
+        }
         if (destination.pathname === window.location.pathname) {
           // A fragment-only navigation would keep the old server-rendered state.
           window.history.replaceState(null, "", body.redirect);
@@ -61,28 +68,14 @@ export function ActionForm({
 
   return (
     <form method="post" action={`/api/advent/${action}`} onSubmit={submit} className="space-y-4" aria-busy={busy}>
-      {children}
-      <button type="submit" className={quiet ? secondary : primary} disabled={busy || disabled}>
-        {busy ? "Submitting…" : label}
-      </button>
+      <fieldset className="min-w-0 space-y-4" disabled={!ready || busy || disabled}>
+        {children}
+        <button type="submit" className={quiet ? secondary : primary}>
+          {busy ? "Submitting…" : label}
+        </button>
+      </fieldset>
       {error && <p role="alert" className="rounded-[10px] bg-brand-danger-surface px-3 py-2 text-sm leading-6 text-brand-danger">{error}</p>}
       {notice && <p role="status" className="rounded-[10px] bg-brand-ok-surface px-3 py-2 text-sm leading-6 text-brand-ink">{notice}</p>}
     </form>
-  );
-}
-
-export function VerifyLink() {
-  const [token, setToken] = useState<string | null>(null);
-  useEffect(() => {
-    const fragment = window.location.hash.slice(1);
-    setToken((current) => current ?? fragment);
-    if (fragment) window.history.replaceState(null, "", window.location.pathname);
-  }, []);
-  if (token === null) return <p role="status" className="text-sm text-brand-muted">Reading the sign-in link…</p>;
-  if (!token) return <p role="alert" className="text-sm text-brand-danger">This link is incomplete. Open the original email or request a new link.</p>;
-  return (
-    <ActionForm action="verify" label="Continue to My Advent">
-      <input type="hidden" name="token" value={token} />
-    </ActionForm>
   );
 }

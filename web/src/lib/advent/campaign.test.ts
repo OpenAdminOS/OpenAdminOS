@@ -103,9 +103,9 @@ const account = "01234567-abcd-4321-abcd-0123456789ab";
 const issued = timestamp("2026-12-01T05:00:00Z");
 
 test("sessions reject tampering, incorrect keys and exact expiry", () => {
-  const session = signSession(account, issued, secret);
-  assert.equal(verifySession(session, issued, secret), account);
-  assert.equal(verifySession(session, issued + SESSION_SECONDS * 1000 - 1, secret), account);
+  const session = signSession(account, 3, issued, secret);
+  assert.deepEqual(verifySession(session, issued, secret), { id: account, version: 3 });
+  assert.deepEqual(verifySession(session, issued + SESSION_SECONDS * 1000 - 1, secret), { id: account, version: 3 });
   assert.equal(verifySession(session, issued + SESSION_SECONDS * 1000, secret), null);
   assert.equal(verifySession(session, issued, "a different secret"), null);
   assert.equal(verifySession(session.replace(/^0/, "1"), issued, secret), null);

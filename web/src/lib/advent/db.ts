@@ -12,6 +12,7 @@ export type Participant = {
   badge_public: boolean;
   marketing_opt_in: boolean;
   reminders_opt_in: boolean;
+  session_version: number;
 };
 
 export type Completion = { day: number; completed_at: string; on_time: boolean };
@@ -86,13 +87,14 @@ export function rpc<T>(name: string, body: object = {}) {
 export async function currentParticipant() {
   const secret = sessionSecret();
   const session = (await cookies()).get(SESSION_COOKIE)?.value;
-  const id = secret && session ? verifySession(session, Date.now(), secret) : null;
-  if (!id) return null;
+  const verified = secret && session ? verifySession(session, Date.now(), secret) : null;
+  if (!verified) return null;
   const [account] = await db<Participant[]>("advent_participants", {
-    select: "id,email,handle,ref_code,badge_public,marketing_opt_in,reminders_opt_in",
-    id: `eq.${id}`,
+    select: "id,email,handle,ref_code,badge_public,marketing_opt_in,reminders_opt_in,session_version",
+    id: `eq.${verified.id}`,
+    session_version: `eq.${verified.version}`,
   });
-  return account ?? null;
+  return account?.session_version === verified.version ? account : null;
 }
 
 export async function currentAdmin() {

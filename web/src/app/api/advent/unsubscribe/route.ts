@@ -1,6 +1,6 @@
 import { verifyReminderUnsubscribe } from "~/lib/advent/auth";
 import { adventEnabled, sessionSecret, storageConfig } from "~/lib/advent/config";
-import { db } from "~/lib/advent/db";
+import { rpc } from "~/lib/advent/db";
 import { escapeHtml } from "~/lib/advent/reminders";
 
 const headers = {
@@ -26,7 +26,7 @@ function tokenFrom(request: Request) {
   return new URL(request.url).searchParams.get("token") ?? "";
 }
 
-function reminderParticipant(token: string) {
+function reminderUnsubscribeId(token: string) {
   const secret = sessionSecret();
   return secret ? verifyReminderUnsubscribe(token, Date.now(), secret) : null;
 }
@@ -43,7 +43,7 @@ export function GET(request: Request) {
   if (!adventEnabled()) return new Response(null, { status: 404, headers });
   if (!sessionSecret() || !storageConfig()) return unavailable();
   const token = tokenFrom(request);
-  if (!reminderParticipant(token)) return expired();
+  if (!reminderUnsubscribeId(token)) return expired();
   const action = `/api/advent/unsubscribe?token=${encodeURIComponent(token)}`;
   return page("Unsubscribe from door reminders", `<p>Turn off daily Advent of Admin reminders for this account.</p>
 <form method="post" action="${escapeHtml(action)}">
@@ -57,18 +57,11 @@ export async function POST(request: Request) {
   if (!sessionSecret() || !storageConfig()) {
     return human ? unavailable() : new Response("Reminder settings are unavailable.", { status: 503, headers });
   }
-  const id = reminderParticipant(tokenFrom(request));
+  const id = reminderUnsubscribeId(tokenFrom(request));
   if (!id) return human ? expired() : new Response("Invalid or expired link.", { status: 400, headers });
 
   try {
-    await db("advent_participants", { id: `eq.${id}` }, {
-      method: "PATCH",
-      body: {
-        reminders_opt_in: false,
-        reminders_consent_text_version: null,
-        reminders_consent_at: null,
-      },
-    });
+    await rpc<void>("advent_unsubscribe_reminders", { p_unsubscribe_id: id });
     return human ? page("Door reminders are off", "<p>You can change this any time in My Advent.</p>")
       : new Response("Door reminders are off.", { headers });
   } catch {

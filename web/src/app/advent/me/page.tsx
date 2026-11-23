@@ -60,12 +60,14 @@ export default async function MyAdventPage() {
                 <label className="flex items-baseline gap-2 text-sm">
                   <input type="checkbox" name="marketing" defaultChecked={account.marketing_opt_in} /> {MARKETING_CONSENT_LABEL}
                 </label>
+                <input type="hidden" name="marketing_initial" value={account.marketing_opt_in ? "on" : "off"} />
                 <label className="flex items-baseline gap-2 text-sm">
                   <input type="checkbox" name="reminders" defaultChecked={account.reminders_opt_in} /> {REMINDERS_CONSENT_LABEL}
                 </label>
                 <input type="hidden" name="reminders_initial" value={account.reminders_opt_in ? "on" : "off"} />
               </ActionForm>
             </div>
+            <p className="text-sm text-brand-muted">Signs you out on every device.</p>
             <ActionForm action="sign-out" label="Sign out" quiet />
           </section>
           <section className="max-w-xl space-y-3 border-t border-brand-line pt-6" aria-labelledby="delete-title">

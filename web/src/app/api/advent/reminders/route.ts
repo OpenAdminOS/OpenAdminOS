@@ -67,9 +67,9 @@ async function sendBatch(day: number, recipients: Recipient[], { apiKey, from, s
   const ids = recipients.map(({ id }) => id);
   const door = doors[day - 1]!;
   const now = Date.now();
-  const emails = recipients.map(({ id, email }) => {
+  const emails = recipients.map(({ unsubscribeId, email }) => {
     const unsubscribe = new URL("/api/advent/unsubscribe", SITE_URL);
-    unsubscribe.searchParams.set("token", signReminderUnsubscribe(id, now, secret));
+    unsubscribe.searchParams.set("token", signReminderUnsubscribe(unsubscribeId, now, secret));
     return {
       from, to: [email], ...renderReminder(door, SITE_URL, unsubscribe.href),
       headers: {

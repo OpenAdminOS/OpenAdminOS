@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getRedis, keys } from "../stats/redis";
 import { createLoginToken, redeemLoginToken } from "./auth";
 import { MARKETING_CONSENT_VERSION, REMINDERS_CONSENT_VERSION, RULES_VERSION } from "./config";
+import { clientIp } from "./client-ip";
 import { db, rpc } from "./db";
 import { newReferralCode, parseReferral } from "./identity";
 
@@ -32,10 +33,7 @@ return 1
 `;
 
 export async function allowLoginEmail(request: Request, email: string, secret: string) {
-  const forwarded = process.env.VERCEL === "1"
-    ? request.headers.get("x-vercel-forwarded-for")
-    : request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip");
-  const ip = forwarded?.split(",")[0]?.trim() || "unknown";
+  const ip = clientIp(request);
   const keyHash = (value: string) => createHmac("sha256", secret).update(value).digest("hex");
   return (await getRedis().eval<unknown[], number>(
     LOGIN_RATE_SCRIPT,
@@ -44,9 +42,13 @@ export async function allowLoginEmail(request: Request, email: string, secret: s
   )) === 1;
 }
 
+export type SignupDraft = { handle: string; ref: string; marketing: boolean; reminders: boolean };
+export type SignupConfirmation = { handle: string; discardReferral: boolean; marketing: boolean; reminders: boolean };
+export type LoginPreview = { kind: "signin"; handle: string; maskedEmail: string }
+  | { kind: "signup"; email: string; handle: string; referral: string | null; marketing: boolean; reminders: boolean };
+
 export async function issueLoginLink(
-  origin: string, email: string, secret: string,
-  signup?: { handle: string; ref: string; marketing: boolean; reminders: boolean; acceptedAt: string },
+  origin: string, email: string, secret: string, requestedAt: string, signup?: SignupDraft,
 ) {
   const [account] = await db<{ id: string }[]>("advent_participants", {
     select: "id",
@@ -54,37 +56,36 @@ export async function issueLoginLink(
   });
   if (!account && !signup) return true;
 
-  const now = Date.now();
-  const token = createLoginToken(now, secret);
-  const pending = signup && !account ? {
-    email,
-    handle: signup.handle,
-    ref: parseReferral(signup.ref),
-    marketing: signup.marketing,
-    marketing_version: signup.marketing ? MARKETING_CONSENT_VERSION : null,
-    reminders: signup.reminders,
-    reminders_version: signup.reminders ? REMINDERS_CONSENT_VERSION : null,
-    accepted_at: signup.acceptedAt,
-    rules_version: RULES_VERSION,
-  } : null;
-  await db("advent_login_tokens", { expires_at: `lte.${new Date(now).toISOString()}` }, { method: "DELETE" });
-  await db("advent_login_tokens", {}, {
-    method: "POST",
-    body: {
-      token_hash: token.hash,
-      expires_at: token.expiresAt,
-      participant_id: account?.id ?? null,
-      pending_signup: pending,
-    },
-  });
+  const token = createLoginToken(Date.now(), secret);
+  if (account) {
+    await db("advent_login_tokens", {}, {
+      method: "POST",
+      body: { token_hash: token.hash, expires_at: token.expiresAt, participant_id: account.id },
+    });
+  } else if (signup) {
+    const issued = await rpc<boolean>("advent_issue_signup_token", {
+      p_hash: token.hash,
+      p_expires_at: token.expiresAt,
+      p_requested_at: requestedAt,
+      p_pending: {
+        email,
+        handle: signup.handle,
+        ref: parseReferral(signup.ref),
+        marketing: signup.marketing,
+        reminders: signup.reminders,
+      },
+    });
+    if (!issued) return true;
+  }
 
   // The fragment keeps the token out of HTTP request URLs and referrer headers.
   const link = new URL(`/advent/verify#${token.linkToken}`, origin).toString();
-  const sent = await deliverLoginLink(email, link);
-  if (!sent) {
-    await db("advent_login_tokens", { token_hash: `eq.${token.hash}` }, { method: "DELETE" });
-  }
-  return sent;
+  return deliverLoginLink(email, link);
+}
+
+export function previewLogin(linkToken: string, secret: string) {
+  return redeemLoginToken(linkToken, Date.now(), secret, (hash, now) =>
+    rpc<LoginPreview | null>("advent_preview_token", { p_hash: hash, p_now: now }));
 }
 
 async function deliverLoginLink(email: string, link: string) {
@@ -113,11 +114,23 @@ async function deliverLoginLink(email: string, link: string) {
   }
 }
 
-type Consumed = { status: "ok"; id: string }
-  | { status: "invalid" | "signup_closed" | "handle_taken" | "ref_collision" };
+type Consumed = { status: "ok"; id: string; version: number }
+  | { status: "invalid" | "signup_closed" | "handle_taken" | "ref_collision" | "confirmation_required" };
 
-export async function consumeLogin(linkToken: string, secret: string, campaignTime: number, allowSignup: boolean) {
+export async function consumeLogin(
+  linkToken: string, secret: string, campaignTime: number, allowSignup: boolean,
+  intent: "signin" | SignupConfirmation,
+) {
   return redeemLoginToken(linkToken, Date.now(), secret, async (hash, now) => {
+    const confirmation = intent === "signin" ? null : {
+      handle: intent.handle,
+      discard_referral: intent.discardReferral,
+      marketing: intent.marketing,
+      reminders: intent.reminders,
+      rules_version: RULES_VERSION,
+      marketing_version: MARKETING_CONSENT_VERSION,
+      reminders_version: REMINDERS_CONSENT_VERSION,
+    };
     for (let attempt = 0; attempt < 3; attempt++) {
       const result = await rpc<Consumed>("advent_consume_token", {
         p_hash: hash,
@@ -125,6 +138,8 @@ export async function consumeLogin(linkToken: string, secret: string, campaignTi
         p_created_at: new Date(campaignTime).toISOString(),
         p_ref_code: newReferralCode(),
         p_allow_signup: allowSignup,
+        p_confirmation: confirmation,
+        p_signin: intent === "signin",
       });
       if (result.status !== "ref_collision") return result;
     }
