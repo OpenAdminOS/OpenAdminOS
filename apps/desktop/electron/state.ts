@@ -6499,7 +6499,10 @@ export class AppStateStore {
     await this.serialize(async () => {
       const latest = await this.read();
       const installedAgents = latest.installedAgents.map((entry) =>
-        entry.slug === agent.slug && entry.schedule && JSON.stringify(entry.schedule) === JSON.stringify(schedule)
+        entry.slug === agent.slug && entry.schedule?.enabled && !entry.schedule.lastSkipReason &&
+          entry.schedule.lastScheduledRunAt === schedule.lastScheduledRunAt &&
+          (entry.schedule.organizationId === schedule.organizationId || !entry.schedule.organizationId) &&
+          JSON.stringify(entry.schedule.modelDestination) === JSON.stringify(schedule.modelDestination)
           ? { ...entry, schedule: { ...entry.schedule, lastScheduledRunAt: now } }
           : entry);
       if (installedAgents.some((entry, index) => entry !== latest.installedAgents[index])) {
@@ -8259,7 +8262,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       persisted.activeTenantId,
     )?.id;
     const next = [...scheduledAgents
-      .filter((agent) => activeOrganizationId !== undefined && agent.schedule?.organizationId === activeOrganizationId)
+      .filter((agent) => !agent.schedule?.lastSkipReason && activeOrganizationId !== undefined && agent.schedule?.organizationId === activeOrganizationId)
       .map((agent) => {
         const schedule = agent.schedule;
         const last = schedule?.lastScheduledRunAt

@@ -53,7 +53,7 @@ async function makeStore(state: Record<string, unknown>, providers?: ProviderSum
     `${JSON.stringify({ activeProviderId: "ollama", tenants: [], runs: [], installedAgents: [], ...state }, null, 2)}\n`,
     "utf8",
   );
-  const store = new AppStateStore({ filePath, tokenStore, statsApiUrl: "", ...(providers ? { providerListFactory: () => providers } : {}) });
+  const store = new AppStateStore({ filePath, tokenStore, statsApiUrl: "", appVersion: "0.7.2", ...(providers ? { providerListFactory: () => providers } : {}) });
   return {
     store,
     filePath,

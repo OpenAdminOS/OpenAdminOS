@@ -747,6 +747,7 @@ function scheduleLine(
   activeOrganizationId: string | undefined,
   connectors: readonly ConnectorSummary[] | "failed" | undefined,
 ): string {
+  if (agent.schedule?.lastSkipReason) return agent.schedule.lastSkipReason;
   const when = !organization
     ? "Paused until it is assigned to an organization."
     : organization.id !== activeOrganizationId
