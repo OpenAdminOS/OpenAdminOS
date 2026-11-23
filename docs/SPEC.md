@@ -2564,8 +2564,9 @@ Electron window.
 
 ### Reset OpenAdminOS and uninstall (2026-11-19)
 
-Removing the app does not remove its data, so a reinstall restored tenant
-access with no sign-in (tester finding, 18 Nov, macOS). Settings > Data has
+On macOS and Linux removing the app does not remove its data, so a
+reinstall restored tenant access with no sign-in (tester finding, 18 Nov,
+macOS). Settings > Data has
 **Reset OpenAdminOS**: a product modal with the data folder, what is removed and
 what stays (the enterprise application and admin consent in each tenant, the IT
 `policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
@@ -2878,7 +2879,8 @@ Mockup: `docs/mockups/34-local-reset.html`.
   In electron-builder 26.15 this applies to assisted installers too and never
   to an update (the installer runs the old uninstaller with `--updated`); for
   an all-users install the uninstaller switches to the current account for
-  this step, so it removes only that account's Roaming folder. The
+  this step, so it removes only that account's Roaming folder
+  (`OpenAdminOS`, and `@openadminos\desktop` for the package name). The
   machine-wide policy (`%ProgramData%\OpenAdminOS\policy.json`) and other
   accounts' data are not touched. It does not remove the updater cache or the
   `OpenAdminOS Scheduler` task; Reset OpenAdminOS does. On macOS and Linux

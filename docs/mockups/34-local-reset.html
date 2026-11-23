@@ -419,7 +419,7 @@
     <header class="doc-head">
       <div class="kicker">MOCKUP 34 · SETTINGS, DATA</div>
       <h1>Reset OpenAdminOS</h1>
-      <p>A full local reset for an admin who hands the device on, starts over, or uninstalls. Removing the app bundle alone leaves the data folder, the Keychain item and the token caches, so a reinstall would sign straight back in.</p>
+      <p>A full local reset for an admin who hands the device on, starts over, or uninstalls. On macOS and Linux, removing the app alone leaves the data folder, the Keychain item or keyring entry and the token caches, so a reinstall would sign straight back in.</p>
       <p>The reset runs in two phases so nothing is deleted while Chromium, SQLite or MSAL hold files. The running app closes every organization to new work, stops background work and restarts. The next launch removes the data folder before anything opens it, then shows first run.</p>
       <nav class="toc" aria-label="Frames">
         <a href="#f1">1 Settings row</a><a href="#f2">2 Confirmation</a><a href="#f3">3 Resetting</a><a href="#f4">4 Could not start</a><a href="#f5">5 Reset did not finish</a><a href="#f6">6 First run after reset</a>
