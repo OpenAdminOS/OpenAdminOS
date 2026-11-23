@@ -3498,6 +3498,8 @@ export class IntuneChatService {
             accessBlockedMessage = caught.message;
             assistantContent = caught.message;
             responseModel = undefined;
+            // Another provider would be blocked the same way, so an issue the loop found is not offered.
+            modelFit = undefined;
             emitDelta(assistantContent);
           } else {
             assistantStatus = "failed";
