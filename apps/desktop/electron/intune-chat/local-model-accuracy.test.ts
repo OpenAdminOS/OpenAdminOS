@@ -1122,6 +1122,20 @@ describe("Model fit after a local model failure (PR #213 with #215)", () => {
     }));
   });
 
+  it("keeps the overflow's offer when the cached-data answer then fails too", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      reply(({ loop }) => {
+        if (loop) throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give openadminos/openadmin-8b 16,384, usually because free memory ran out.");
+        throw new Error("Ollama stopped while answering.");
+      });
+      const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(answered.status, "failed");
+      assert.equal(answered.modelFit?.reason, "context-too-small");
+      assert.equal(answered.modelFit?.neededTokens, 40652);
+      assert.ok(answered.modelFit?.offerId);
+    }));
+  });
+
   it("offers a provider once the 8B model has failed the tool loop repeatedly, and not after one malformed answer", async () => {
     await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
       reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "Deterministic answer."));

@@ -3460,7 +3460,7 @@ export class IntuneChatService {
                 // reasoning-only reply), or failed the investigation often enough that Chat stops trying
                 // it: the cached-data answer carries the model fit offer. Nothing goes elsewhere unless
                 // the admin chooses it.
-                if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, fitModel) ?? (agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, fitModel) ? repeatedFailureIssue(provider, fitModel) : undefined);
+                if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, fitModel) ?? (agentic.reason !== "context-limit" && agentic.reason !== "provider-unavailable" && agenticModelHasFailedRepeatedly(providerId, fitModel) ? repeatedFailureIssue(provider, fitModel) : undefined);
                 await streamDeterministicAnswer(agentic.fallbackNotice, localChat);
               }
             }
@@ -3505,7 +3505,7 @@ export class IntuneChatService {
               ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
               : caught instanceof Error ? caught.message : String(caught);
             // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
-            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel);
+            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
