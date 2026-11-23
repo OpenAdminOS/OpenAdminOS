@@ -2067,7 +2067,7 @@ describe("local reset: confirmations", () => {
       // Now recorded as applying, until the apply finishes. The finished
       // run's report delivery pass may still be under way: wait it out.
       let blocker = await store.beginLocalReset();
-      for (let attempt = 0; attempt < 3000 && blocker !== undefined && /being sent|still finishing|still running/.test(blocker); attempt += 1) {
+      for (let attempt = 0; attempt < 3000 && blocker !== undefined && !/is applying a confirmed change/.test(blocker); attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         blocker = await store.beginLocalReset();
       }
