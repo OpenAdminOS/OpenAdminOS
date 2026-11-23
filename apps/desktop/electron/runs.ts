@@ -14,6 +14,7 @@ import {
 } from "@openadminos/runtime";
 import {
   agentCallsNoServiceApi,
+  contextTooSmallFromError,
   agentServiceIds,
   formatServiceList,
   graphAccessDenialFromError,
@@ -28,6 +29,7 @@ import {
   runInitiator,
   type AgentSummary,
   type GraphAccessDenial,
+  type RunFailureReason,
   type IntuneChatMessage,
   type ProviderId,
   type ProviderSummary,
@@ -250,8 +252,9 @@ export function readOnlyRevalidationTransport(
 
 /** A plan that could not be checked again keeps the Graph denial of that check. */
 class PlanCheckFailedError extends Error {
-  constructor(message: string, readonly accessDenial: GraphAccessDenial | undefined) {
-    super(message);
+  constructor(message: string, readonly accessDenial: GraphAccessDenial | undefined, failureReason?: RunFailureReason) {
+    // contextTooSmallFromError finds the typed reason through `cause`.
+    super(message, failureReason ? { cause: { code: failureReason.code, failure: failureReason } } : undefined);
     this.name = "PlanCheckFailedError";
   }
 }
@@ -1496,9 +1499,11 @@ export class RunService {
       });
       controller.signal.throwIfAborted();
       if (fresh.status === "failed" || !fresh.plan) {
+        // The Graph denial and the typed context reason (a prompt that no
+        // longer fits the model) ride along with the failure.
         throw new PlanCheckFailedError(kind === "office"
           ? `The proposal could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Run the assignment again."}`
-          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`, fresh.accessDenial);
+          : `The plan could not be checked against the tenant before applying, so nothing was applied. ${fresh.error ?? "Select Run again to review a fresh plan."}`, fresh.accessDenial, fresh.failureReason);
       }
       const change = planChangeSinceReview(input.plan, fresh.plan);
       if (change.changed) throw new Error(planChangedSinceReviewCopy(change, kind, { usesModel: (fresh.usage?.calls ?? 0) > 0 }));
@@ -1794,6 +1799,7 @@ export class RunService {
   ): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     const finishedAt = new Date().toISOString();
+    const failureReason = contextTooSmallFromError(error);
     await this.persistRunSnapshot({
       ...run,
       status: "failed",
@@ -1801,6 +1807,7 @@ export class RunService {
       summary: `${agent.name} failed: ${message}`,
       error: message,
       ...graphFailureFields(error),
+      ...(failureReason ? { failureReason } : {}),
     });
   }
 

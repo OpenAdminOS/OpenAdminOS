@@ -44,6 +44,7 @@ import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
   auditGraphWritesFetch,
+  appVersionSatisfies,
   compareSemver,
   createGraphAdapter,
   type GraphWriteAuditSink,
@@ -7046,13 +7047,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     return installed.map((agent) => {
       const candidate = bySlug.get(agent.slug) ?? bySlug.get(agent.id);
+      // Whether the installed copy runs depends on the installed manifest.
+      // A newer registry entry that needs a newer app only gates its update.
       const compatibleAgent = withAgentCompatibility(
         {
           ...agent,
           minAppVersion:
-            candidate?.minAppVersion ??
             agent.minAppVersion ??
-            agent.provenance?.minAppVersion,
+            agent.provenance?.minAppVersion ??
+            candidate?.minAppVersion,
         },
         this.appVersion,
       );
@@ -7067,6 +7070,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           manifestUrl: candidate.manifestUrl,
           manifestSha256: candidate.manifestSha256,
           minAppVersion: candidate.minAppVersion,
+          supported: appVersionSatisfies(this.appVersion, candidate.minAppVersion || "0.1.0"),
         },
       };
     });
@@ -7182,6 +7186,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         scopes: target.scopes,
         writeLimits: parsedManifest.descriptor.writeLimits,
         author: target.author,
+        // The installed manifest decides whether the agent runs here.
+        ...(target.minAppVersion ? { minAppVersion: target.minAppVersion } : {}),
         ...(hasRemainingSettings ? { settings: prunedSettings } : {}),
         provenance: buildAgentProvenance({
           agent: target,

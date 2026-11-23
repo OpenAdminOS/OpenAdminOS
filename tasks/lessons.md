@@ -58,11 +58,11 @@ Format:
 
 ## Never load a local model on the maintainer's Mac
 
-**Pattern:** Live app checks never load an Ollama or LM Studio model: no `ollama run`, no `/api/chat` or `/api/generate`, no profile with a local provider that could answer or embed. Use a hosted provider, and check `ollama ps` after any dev-build launch.
+**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models, and tokenizer or model metadata work uses recorded counts or mocked `/api/show` and `/api/tags`. Live app checks use a hosted provider (Claude Code or Codex CLI), and end-to-end profiles are seeded with a hosted provider or none, never a local provider that could answer or embed.
 
-**Why:** Loading a local model makes the machine unusable. The PR #212 end-to-end check launched a dev build whose seeded profile had Ollama active; nothing was loaded, but the maintainer made the rule explicit on 2026-11-19.
+**Why:** Loading a local model makes the machine unusable. On 2026-11-19 the prompt size estimator was calibrated by sending synthetic prompts to OpenAdmin 8B and gpt-oss 20B through the local Ollama, and the maintainer forbade it during the local model accuracy work for the 8B demos. The PR #212 end-to-end check also launched a dev build whose seeded profile had Ollama active.
 
-**How to apply:** Seed end-to-end profiles with a hosted provider or none, put the rule in every brief for an implementer or reviewer that may launch the app, and run `ollama stop <model>` at once if one is loaded.
+**How to apply:** Before an end-to-end or smoke run, confirm its provider is a mock or a hosted CLI. Run `ollama ps` afterwards (it reads status and loads nothing); if a model is listed, run `ollama stop <model>` at once. Name the provider and model used in every hand-back, and pass this rule to every delegated child and reviewer.
 
 ---
 

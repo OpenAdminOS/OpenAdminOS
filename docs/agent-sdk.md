@@ -163,12 +163,13 @@ Supported transform kinds:
 
 | Kind | Main settings |
 | --- | --- |
-| `group-by-age` | `source`, `timestampField`, `groups: [{ name, inactiveDaysAtLeast }]` |
+| `group-by-age` | `source`, `timestampField`, `groups: [{ name, inactiveDaysAtLeast }]`, optional `fallbackTimestampField` (read when `timestampField` is empty), optional `pick` (field path kept per item instead of the whole item) |
 | `filter-by-age` | `source`, `timestampField`, `inactiveDaysAtLeast` |
-| `count-by-field` | `source`, `field`, optional `buckets` |
+| `count-by-field` | `source`, `field`, optional `buckets`, optional `missingBucket` (counts null, absent, empty string and empty array values), optional `top` (keep the n largest buckets as `{ top, otherValues, otherCount }`; older apps ignore it and return every bucket) |
 | `group-by-field` | `source`, `field`, optional `missing` bucket |
 | `sort-by` | `source`, `field`, optional `direction` (`asc` or `desc`), optional `take` |
 | `correlate-stale-devices` | `intuneSource`, `entraSource`, `staleDays`, `strategy` (`both`, `intune-only`, or `entra-only`), optional `excludePersonalDevices` |
+| `compact-conditional-access` | `source` (Conditional Access policies from Graph). One short record per policy for model prompts: scope as counts or `All`, built-in role names, conditions, grant and session controls |
 
 Field paths can use dot notation, such as `status.errorCode`.
 
@@ -261,7 +262,17 @@ Templates use a small Liquid-style subset:
 ```
 
 Supported filters are `size`, `total`, `length`, `sample(n)`, `default(...)`,
-`join(...)`, `upper`, `lower`, and `type`. When a string is only one template
+`join(...)`, `boundedJson(maxChars)`, `counts`, `top(n)`, `upper`, `lower`, and
+`type`. In prompts, prefer counts and bounded samples to whole inventories:
+Prefer step settings to filters in bundled agents: an app that predates a
+setting ignores it and still runs the agent, while an unknown filter stops the
+run. `counts` turns a `group-by-field` result into bucket counts, `top(n)` keeps the
+n largest buckets of a count (when buckets are left out the result is
+`{ top: { ... }, otherValues, otherCount }`, so no tenant value collides with
+the summary; read one bucket exactly with its own expression, such as
+`{{ by_location.output.(unset) | size }}`), and `boundedJson(maxChars)` keeps whole records up to a character budget
+and says how many were left out. Every LLM call is checked against the model's
+context window before it is sent when the provider reports one. When a string is only one template
 expression, the raw value is preserved. This lets
 `source: "{{ load_devices.output }}"` remain an array.
 

@@ -13,7 +13,7 @@ Clusters recent failed sign-ins by error, app, user, client app, Conditional Acc
 | Field | Value |
 | --- | --- |
 | Agent ID | `sign-in-failure-explainer` |
-| Version | `1.1.0` |
+| Version | `1.2.0` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `policies` |
@@ -21,7 +21,7 @@ Clusters recent failed sign-ins by error, app, user, client app, Conditional Acc
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `6b31f810` |
+| Last changed | 2026-11-19 · `e7327592` |
 
 ## Execution
 

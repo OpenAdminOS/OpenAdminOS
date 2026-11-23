@@ -37,8 +37,9 @@ import {
   type ServiceId,
 } from "@openadminos/agent-sdk";
 
-import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
+import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, topBuckets, type TemplateContext } from "./template-engine.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
+import { compactConditionalAccessPolicies } from "./ca-compact.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export class ManifestValidationError extends Error {
@@ -1161,9 +1162,11 @@ async function runTransformSkill(
       return transformSortBy(skill.id, settings, ctx);
     case "correlate-stale-devices":
       return transformCorrelateStaleDevices(skill.id, settings, ctx);
+    case "compact-conditional-access":
+      return transformCompactConditionalAccess(skill.id, settings, ctx);
     default:
       throw new Error(
-        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.`,
+        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices, compact-conditional-access.`,
       );
   }
 }
@@ -1267,6 +1270,23 @@ interface GroupByAgeSpec {
   source: unknown;
   timestampField: string;
   groups: Array<{ name: string; inactiveDaysAtLeast: number }>;
+  /** Optional field path kept per item instead of the whole item. */
+  pick?: string;
+  /** Optional field read when `timestampField` is empty on an item. */
+  fallbackTimestampField?: string;
+}
+
+function transformCompactConditionalAccess(
+  skillId: string,
+  settings: Record<string, unknown>,
+  ctx: RunContext,
+): unknown[] {
+  if (!Array.isArray(settings.source)) {
+    throw new Error(`transform "${skillId}": compact-conditional-access expects "source" to resolve to an array.`);
+  }
+  const compact = compactConditionalAccessPolicies(settings.source);
+  ctx.log("info", `Compacted ${compact.length} Conditional Access policies for review.`);
+  return compact;
 }
 
 function transformGroupByAge(
@@ -1296,8 +1316,14 @@ function transformGroupByAge(
     result[group.name] = [];
   }
 
+  const pick = typeof spec.pick === "string" && spec.pick.length > 0 ? spec.pick : undefined;
+  const fallback =
+    typeof spec.fallbackTimestampField === "string" && spec.fallbackTimestampField.length > 0
+      ? spec.fallbackTimestampField
+      : undefined;
   for (const item of spec.source as Array<Record<string, unknown>>) {
-    const raw = readFieldPath(item, spec.timestampField);
+    let raw = readFieldPath(item, spec.timestampField);
+    if ((raw === undefined || raw === null || raw === "") && fallback) raw = readFieldPath(item, fallback);
     if (typeof raw !== "string") continue;
     const ms = new Date(raw).getTime();
     if (Number.isNaN(ms)) continue;
@@ -1305,7 +1331,7 @@ function transformGroupByAge(
 
     for (const group of ordered) {
       if (days >= group.inactiveDaysAtLeast) {
-        result[group.name]!.push(item);
+        result[group.name]!.push(pick ? readFieldPath(item, pick) ?? null : item);
         break;
       }
     }
@@ -1565,6 +1591,12 @@ interface CountByFieldSpec {
   buckets?: string[];
   /** Optional bucket for null, absent or empty field values. */
   missingBucket?: string;
+  /**
+   * Optional: keep only the n largest buckets, with the rest summarized.
+   * Older runtimes ignore it and return every bucket, so a manifest that
+   * sets it still runs on them.
+   */
+  top?: number;
 }
 
 function transformCountByField(
@@ -1589,13 +1621,22 @@ function transformCountByField(
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
     const raw = readFieldPath(item, spec.field);
-    const missing = raw === undefined || raw === null || (raw === "" && spec.missingBucket !== undefined);
+    // An empty string or empty array (Graph's "no risk levels") counts as
+    // missing only when the manifest names a bucket for it, so agents
+    // without missingBucket keep their counts.
+    const empty = raw === "" || (Array.isArray(raw) && raw.length === 0);
+    const missing = raw === undefined || raw === null || (empty && spec.missingBucket !== undefined);
     if (missing && !spec.missingBucket) continue;
     const key = missing ? spec.missingBucket! : typeof raw === "string" ? raw : String(raw);
     Object.defineProperty(result, key, { value: (Object.hasOwn(result, key) ? result[key]! : 0) + 1, writable: true, enumerable: true, configurable: true });
   }
 
   const total = (spec.source as unknown[]).length;
+  if (typeof spec.top === "number" && Number.isInteger(spec.top) && spec.top > 0) {
+    const bounded = topBuckets(result, spec.top);
+    ctx.log("info", `Counted ${total} items by "${spec.field}" into ${Object.keys(result).length} buckets; kept the ${spec.top} largest.`);
+    return bounded as Record<string, number>;
+  }
   const breakdown = Object.entries(result)
     .map(([key, count]) => `${key}=${count}`)
     .join(", ");

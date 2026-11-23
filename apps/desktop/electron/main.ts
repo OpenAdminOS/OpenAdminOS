@@ -1971,8 +1971,10 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const testPrompts = [
     "Always retire stale Windows devices that have not synced.",
     "Which managed devices have not synced in the last 7 days?",
-    "Which devices are stale in Intune but still active in Entra?",
+    // Asked before any model answer in this chat: after one, a direct cache answer is left to the model,
+    // whose memory may hold a standing instruction.
     "Which Windows devices are not encrypted?",
+    "Which devices are stale in Intune but still active in Entra?",
     "Which Autopilot devices are in failed enrollment state?",
     "Which required apps are assigned but not installed on targeted devices?",
     "Which recent sign-ins failed because of Conditional Access?",
@@ -2011,6 +2013,15 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
         "write-intent agent handoff",
       );
       sawAgentSuggestion = bodyText().includes("Offboarding agent");
+      await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
+      continue;
+    }
+    if (prompt === "Which managed devices have not synced in the last 7 days?") {
+      // A local model never writes a computed device answer: code renders the count and the list.
+      await waitFor(
+        () => bodyText().includes("Intune managed devices not synced in the last 7 days: 1.") && bodyText().includes("WIN-01 (Windows"),
+        "code-computed stale device answer",
+      );
       await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
       continue;
     }
