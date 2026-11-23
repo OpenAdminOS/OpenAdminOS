@@ -435,9 +435,10 @@ that model cannot take it; its think value is chosen after that lookup, and
 a context overflow on that resend is checked, and reported, against what the
 new lookup saw and the size that resend sent. The
 retry after a context overflow reads its lookup again when the list then
-names another revision or the name resolves to another installed model. The think value,
-version and family a send uses are taken right before it, and the chat
-request's timeout starts only then; the last
+names another revision or the name resolves to another installed model. A name that resolves to another
+installed model by the first send (an upgrade seen meanwhile) is sized again.
+The think value, version and family a send uses are taken right before it,
+and the chat request's timeout starts only then; the last
 resend after a rejected level always sends `false`, without remembering it
 when the model could not be confirmed. A reply with reasoning and no answer
 is never returned as the answer: it fails with

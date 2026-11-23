@@ -300,7 +300,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // the context), not that memory ran out; that size stays.
         // The size the latest attempt sent: after a think fallback to a model
         // that replaced the one the request was built for, not the kept one.
-        const sent = retry ? retry.numCtx : lastSentCtx;
+        const sent = lastSentCtx;
         const sentSizeGiven = counted !== undefined && sent !== undefined && counted.available >= sent;
         if (!sentSizeGiven) forgetSize(sent);
         if (memory) {
@@ -355,7 +355,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           return new Error(contextTooSmallMessage(model, counted.requested, counted.available, atModelLimit));
         }
-        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : cachedCtx !== undefined ? { size: cachedCtx, kept: true } : undefined, text));
+        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : lastSentCtx !== undefined && lastSentCtx === cachedCtx ? { size: lastSentCtx, kept: true } : undefined, text));
       };
       // The context lookup for this request, by the name as given.
       // Takes the signal of the attempt it belongs to; the lookup has its own timeout.
@@ -470,6 +470,20 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
         }
 
+        // A name that resolves to another installed model by now (a server
+        // upgraded while this request was sized reads a lone :local as the
+        // default tag) is sized again, so its own pin holds.
+        if (ollamaInstalledModelNow(endpoint, model) !== installedModel) {
+          installedModel = await settleInstalledModel();
+          sized = await sizeRequest();
+          if (opts.signal?.aborted) throw stoppedByUser();
+          applySizing();
+          if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
+          numCtx = sized?.numCtx;
+          raisedCtx = sized?.numCtx;
+          retry = sized?.numCtx === undefined ? undefined : { requested: sized.neededTokens, numCtx: sized.numCtx, sizedUpFront: true };
+          if (sized?.numCtx !== undefined) retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
+        }
         startAttempt(sized?.numCtx !== undefined
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
@@ -609,6 +623,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
           [response, detail, numCtx] = await sendWithThinkFallback(numCtx);
+          // A fallback that sized the retry again for a replacement model sent its size.
+          if (retry && numCtx !== retry.numCtx) retry = numCtx === undefined ? undefined : { ...retry, numCtx };
           if (response.ok) raisedCtx = numCtx;
         }
         if (!response.ok) {
