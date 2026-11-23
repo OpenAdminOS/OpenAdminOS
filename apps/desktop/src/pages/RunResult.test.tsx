@@ -885,6 +885,26 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "ollama", model: "gpt-oss:20b", requireOnDeviceModel: true })));
   });
 
+  it("blocks a reviewed on-device rerun when its Ollama model is now a Cloud alias", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({
+      status: "failed", plan: undefined, providerId: "ollama", model: "alias",
+      tenantId: "tenant-1", requireOnDeviceModel: true,
+      providerEndpointBinding: { endpoint: "http://127.0.0.1:11434", scope: "model-fit" },
+    });
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, models: ["alias", "llama3.1"], remoteModels: ["alias"] }
+      : provider);
+    const bridge = makeMockBridge({}, createMockAppState({ providers, runs: [run] }));
+    renderWithPreflight(run.id, bridge);
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+    const dialog = await screen.findByRole("dialog", { name: "Review run" });
+    expect(within(dialog).getByText("alias is unavailable for an on-device rerun. Choose a model that runs on this device.")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Prompts stay on this device/)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+  });
+
   it("keeps a failed dry run a dry run when it is run again with another provider", async () => {
     const user = userEvent.setup();
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, dryRun: true, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });

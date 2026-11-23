@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_NAME, isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { ProviderLogo } from "../components/ProviderLogo";
 import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
@@ -657,7 +658,8 @@ function ProviderRow({
   );
   const cliLabel = provider.cli ? ({ ready: "Connected", "check-required": "Test required", "not-installed": "Not installed", "signed-out": "Signed out", "access-denied": "Access denied", "unsupported-version": "Update required", "request-failed": "Request failed" } as const)[provider.cli.state] : undefined;
   // A hosted provider names where its prompts go, like every other surface.
-  const kind = provider.isLocal ? "Local" : promptsGoTo(provider);
+  const modelProvider = providerForModel(provider, effectiveModel);
+  const kind = modelProvider.isLocal ? "Local" : promptsGoTo(modelProvider);
   const status = testing
     ? { label: "Checking", tone: "info" as const }
     : !implemented
@@ -734,7 +736,7 @@ function ProviderRow({
       ) : null}
       {expanded ? (
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/30 px-5 py-4">
-          <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{provider.description}</p>
+          <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{modelProvider.name === OLLAMA_CLOUD_NAME ? `${promptsGoTo(modelProvider)}.` : provider.description}</p>
           {/* The check's own recovery: how to start an installed runtime, or why the check failed. */}
           {implemented && provider.detail && provider.detail !== testResult?.message && ((provider.status === "not-installed" && provider.installed) || provider.status === "error") ? (
             <p className="mt-2 max-w-[720px] text-sm leading-5 text-[var(--color-text)]">{provider.detail}</p>
@@ -768,7 +770,7 @@ function ProviderRow({
                         await onSetActiveModel(provider.id, selected && isActive ? null : model);
                       })()}
                     >
-                      <span className="min-w-0 truncate">{providerModelLabel(provider, model)}</span>
+                      <span className="min-w-0 truncate">{providerModelLabel(provider, model)}{isRemoteBackedModel(provider, model) ? ` · ${OLLAMA_CLOUD_NAME}` : ""}</span>
                     </UiButton>
                   );
                 })}

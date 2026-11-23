@@ -16,3 +16,19 @@ describe("the status strip boundary for Copilot Fusion", () => {
     expect(boundary.tooltip).toContain("Several models may see each prompt.");
   });
 });
+
+it("shows Ollama Cloud in the strip for remote aliases and cloud tags, and local for the local model", () => {
+  const ollama: ProviderSummary = {
+    id: "ollama", name: "Ollama", description: "", isLocal: true, status: "connected",
+    models: ["llama3.1", "cloud-alias", "glm-4.6:cloud"], remoteModels: ["cloud-alias"],
+  };
+  const boundary = (model: string) => deriveDataBoundary(createMockAppState({
+    providers: [ollama], activeProviderId: "ollama", activeModelByProviderId: { ollama: model },
+  }));
+  for (const model of ["cloud-alias", "glm-4.6:cloud"]) {
+    expect(boundary(model)).toMatchObject({
+      kind: "hosted", model, label: expect.stringContaining("Ollama Cloud · prompts processed on ollama.com"),
+    });
+  }
+  expect(boundary("llama3.1")).toMatchObject({ kind: "local", model: "llama3.1" });
+});

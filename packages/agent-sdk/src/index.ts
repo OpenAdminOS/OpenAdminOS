@@ -750,6 +750,8 @@ export interface StartRunOptions {
   bindProviderEndpoint?: boolean;
   /** `getProviderDestination` as the run review saw it; with `bindProviderEndpoint`, a changed destination refuses the start. */
   expectedProviderDestination?: string;
+  /** The reviewed Ollama model destination. Refuse admission if it changes. */
+  expectedOllamaCloud?: boolean;
   /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
@@ -1073,6 +1075,8 @@ export interface RunRecord {
   confirmedAt?: string;
   rejectedAt?: string;
   providerId?: ProviderId;
+  /** Ollama Cloud or on-device Ollama, recorded at admission to preserve the model destination. */
+  ollamaCloud?: boolean;
   model?: string;
   trigger?: "manual" | "schedule";
   /**
@@ -5026,6 +5030,47 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
 ];
 
+export const OLLAMA_CLOUD_NAME = "Ollama Cloud";
+export const OLLAMA_CLOUD_LOCATION = "Ollama Cloud · prompts processed on ollama.com";
+
+/** A cloud tag can be present even if the server omitted remote metadata. */
+export function isOllamaCloudModel(model: string | undefined): boolean {
+  return Boolean(model && /[:-]cloud$/i.test(model.trim()));
+}
+
+export function isRemoteBackedModel(provider: Pick<ProviderSummary, "id" | "remoteModels">, model: string | undefined): boolean {
+  return Boolean(model && (provider.remoteModels?.includes(model) || (provider.id === "ollama" && isOllamaCloudModel(model))));
+}
+
+export function isOnDeviceModel(provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">, model: string | undefined): boolean {
+  return provider.isLocal && !isRemoteBackedModel(provider, model);
+}
+
+/** The trust identity of a selected model. The original summary describes the server. */
+export function providerForModel(provider: ProviderSummary, model?: string): ProviderSummary;
+export function providerForModel(provider: ProviderSummary | undefined, model?: string): ProviderSummary | undefined;
+export function providerForModel(provider: ProviderSummary | undefined, model?: string): ProviderSummary | undefined {
+  if (provider?.id === "ollama" && isRemoteBackedModel(provider, model)) {
+    return { ...provider, name: OLLAMA_CLOUD_NAME, isLocal: false };
+  }
+  return provider;
+}
+
+export function activeModelProvider(
+  provider: ProviderSummary,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ProviderSummary;
+export function activeModelProvider(
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ProviderSummary | undefined;
+export function activeModelProvider(
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ProviderSummary | undefined {
+  return providerForModel(provider, resolveProviderDefaultModel(provider, activeModelByProviderId).model);
+}
+
 export interface DeriveTrustStateInput {
   provider: ProviderSummary | undefined;
   activeTenant?: TenantRecord | undefined;
@@ -5080,7 +5125,7 @@ export function deriveTrustState(
     providerOrInput !== undefined &&
     typeof providerOrInput === "object" &&
     "provider" in (providerOrInput as object);
-  const provider = isInputObject
+  const endpoint = isInputObject
     ? (providerOrInput as DeriveTrustStateInput).provider
     : (providerOrInput as ProviderSummary | undefined);
   const activeTenant = isInputObject
@@ -5089,6 +5134,7 @@ export function deriveTrustState(
   const model = isInputObject
     ? (providerOrInput as DeriveTrustStateInput).model
     : undefined;
+  const provider = providerForModel(endpoint, model);
 
   const tenantSegment = activeTenant
     ? `tenant ${activeTenant.displayName}`
@@ -5119,7 +5165,9 @@ export function deriveTrustState(
     return base;
   }
 
-  const detail = activeTenant
+  const detail = provider.id === "ollama" && provider.name === OLLAMA_CLOUD_NAME
+    ? `${activeTenant ? "Prompts and tenant data are" : "Prompts are"} sent to ollama.com for processing by Ollama Cloud.`
+    : activeTenant
     ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}${modelDetail}.`
     : `Prompts are sent to ${provider.name}${modelDetail}.`;
   const base: TrustState = {

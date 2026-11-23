@@ -1,3 +1,4 @@
+import { isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ServiceMark } from "../components/ServiceMark";
 import { ProviderLogo } from "../components/ProviderLogo";
@@ -10,7 +11,7 @@ import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
 import { AGENT_COPY, PROVIDER_TOOL_NAMES, modelTrustNote, promptsGoTo, providerDataLocationDetail } from "../copy";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { modelFitModelName } from "../components/ModelFitNotice";
-import { hostedModelFitModel, isListedHostedModel, isPlaceholderModel } from "../shared/model-fit";
+import { hostedModelFitModel, isListedHostedModel, isPlaceholderModel, onDeviceRerunProvider } from "../shared/model-fit";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -192,7 +193,7 @@ export default function AgentDetail({
     ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
     : activeTenant;
   const pendingProviderId = pendingRunChoice?.providerId ?? state.activeProviderId;
-  const pendingProvider = state.providers.find(
+  const pendingEndpoint = state.providers.find(
     (provider) => provider.id === pendingProviderId,
   );
   // A model fit rerun on a hosted provider with no model named (a provider picked in setup) uses the
@@ -200,17 +201,23 @@ export default function AgentDetail({
   const pendingFitLike = Boolean(pendingRunChoice?.modelFit || pendingRunChoice?.safeguards);
   // A model the choice named is the one the review shows, even when its provider no longer lists it
   // (the review then says so and Start stays disabled), never a fallback this run would not use.
+  const onDeviceRerun = pendingFitLike && (pendingRunChoice?.safeguards?.onDevice === true || pendingEndpoint?.isLocal === true);
+  const onDeviceProvider = onDeviceRerun && pendingEndpoint ? onDeviceRerunProvider(pendingEndpoint) : undefined;
   const pendingModel =
     pendingFitLike && pendingRunChoice?.model
       ? pendingRunChoice.model
-      : pendingFitLike && pendingProvider && !pendingProvider.isLocal
-      ? hostedModelFitModel(pendingProvider, state.activeModelByProviderId)
+      : pendingFitLike && pendingEndpoint && !onDeviceRerun
+      ? hostedModelFitModel(pendingEndpoint, state.activeModelByProviderId)
       : resolveRunModel({
-          provider: pendingProvider,
+          provider: onDeviceProvider ?? pendingEndpoint,
           activeModelByProviderId: state.activeModelByProviderId,
           preferredModel: agent?.preferredModel,
           explicitModel: pendingRunChoice?.model,
         }).model;
+  const pendingProvider = providerForModel(pendingEndpoint, pendingModel);
+  const onDeviceModelMissing = onDeviceRerun && (
+    !pendingModel || !onDeviceProvider?.models.includes(pendingModel)
+  );
 
   const handleUninstallAgent = async () => {
     if (!agent || uninstalling) return;
@@ -409,7 +416,7 @@ export default function AgentDetail({
     safeguards?: { onDevice: boolean };
     expectedProviderDestination?: string;
   }) => {
-    if (!agent) return;
+    if (!agent || onDeviceModelMissing) return;
     // One start per click: a second activation while admission is pending (a double click, a slow
     // provider check) does nothing, so one review never queues two runs.
     if (startingRunRef.current) return;
@@ -425,8 +432,12 @@ export default function AgentDetail({
       const pinTenant = fitLike
         ? pendingTenant ? { tenantId: choice?.tenantId ?? pendingTenant.id } : { expectNoTenant: true as const }
         : choice?.tenantId ? { tenantId: choice.tenantId } : {};
+      const reviewedOllama = !fitLike && pendingEndpoint?.id === "ollama" && pendingModel &&
+        (pendingEndpoint.isLocal || isRemoteBackedModel(pendingEndpoint, pendingModel))
+        ? { providerId: pendingEndpoint.id, model: pendingModel, expectedOllamaCloud: isRemoteBackedModel(pendingEndpoint, pendingModel) }
+        : undefined;
       const options =
-        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model || fitLike)
+        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model || fitLike || reviewedOllama)
           ? {
               ...(choice.dryRun ? { dryRun: true } : {}),
               ...(choice.runForRealOfRunId ? { runForRealOfRunId: choice.runForRealOfRunId } : {}),
@@ -434,7 +445,7 @@ export default function AgentDetail({
               ...pinTenant,
               // A model on this device is checked again by the host before the run is admitted.
               // Decided by the provider this review shows, so a provider picked in setup sets it too.
-              ...(fitLike && pendingProvider?.isLocal ? { requireOnDeviceModel: true } : {}),
+              ...(onDeviceRerun ? { requireOnDeviceModel: true } : {}),
               // Every later phase (replan, apply) goes only where the provider was reached when the run was admitted.
               ...(fitLike ? { bindProviderEndpoint: true } : {}),
               ...(fitLike && choice.expectedProviderDestination ? { expectedProviderDestination: choice.expectedProviderDestination } : {}),
@@ -443,6 +454,7 @@ export default function AgentDetail({
               // it if the provider no longer reports it instead of running another one.
               ...(fitLike ? { providerId: pendingProviderId } : choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : fitLike && pendingModel ? { model: pendingModel } : {}),
+              ...reviewedOllama,
             }
           : undefined;
       const run = await startRun(agent.slug, options);
@@ -1142,6 +1154,7 @@ export default function AgentDetail({
           providerName={pendingProvider?.name ?? pendingProviderId}
           providerId={pendingProviderId}
           providerIsLocal={pendingProvider?.isLocal === true}
+          onDeviceModelMissing={onDeviceModelMissing}
           requestedScopes={requestedScopes}
           organizationName={organizationForTenant(resolveOrganizations(state), pendingTenant?.id)?.name}
           organizationInactive={pendingTenant !== undefined && pendingTenant.id !== state.activeTenantId}
@@ -1154,6 +1167,8 @@ export default function AgentDetail({
           // A model fit rerun starts only once the review knows where its provider is reached.
           {...((pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.model && !isPlaceholderModel(pendingRunChoice.model) && pendingProvider && pendingProvider.models.length > 0 && !pendingProvider.models.includes(pendingRunChoice.model)
             ? { destinationState: "model-gone" as const, missingModel: pendingRunChoice.model }
+            : onDeviceModelMissing
+            ? { destinationState: "on-device-model-missing" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingProvider && !pendingProvider.isLocal && !isListedHostedModel(pendingProvider, pendingRunChoice.model ?? pendingModel)
             ? { destinationState: "no-model" as const }
             : (pendingRunChoice?.modelFit || pendingRunChoice?.safeguards) && pendingRunChoice.startRefused
@@ -2804,6 +2819,7 @@ function RunPreflightModal({
   deliverySaving,
   starting = false,
   destinationState,
+  onDeviceModelMissing,
   missingModel,
   onConnect,
   onOpenConnections,
@@ -2844,7 +2860,8 @@ function RunPreflightModal({
   /** A start from this review is being admitted; Start stays disabled until it returns. */
   starting?: boolean;
   /** A model fit rerun is still reading, or could not read, where its provider is reached, or its hosted provider names no model. */
-  destinationState?: "pending" | "failed" | "no-model" | "model-gone" | "refused";
+  onDeviceModelMissing?: boolean;
+  destinationState?: "pending" | "failed" | "no-model" | "model-gone" | "on-device-model-missing" | "refused";
   /** The model a model fit rerun named that its provider no longer reports. */
   missingModel?: string | undefined;
   onClose: () => void;
@@ -2898,6 +2915,7 @@ function RunPreflightModal({
   // Why a model fit rerun cannot start yet; Start and Try again wait for the same thing.
   const fitHint =
     destinationState === "model-gone" ? MODEL_FIT_COPY.modelGone(missingModel ?? "", providerName)
+    : destinationState === "on-device-model-missing" ? MODEL_FIT_COPY.onDeviceModelMissing(providerName, model)
     : destinationState === "no-model" ? MODEL_FIT_COPY.modelMissing(providerName)
     : destinationState === "refused" ? MODEL_FIT_COPY.reviewAgain
     : destinationState === "failed" ? MODEL_FIT_COPY.destinationFailed(providerName)
@@ -2989,12 +3007,12 @@ function RunPreflightModal({
           <PreflightFact label="Model">
             <span className="inline-flex items-center gap-1.5">
               <ProviderLogo provider={providerId} size={14} />
-              {modelLabel ?? model ?? "Provider default"}
+              {modelLabel ?? model ?? (onDeviceModelMissing ? "No on-device model available" : "Provider default")}
             </span>
             {model && modelTrustNote(providerId, model) ? (
               <span className="mt-0.5 block text-xs text-[var(--color-warning)]">{`${modelTrustNote(providerId, model)}.`}</span>
             ) : null}
-            {providerIsLocal ? (
+            {onDeviceModelMissing ? null : providerIsLocal ? (
               <span className="mt-0.5 block text-xs text-[var(--color-success)]">{`${providerName}. Prompts stay on this device.`}</span>
             ) : (
               <>
@@ -3176,8 +3194,8 @@ function ModelCardBody({
         </div>
       )}
       <div className="mt-3 flex flex-wrap gap-1.5">
-        <Pill tone={provider?.isLocal ? "success" : "warning"}>
-          {provider?.isLocal ? "Local" : "Hosted"}
+        <Pill tone={providerForModel(provider, resolvedModel.model)?.isLocal ? "success" : "warning"}>
+          {providerForModel(provider, resolvedModel.model)?.isLocal ? "Local" : "Hosted"}
         </Pill>
       </div>
     </>

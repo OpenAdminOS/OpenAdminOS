@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_LOCATION, isRemoteBackedModel } from "@openadminos/agent-sdk";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
@@ -167,6 +168,7 @@ export function RunWithMenu({
                     <div className="pb-1">
                       {models.map((model) => {
                         const isPinned = model === pinnedModel;
+                        const trustNote = isRemoteBackedModel(provider, model) ? OLLAMA_CLOUD_LOCATION : modelTrustNote(provider.id, model);
                         return (
                           <button
                             key={model}
@@ -185,8 +187,8 @@ export function RunWithMenu({
                             />
                             <span title={model} className="min-w-0 flex-1">
                               <span className="block truncate font-mono text-sm text-[var(--color-text-soft)]">{providerModelLabel(provider, model)}</span>
-                              {modelTrustNote(provider.id, model) ? (
-                                <span className="block text-xs text-[var(--color-text-muted)]">{modelTrustNote(provider.id, model)}</span>
+                              {trustNote ? (
+                                <span className="block text-xs text-[var(--color-text-muted)]">{trustNote}</span>
                               ) : null}
                             </span>
                             {isPinned && (

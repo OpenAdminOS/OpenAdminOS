@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_LOCATION, OLLAMA_CLOUD_NAME } from "@openadminos/agent-sdk";
 import type { ProviderSummary } from "../shared/openAdminOS";
 
 export interface TrustScope {
@@ -76,6 +77,7 @@ const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: s
 
 /** The short label: the status strip, the composer model chip and the confirmation's "Goes to". */
 export function providerDataLocation(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>): string {
+  if (provider.id === "ollama" && provider.name === OLLAMA_CLOUD_NAME) return OLLAMA_CLOUD_LOCATION;
   return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]?.label) || `${provider.name} · location not stated`;
 }
 
@@ -89,6 +91,7 @@ export function providerDataLocation(provider: Pick<ProviderSummary, "name"> & P
 export function promptsGoTo(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>, withTenantData = false): string {
   const entry = provider.id ? HOSTED_DATA_LOCATIONS[provider.id] : undefined;
   const what = withTenantData ? "Prompts and tenant data" : "Prompts";
+  if (provider.id === "ollama" && provider.name === OLLAMA_CLOUD_NAME) return `${what} are sent to ollama.com for processing by Ollama Cloud`;
   if (entry?.through) {
     const [through, where] = entry.label.split(" · ");
     return `${what} leave this device through ${through}; ${where}`;

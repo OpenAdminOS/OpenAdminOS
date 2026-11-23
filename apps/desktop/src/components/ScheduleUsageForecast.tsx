@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { useMemo } from "react";
 import { resolveRunModel, type AgentSummary } from "../shared/openAdminOS";
 import { forecastScheduleUsage, formatForecastRange, scheduleBillingMessage } from "../shared/schedule-forecast";
@@ -9,12 +10,13 @@ export function ScheduleUsageForecast({ agent, intervalSeconds, compact = false 
   compact?: boolean;
 }) {
   const { state } = useAppState();
-  const provider = state.providers.find((item) => item.id === state.activeProviderId);
+  const endpoint = state.providers.find((item) => item.id === state.activeProviderId);
   const model = resolveRunModel({
-    provider,
+    provider: endpoint,
     preferredModel: agent.preferredModel,
     activeModelByProviderId: state.activeModelByProviderId,
   }).model;
+  const provider = useMemo(() => providerForModel(endpoint, model), [endpoint, model]);
   const forecast = useMemo(() => forecastScheduleUsage({
     intervalSeconds, agentSlug: agent.slug, provider, model,
     tenantId: state.activeTenantId, runs: state.runs,

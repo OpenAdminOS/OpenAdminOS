@@ -1,3 +1,4 @@
+import { providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
@@ -2657,11 +2658,9 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId) ?? null
     : null;
-  const activeProvider =
-    state.providers.find((provider) => provider.id === state.activeProviderId) ?? null;
-  const activeModel = activeProvider
-    ? state.activeModelByProviderId?.[activeProvider.id] ?? activeProvider.defaultModel
-    : undefined;
+  const endpoint = state.providers.find((provider) => provider.id === state.activeProviderId);
+  const activeModel = resolveProviderDefaultModel(endpoint, state.activeModelByProviderId).model;
+  const activeProvider = providerForModel(endpoint, activeModel);
   const scheduler = await getSchedulerLaunchSettings();
   const cacheStatus = activeTenant
     ? await store.getGraphCacheStatus(activeTenant.id).catch(() => null)
@@ -3507,6 +3506,10 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     if (value.expectNoTenant !== true) throw new Error("startRun.expectNoTenant must be true when present.");
     if (options.tenantId !== undefined) throw new Error("startRun.expectNoTenant cannot be combined with a tenant.");
     options.expectNoTenant = true;
+  }
+  if (value.expectedOllamaCloud !== undefined) {
+    if (typeof value.expectedOllamaCloud !== "boolean") throw new Error("startRun.expectedOllamaCloud must be a boolean.");
+    options.expectedOllamaCloud = value.expectedOllamaCloud;
   }
   if (value.requireOnDeviceModel !== undefined) {
     if (value.requireOnDeviceModel !== true) throw new Error("startRun.requireOnDeviceModel must be true when present.");

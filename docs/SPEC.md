@@ -3541,6 +3541,15 @@ These are visible in the mockups and need to be built as proper React components
 
 The phrase "Local-only · No data leaves this device" appears in multiple places. It is a **single source of truth**: when the user selects a hosted LLM, every instance of this messaging must flip simultaneously to honestly state where data goes (e.g., "Claude Code · location set by your account", with what that location depends on in its detail). Implement this as a single derived state, not as duplicated copy.
 
+Ollama can list local and cloud models from the same on-device server. Cloud
+tags ending in `-cloud` or `:cloud`, and aliases with remote metadata in
+`/api/tags`, are hosted. The status strip, Chat, and run review name Ollama
+Cloud and disclose that prompts are processed on ollama.com. Chat uses the
+same confirmation rules as other hosted models. A mixed Ollama installation
+defaults to a local model when no model is pinned. An on-device rerun can
+use only a listed model that runs on this device, and setup and review show
+a recovery message when none is available.
+
 The cost cell follows the same pattern: green `$0.00 local` for local providers, real cost numbers for hosted.
 
 ---

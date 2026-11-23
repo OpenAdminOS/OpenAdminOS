@@ -1100,6 +1100,40 @@ describe("IntuneChat hosted-provider disclosure", () => {
 });
 
 describe("IntuneChat hosted-provider consent", () => {
+  it("groups models from the same Ollama server by location and confirms a Cloud send", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, models: ["llama3.1", "cloud-alias"], remoteModels: ["cloud-alias"] }
+      : provider);
+    const bridge = makeMockBridge({}, createMockAppState({
+      providers, activeProviderId: "ollama", activeModelByProviderId: { ollama: "cloud-alias" },
+    }));
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, {
+      path: "/chat/:conversationId?", route: "/chat", bridge,
+    });
+
+    await user.click(await screen.findByLabelText("Model: cloud-alias"));
+    const menu = screen.getByRole("menu", { name: "Models" });
+    expect(within(menu).getByText("Hosted").parentElement).toContainElement(
+      within(menu).getByRole("menuitemradio", { name: /cloud-alias.*Ollama Cloud/ }),
+    );
+    expect(within(menu).getByText("On this device").parentElement).toContainElement(
+      within(menu).getByRole("menuitemradio", { name: /llama3.1/ }),
+    );
+    await user.click(screen.getByLabelText("Model: cloud-alias"));
+    await user.type(screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" }), "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to Ollama Cloud?" });
+    expect(within(dialog).getByText("Ollama Cloud · prompts processed on ollama.com")).toBeInTheDocument();
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Send to Ollama Cloud" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]?.[0].hostedProviderConsent).toMatchObject({
+      providerId: "ollama", model: "cloud-alias", tenantId: "tenant-1",
+    });
+  });
+
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge(
@@ -2214,7 +2248,7 @@ it("routes a suggested write-agent dry run through the dry-run preflight", async
   expect(bridge.startRun).not.toHaveBeenCalled();
   expect(await screen.findByRole("heading", { name: "Review dry run" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Start dry run" }));
-  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", expect.objectContaining({ dryRun: true, expectedOllamaCloud: false })));
 });
 
 /**

@@ -101,6 +101,10 @@ async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item:
   return results;
 }
 
+function isRemoteOllamaTag(entry: NonNullable<OllamaTagsResponse["models"]>[number], model: string): boolean {
+  return Boolean(entry.remote_host || entry.remote_model || isOllamaCloudModel(model));
+}
+
 /**
  * Whether Ollama runs this model on this device right now, from a fresh
  * /api/tags read (model metadata only; nothing is loaded). False when the
@@ -117,8 +121,8 @@ export async function ollamaModelIsOnDevice(model: string): Promise<boolean> {
     const response = await fetchLocal(`${endpoint}/api/tags`, { signal: controller.signal });
     if (!response.ok) return false;
     const payload = (await response.json()) as OllamaTagsResponse;
-    const entry = payload.models?.find((candidate) => candidate.name === model);
-    return Boolean(entry && !entry.remote_host && !entry.remote_model);
+    const entry = payload.models?.find((candidate) => (candidate.name ?? candidate.model) === model);
+    return Boolean(entry && !isRemoteOllamaTag(entry, model));
   } catch {
     return false;
   } finally {
@@ -224,7 +228,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const models = installedModels.filter((_, i) => supported[i]);
     // A remote-backed model is listed like a local one, but its prompts leave this device.
     const remoteModels = installed
-      .filter((model) => Boolean(model.remote_host || model.remote_model) && models.includes(model.name))
+      .filter((model) => models.includes(model.name) && isRemoteOllamaTag(model, model.name))
       .map((model) => model.name);
     const capabilityWarning = models.length > 0 && redirectedShow
       ? `Some model capabilities could not be verified. ${redirectedShow} Check Ollama's endpoint and refresh providers.`
@@ -245,7 +249,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
             : "Ollama has no text-generation models available. Install a text-generation model, then refresh providers.",
       ),
       models,
-      defaultModel: models[0],
+      defaultModel: models.find((model) => !remoteModels.includes(model)) ?? models[0],
       ...(remoteModels.length > 0 ? { remoteModels } : {}),
     };
   } catch (error) {

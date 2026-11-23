@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
@@ -110,13 +111,14 @@ export function Nova({
   const liveReady = useRef(false);
   const [checking, setChecking] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus>();
-  const reasoning = state.providers.find(
+  const reasoningEndpoint = state.providers.find(
     (p) => p.id === state.activeProviderId,
   );
   const reasoningModel = resolveProviderDefaultModel(
-    reasoning,
+    reasoningEndpoint,
     state.activeModelByProviderId,
   ).model;
+  const reasoning = providerForModel(reasoningEndpoint, reasoningModel);
   const reasoningReady =
     reasoning?.status === "connected" &&
     (mode !== "local" || reasoning.isLocal);

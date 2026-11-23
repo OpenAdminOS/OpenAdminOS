@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -165,10 +166,11 @@ export class OfficeService {
     return p;
   }
   private trustKey(
-    p: Pick<OfficePersona, "providerId" | "agentSlugs">,
+    p: Pick<OfficePersona, "providerId" | "model" | "agentSlugs">,
     c: Context,
   ) {
-    const provider = c.providers.find((x) => x.id === p.providerId);
+    const endpoint = c.providers.find((x) => x.id === p.providerId);
+    const provider = providerForModel(endpoint, p.model ?? endpoint?.defaultModel ?? endpoint?.models[0]);
     return createHash("sha256")
       .update(
         JSON.stringify({
@@ -198,12 +200,13 @@ export class OfficeService {
       .digest("hex");
   }
   private reviewed(p: OfficePersona, c: Context) {
+    const endpoint = c.providers.find((x) => x.id === p.providerId);
     const digest = (value: unknown) =>
       createHash("sha256").update(JSON.stringify(value)).digest("hex");
     return {
       provider: digest([
         p.providerId,
-        c.providers.find((x) => x.id === p.providerId)?.isLocal,
+        providerForModel(endpoint, p.model ?? endpoint?.defaultModel ?? endpoint?.models[0])?.isLocal,
         c.providerConfigKeys?.[p.providerId] ?? c.providerConfigKey,
       ]),
       agents: Object.fromEntries(
@@ -244,7 +247,8 @@ export class OfficeService {
       throw new Error(
         "The assigned tenant is disconnected. Edit this teammate and choose a connected tenant.",
       );
-    const provider = c.providers.find((x) => x.id === p.providerId);
+    const endpoint = c.providers.find((x) => x.id === p.providerId);
+    const provider = providerForModel(endpoint, p.model ?? endpoint?.defaultModel ?? endpoint?.models[0]);
     if (
       !provider ||
       !(

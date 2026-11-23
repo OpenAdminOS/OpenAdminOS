@@ -1,3 +1,4 @@
+import { activeModelProvider } from "@openadminos/agent-sdk";
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
@@ -289,9 +290,7 @@ export class NovaService {
       if (!state.activeTenantId || state.activeTenantId !== input.tenantId)
         throw new Error("Select a tenant before starting Nova.");
       this.requireReasoningProvider(state, input.mode);
-      const provider = state.providers.find(
-        (p) => p.id === state.activeProviderId,
-      );
+      const provider = activeModelProvider(state.providers.find((p) => p.id === state.activeProviderId), state.activeModelByProviderId);
       if (input.mode === "local" && !provider?.isLocal)
         throw new Error(
           "Choose a local agent provider before using local voice.",
@@ -430,7 +429,7 @@ export class NovaService {
       state.activeTenantId !== session.tenantId ||
       state.activeProviderId !== session.providerId ||
       selectedNovaModel(state) !== session.model ||
-      state.providers.find((p) => p.id === session.providerId)?.isLocal !==
+      activeModelProvider(state.providers.find((p) => p.id === session.providerId), state.activeModelByProviderId)?.isLocal !==
         session.reasoningIsLocal
     )
       throw new Error(
@@ -948,9 +947,7 @@ export class NovaService {
       throw new Error(
         "Connect and select a tenant in Settings before starting Nova.",
       );
-    const provider = state.providers.find(
-      (p) => p.id === state.activeProviderId,
-    );
+    const provider = activeModelProvider(state.providers.find((p) => p.id === state.activeProviderId), state.activeModelByProviderId);
     if (mode === "local" && !provider?.isLocal)
       throw new Error(
         "Choose a local agent provider in Settings before using local voice.",
@@ -1079,7 +1076,7 @@ function sessionContextDiffers(
     tenantConnection(state, session.tenantId) !== session.connection ||
     state.activeProviderId !== session.providerId ||
     selectedNovaModel(state) !== session.model ||
-    state.providers.find((p) => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal ||
+    activeModelProvider(state.providers.find((p) => p.id === session.providerId), state.activeModelByProviderId)?.isLocal !== session.reasoningIsLocal ||
     (endpoint ?? undefined) !== (session.endpoint ?? undefined)
   );
 }
@@ -1093,7 +1090,7 @@ export function buildNovaInstructions(
   profileBlock = "",
 ): string {
   const tenant = state.tenants.find((t) => t.id === state.activeTenantId);
-  const provider = state.providers.find((p) => p.id === state.activeProviderId);
+  const provider = activeModelProvider(state.providers.find((p) => p.id === state.activeProviderId), state.activeModelByProviderId);
   const allowed = (capability: "webSearch" | "startAgents" | "navigation") =>
     !settings || novaCapabilityAllowed(settings.profile, settings.policy, capability);
   const sendTargets = NOVA_SEND_CONNECTORS.filter((connector) => !settings || novaConnectorSendAllowed(settings.profile, settings.policy, connector.id)).map((connector) => connector.label);

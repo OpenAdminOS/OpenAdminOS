@@ -1,3 +1,4 @@
+import { promptsGoTo } from "../copy";
 import { useMemo, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Button } from "../components/Button";
@@ -1133,7 +1134,7 @@ function ProviderStep({
             >
               {selected.isLocal
                 ? "Tenant data and prompts stay on this device while this endpoint remains local."
-                : `Tenant prompts and retrieved context are sent to ${selected.name} after the normal hosted-provider confirmation.`}
+                : `${promptsGoTo(selected, true)} after the normal hosted-provider confirmation.`}
             </TrustBanner>
             {selected.status !== "connected" && (
               <ProviderNotReadyCard provider={selected} onRecheck={onRecheck} />

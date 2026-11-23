@@ -1,3 +1,4 @@
+import { isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { guardModelFitLlm } from "./intune-chat/model-fit.js";
 import { classifyModelFitFailure, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
@@ -383,6 +384,7 @@ export interface RunServiceHost {
   listProviders(): Promise<ProviderSummary[]>;
   /** A fresh check that this provider runs this model on this device (model fit reruns). */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
+  verifyLocalOllamaModel?(model: string): Promise<boolean>;
   providerCanRun(
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
@@ -748,6 +750,13 @@ export class RunService {
         explicitModel,
       }).model;
 
+      const ollamaCloud = activeProvider?.id === "ollama" && isRemoteBackedModel(activeProvider, model);
+      if (options.expectedOllamaCloud !== undefined && (
+        providerId !== "ollama" || ollamaCloud !== options.expectedOllamaCloud || (!ollamaCloud && activeProvider?.isLocal !== true)
+      )) {
+        throw new Error("Ollama's model destination changed, so this run did not start. Close the review and open it again.");
+      }
+
       // Preflight the LLM provider so a clearly-actionable error is
       // returned to the renderer synchronously instead of a queued
       // run that fails moments later when the runtime can't reach it.
@@ -780,7 +789,7 @@ export class RunService {
         throw new Error(`OpenAdminOS could not tell which ${activeProvider?.name ?? providerId} model this run uses, so it did not start. Choose a model, then review the run again.`);
       }
       if (options.requireOnDeviceModel) {
-        if (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+        if (activeProvider?.isLocal !== true || !isOnDeviceModel(activeProvider, model) || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
         }
         // The check reads the network; the organization this start was admitted for must still be active.
@@ -789,7 +798,11 @@ export class RunService {
         }
       }
 
-      if (options.retryOfRunId && activeProvider?.isLocal !== true) {
+      const modelProvider = providerForModel(activeProvider, model);
+      if (modelFitStart && activeProvider?.isLocal && modelProvider?.isLocal === false) {
+        throw new Error(`${model} runs in Ollama Cloud. Choose an on-device model for this rerun.`);
+      }
+      if (options.retryOfRunId && modelProvider?.isLocal !== true) {
         throw new Error("Review and retry this assignment in Agent Team to confirm the hosted provider destination before sending its evidence.");
       }
 
@@ -883,6 +896,9 @@ export class RunService {
         agent = { ...agent, settings: { ...defaults, ...agent.settings } };
       }
       const queuedRun = createQueuedRun({ agent, providerId, model, dryRun: options.dryRun });
+      if (activeProvider?.id === "ollama" && (activeProvider.isLocal || ollamaCloud)) {
+        queuedRun.ollamaCloud = ollamaCloud;
+      }
       // A model fit rerun keeps its admission checks for every later phase (plan, replan, apply).
       if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
       if (options.bindProviderEndpoint) {
@@ -1461,7 +1477,7 @@ export class RunService {
       throw error;
     }
     // A hosted model fit rerun runs only the model its review named, call by call.
-    if (!run.requireOnDeviceModel) {
+    if (!run.requireOnDeviceModel && (run.ollamaCloud !== false || !model || !this.host.verifyLocalOllamaModel)) {
       return run.providerEndpointBinding?.scope === "model-fit" ? guardModelFitLlm(llm, { before: async () => undefined, dispatched: () => undefined, model }) : llm;
     }
     // Every model call of the phase checks again, since evidence gathering and the
@@ -1473,8 +1489,13 @@ export class RunService {
         if (bound && this.host.providerTarget && (await this.host.providerTarget(providerId)).endpoint !== bound.endpoint) {
           throw new Error("The provider's settings changed while this run ran, so nothing more was sent. Review the run again.");
         }
-        const current = (await this.host.listProviders()).find((entry) => entry.id === providerId);
-        if (current?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+        const current = run.requireOnDeviceModel
+          ? (await this.host.listProviders()).find((entry) => entry.id === providerId)
+          : undefined;
+        const onDevice = run.requireOnDeviceModel
+          ? current?.isLocal === true && await this.host.verifyOnDeviceModel?.(providerId, model)
+          : model && await this.host.verifyLocalOllamaModel?.(model);
+        if (!onDevice) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? current?.name ?? providerId} still runs on this device, so nothing more was sent to it. Start the run again.`);
         }
       },
@@ -1932,7 +1953,7 @@ export class RunService {
    * when it failed, never later against changed provider settings.
    */
   private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
-    if (run.status !== "failed" || run.modelFit || !run.providerId || run.origin !== undefined || run.officeContext) return run;
+    if (run.status !== "failed" || run.modelFit || run.ollamaCloud || !run.providerId || run.origin !== undefined || run.officeContext) return run;
     // A reply with reasoning and no answer has its own cause and recovery card,
     // whatever its error text (a model name) matches.
     if (run.failureCause === "reasoning-without-answer") return run;

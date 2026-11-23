@@ -378,6 +378,22 @@ it('refuses a run reviewed with no organization once an organization became acti
   assert.equal(h.state().runs.length, 0);
 });
 
+it('refuses an Ollama run whose reviewed destination changed and records an accepted Cloud alias', async () => {
+  const h = harness();
+  const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['alias'], remoteModels: ['alias'], isLocal: true }],
+    providerCanRun: () => true,
+  });
+  await h.host.write({ ...h.state(), installedAgents: [agent] });
+  const options = { providerId: 'ollama' as const, model: 'alias' };
+  await assert.rejects(h.service.startRun('docs', { ...options, expectedOllamaCloud: false }), /model destination changed/);
+  assert.equal(h.state().runs.length, 0);
+  const run = await h.service.startRun('docs', { ...options, expectedOllamaCloud: true });
+  assert.equal(run.ollamaCloud, true);
+});
+
 it('admits a model fit rerun on a model on this device only after a fresh check that it runs here', async () => {
   const h = harness();
   const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;

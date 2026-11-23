@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -2117,6 +2118,7 @@ export class AppStateStore {
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      ...(!host.llmFactory ? { verifyLocalOllamaModel: ollamaModelIsOnDevice } : {}),
       providerTarget: (providerId) => host.providerTarget(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
@@ -2203,6 +2205,7 @@ export class AppStateStore {
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      ...(!host.llmFactory ? { verifyLocalOllamaModel: ollamaModelIsOnDevice } : {}),
       providerTarget: (providerId) => host.providerTarget(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
@@ -5890,7 +5893,7 @@ export class AppStateStore {
       const state = await this.getAppState();
       const provider = state.providers.find(p => p.id === state.activeProviderId);
       if (state.activeTenantId !== options.scope.tenantId || state.activeProviderId !== options.scope.providerId ||
-          resolveProviderDefaultModel(provider, state.activeModelByProviderId).model !== options.scope.model || provider?.isLocal !== options.scope.isLocal)
+          resolveProviderDefaultModel(provider, state.activeModelByProviderId).model !== options.scope.model || providerForModel(provider, options.scope.model)?.isLocal !== options.scope.isLocal)
         throw new Error("Nova's tenant or provider changed. Start a new conversation.");
     };
     await check();
@@ -7784,7 +7787,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const model = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
     if (state.activeProviderId !== input.providerId || model !== input.model) throw new Error(NOVA_FOLLOW_UP_PROVIDER_CHANGED);
     const organizationId = state.activeOrganizationId;
-    const hosted = !provider?.isLocal;
+    const hosted = !providerForModel(provider, model)?.isLocal;
     const acknowledgedAt = this.clock().toISOString();
     // Where the provider runs is part of the follow-up: a local provider
     // moved off this device later does not get the question. A hosted
@@ -7893,14 +7896,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         tenantConnected: state.tenants.some((tenant) => tenant.id === followUp.tenantId) && this.tenantLifecycle.isWritable(followUp.tenantId),
         activeProviderId: state.activeProviderId,
         ...(activeModel ? { activeModel } : {}),
-        activeProviderLocal: provider?.isLocal === true,
+        activeProviderLocal: providerForModel(provider, activeModel)?.isLocal === true,
         ...(activeEndpoint ? { activeProviderEndpoint: activeEndpoint } : {}),
         providerAllowed,
       });
       let reason: string | undefined;
       if (decision === "skipped-provider" && !providerAllowed) reason = NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED;
       else if (decision === "skipped-provider" && state.activeProviderId === followUp.providerId &&
-          ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== activeEndpoint))
+          ((providerForModel(provider, activeModel)?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== activeEndpoint))
         reason = NOVA_FOLLOW_UP_PROVIDER_MOVED;
       return { decision, provider, ...(activeEndpoint ? { endpoint: activeEndpoint } : {}), ...(reason ? { reason } : {}) };
     };
