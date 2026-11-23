@@ -11,7 +11,7 @@ import type {
   WritePlan,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, graphAccessDenialFromError, WritePlanLimitError } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, contextTooSmallFromError, graphAccessDenialFromError, WritePlanLimitError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
@@ -36,6 +36,12 @@ export interface SandboxBroker {
    * requests and never counts.
    */
   graphDenialFor(scriptOutput: string): Error | undefined;
+  /**
+   * A model request refused because it did not fit the context window, when
+   * that refusal answered the script's last brokered request (log calls
+   * aside). The caller still checks that the script ended on it.
+   */
+  getContextFailure(): ContextTooSmallFailure | undefined;
 }
 
 export interface SandboxBrokerInput {
@@ -47,6 +53,7 @@ type BrokerErrorCode =
   | "invalid_request"
   | "policy_denied"
   | "not_available"
+  | "context-too-small"
   | "host_error";
 
 class SandboxBrokerError extends Error {
@@ -104,6 +111,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       }
     },
     getWritePlan: () => writePlan,
+    getContextFailure: () => contextTooSmallFromError(lastFailure),
     graphDenialFor: (scriptOutput) =>
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
@@ -547,6 +555,10 @@ function ok(id: string, result?: unknown): SandboxBrokerResponse {
 }
 
 function failure(id: string, error: unknown): SandboxBrokerResponse {
+  const tooLarge = contextTooSmallFromError(error);
+  if (tooLarge) {
+    return { id, ok: false, error: { message: error instanceof Error ? error.message : String(error), code: "context-too-small", detail: tooLarge } };
+  }
   if (error instanceof WritePlanLimitError) {
     return { id, ok: false, error: { message: error.message, code: "policy_denied" } };
   }
