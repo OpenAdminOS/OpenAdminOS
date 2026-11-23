@@ -58,6 +58,12 @@ function freshConsent(providerId: ProviderId, model?: string, remember?: boolean
 }
 
 describe("Model fit: classifying a failure", () => {
+  it("recognizes a Lemonade context overflow with only the server's wording", () => {
+    assert.deepEqual(classifyModelFitFailure(new Error("Lemonade error: the request exceeds the available context size"), {
+      providerId: "lemonade", isLocal: true, model: "local-model",
+    }), { reason: "context-too-small", providerId: "lemonade", model: "local-model" });
+  });
+
   it("reads the numbers from the Ollama adapter's message and from Ollama's own error", () => {
     assert.deepEqual(classifyModelFitFailure(new Error(ADAPTER_ERROR), { providerId: "ollama", model: LOCAL_MODEL, isLocal: true }), {
       reason: "context-too-small",

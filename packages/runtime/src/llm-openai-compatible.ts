@@ -53,8 +53,8 @@ export interface OpenAiCompatibleServer {
   contextOverflowMessage?: (failure: OpenAiCompatibleFailure) => Promise<string | undefined>;
   /**
    * Whether an `error` field that is a plain string fails the request.
-   * LM Studio 0.3.x sends its errors that way; Lemonade's string errors keep
-   * their earlier handling. Defaults to false.
+   * LM Studio 0.3.x sends its errors that way. Context overflow errors fail
+   * the request for either server. Defaults to false.
    */
   stringErrors?: boolean;
 }
@@ -123,7 +123,7 @@ interface ChatResponse {
     total_tokens?: number;
   };
   /** An object in the OpenAI shape; older LM Studio releases send a string. */
-  error?: { message?: string } | string;
+  error?: { message?: string; type?: string; code?: string; n_prompt_tokens?: number; n_ctx?: number } | string;
 }
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -304,6 +304,19 @@ export function createOpenAiCompatibleLlm(
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
         throw new Error(`${name} response had no body to stream.`);
+      }
+
+      // A server can return a regular JSON error even when streaming was requested.
+      if (response.headers.get("content-type")?.includes("application/json")) {
+        try {
+          const payload = (await response.json()) as ChatResponse;
+          const detail = errorMessage(payload, server.stringErrors ?? false);
+          if (detail) throw (await contextOverflow(detail, model, opts)) ?? new Error(`${name} error: ${detail}`);
+          throw new Error(`${name} returned JSON without a stream. Try again.`);
+        } finally {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener("abort", abortFromCaller);
+        }
       }
 
       const reader = response.body.getReader();
@@ -521,7 +534,13 @@ export function classifyOpenAiCompatibleEndpoint(
 
 function errorMessage(payload: ChatResponse, stringErrors: boolean): string | undefined {
   const { error } = payload;
-  if (typeof error === "string") return stringErrors && error.length > 0 ? error : undefined;
+  if (typeof error === "string") {
+    return (stringErrors && error.length > 0) || /exceed_context_size_error|exceeds the available context size|context size has been exceeded/i.test(error) ? error : undefined;
+  }
+  if (error?.type === "exceed_context_size_error" || error?.code === "exceed_context_size_error") {
+    const { message, type, code, n_prompt_tokens, n_ctx } = error;
+    return JSON.stringify({ type, code, n_prompt_tokens, n_ctx, message });
+  }
   return error?.message || undefined;
 }
 

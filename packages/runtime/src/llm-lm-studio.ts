@@ -56,7 +56,10 @@ const LM_STUDIO_OVERFLOW = /greater than the context length|when context the ove
 
 /** The token counts LM Studio's overflow error names, when it names them. */
 export function parseLmStudioContextOverflow(detail: string): { requested?: number; loaded?: number } | undefined {
-  if (!LM_STUDIO_OVERFLOW.test(detail)) return undefined;
+  if (!LM_STUDIO_OVERFLOW.test(detail) && !/exceed_context_size_error/i.test(detail)) return undefined;
+  const requested = /"n_prompt_tokens"\s*:\s*(\d+)/.exec(detail);
+  const loaded = /"n_ctx"\s*:\s*(\d+)/.exec(detail);
+  if (requested && loaded) return { requested: Number(requested[1]), loaded: Number(loaded[1]) };
   const keep = /keep the first (\d+) tokens?[\s\S]*?context length of only (\d+) tokens?/i.exec(detail);
   if (keep) return { requested: Number(keep[1]), loaded: Number(keep[2]) };
   const nKeep = /n_keep:\s*(\d+)\s*>=?\s*n_ctx:\s*(\d+)/i.exec(detail);
@@ -65,7 +68,7 @@ export function parseLmStudioContextOverflow(detail: string): { requested?: numb
   if (llamaCpp) return { requested: Number(llamaCpp[1]), loaded: Number(llamaCpp[2]) };
   const reached = /reached context length of (\d+) tokens?/i.exec(detail);
   if (reached) return { loaded: Number(reached[1]) };
-  return {};
+  return { ...(requested ? { requested: Number(requested[1]) } : {}), ...(loaded ? { loaded: Number(loaded[1]) } : {}) };
 }
 
 interface LmStudioContextInfo {

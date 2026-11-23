@@ -148,9 +148,8 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
   // llama.cpp server, which LM Studio and Lemonade run.
-  // Its error body (an `exceed_context_size_error` type, or the `n_ctx` count) is required, so a
-  // sentence that only mentions a context size does not raise the notice.
-  if (/exceed_context_size_error/i.test(text) || (/exceeds the available context size/i.test(text) && /"n_ctx"\s*:/.test(text))) {
+  const availableContext = /exceeds the available context size/i.test(text);
+  if (/exceed_context_size_error|\b(?:request|prompt) exceeds the available context size\b/i.test(text) || (availableContext && /"n_ctx"\s*:/.test(text))) {
     const neededTokens = count(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
