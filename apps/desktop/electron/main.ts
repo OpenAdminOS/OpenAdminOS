@@ -331,7 +331,10 @@ if (
   app.setActivationPolicy("accessory");
 }
 
-let chatDateTimeLocale: Required<ChatDateTimeLocale>;
+let chatDateTimeLocale: Required<ChatDateTimeLocale> = {
+  locale: "en-US",
+  timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+};
 
 function chatDateTimeArguments(): string[] {
   return [
