@@ -1085,7 +1085,9 @@ function DryRunProviderStep({ setup, error, onRecheck, onCancel }: {
   const providerName = provider?.name ?? (providerId && (PROVIDER_TOOL_NAMES[providerId] ?? providerId)) ?? "the original provider";
   const showSetup = provider && block === "not-connected";
   const reasons: Record<DryRunProviderBlock, string> = {
-    "provider-missing": `The provider list is missing ${providerName}. Check Settings > Providers, then recheck here.`,
+    "provider-missing": providerId
+      ? `The provider list is missing ${providerName}. Check Settings > Providers, then recheck here.`
+      : "This dry run has no saved provider.",
     "not-connected": `Connect ${providerName} to continue.`,
     "policy-model-list": `IT policy supplies the model list for ${providerName}. Ask IT to restore access to the dry run model, then recheck.`,
     "model-missing": `${providerName} no longer lists ${model}. Restore the model, then recheck.`,
