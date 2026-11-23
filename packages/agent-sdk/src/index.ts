@@ -1576,6 +1576,8 @@ export interface ModelFitIssue {
    * model. Absent when the request cannot be offered again (Nova, a run).
    */
   offerId?: string;
+  /** Host deadline in Unix milliseconds, present only on a live offer. */
+  offerExpiresAt?: number;
 }
 
 /**

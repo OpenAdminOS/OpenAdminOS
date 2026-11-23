@@ -54,7 +54,7 @@ function fitBridge(state = createMockAppState(), failedModel = "llama3.1") {
               content: "The selected LLM provider failed while answering this chat message.",
               providerId: "ollama", model: failedModel,
               error: "Ollama context size too small",
-              modelFit: { reason: "context-too-small", providerId: "ollama", model: failedModel, neededTokens: 40652, limitTokens: 16384, offerId: `fit_${count}` },
+              modelFit: { reason: "context-too-small", providerId: "ollama", model: failedModel, neededTokens: 40652, limitTokens: 16384, offerId: `fit_${count}`, offerExpiresAt: Date.now() + 15 * 60_000 },
             };
         saved = [...saved, userMessage, assistantMessage];
         const cacheStatus: GraphCacheStatus = { tenantId, resources: [] };
@@ -104,6 +104,48 @@ describe("IntuneChat model fit (mockup 36)", () => {
     // The generic error is replaced by the notice.
     expect(screen.queryByRole("alert")).toBeNull();
     expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
+  });
+
+  it("withdraws the visible choices when the host deadline passes", async () => {
+    let expire: (() => void) | undefined;
+    // jsdom returns a browser timer id, while the test types include Node's timer overload.
+    const realTimeout = window.setTimeout.bind(window) as unknown as typeof globalThis.setTimeout;
+    const timeout = vi.spyOn(window, "setTimeout").mockImplementation((handler, delay, ...args) => {
+      if (delay !== undefined && delay > 14 * 60_000 && delay <= 15 * 60_000 && typeof handler === "function") {
+        expire = () => handler(...args);
+      }
+      return realTimeout(handler, delay, ...args);
+    });
+    try {
+      const bridge = fitBridge();
+      const { notice } = await sendTooLarge(bridge);
+      expect(within(notice).getByRole("button", { name: "Run with Codex" })).toBeInTheDocument();
+      expect(expire).toBeTypeOf("function");
+      act(() => expire?.());
+      expect(await screen.findByText("This choice has expired. Send the question again.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Run with Codex" })).toBeNull();
+      expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("closes a hosted confirmation without sending if clicked after the deadline", async () => {
+    const bridge = fitBridge();
+    const { user, notice } = await sendTooLarge(bridge);
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Run this request with Codex?" });
+    // Simulate waking from sleep before the expiry timer fires.
+    const realNow = Date.now;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => realNow() + 15 * 60_000);
+    try {
+      fireEvent.click(within(confirmation).getByRole("button", { name: "Send through Codex" }));
+      expect(await screen.findByText("This choice has expired. Send the question again.")).toBeInTheDocument();
+      expect(confirmation).not.toBeInTheDocument();
+      expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce();
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("sends nothing to the hosted provider until the per-request accept, then answers with it and says where data went", async () => {

@@ -363,7 +363,7 @@ describe("Model fit: offers", () => {
     const offers = new ModelFitOffers();
     const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
     assert.throws(() => offers.check("fit_missing", request), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
-    const id = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     assert.throws(() => offers.check(id, { ...request, content: "other" }), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
     offers.claim(id);
     assert.throws(() => offers.claim(id), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
@@ -373,15 +373,15 @@ describe("Model fit: offers", () => {
     let now = 0;
     const offers = new ModelFitOffers(() => now);
     const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
-    const id = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     offers.check(id, request);
-    now = MODEL_FIT_OFFER_TTL_MS + 1;
+    now = MODEL_FIT_OFFER_TTL_MS;
     assert.throws(() => offers.claim(id), /no longer available/);
   });
 
   it("lets only one send claim an offer", () => {
     const offers = new ModelFitOffers();
-    const id = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
     // Both sends pass the check before either claims it.
     offers.check(id, request);
@@ -393,9 +393,9 @@ describe("Model fit: offers", () => {
   it("replaces an earlier offer for the same conversation, and keeps other conversations' offers", () => {
     const offers = new ModelFitOffers();
     const base = { tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama" as const, model: LOCAL_MODEL }, failed: { providerId: "ollama" as const, model: LOCAL_MODEL }, reason: "context-too-small" as const };
-    const first = offers.issue({ ...base, conversationId: "chat_1" });
-    const other = offers.issue({ ...base, conversationId: "chat_2" });
-    const second = offers.issue({ ...base, conversationId: "chat_1" });
+    const { offerId: first } = offers.issue({ ...base, conversationId: "chat_1" });
+    const { offerId: other } = offers.issue({ ...base, conversationId: "chat_2" });
+    const { offerId: second } = offers.issue({ ...base, conversationId: "chat_1" });
     assert.throws(() => offers.check(first, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined }), /no longer available/);
     offers.check(second, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined });
     offers.check(other, { conversationId: "chat_2", tenantId: undefined, content: "q", workspaceKey: undefined });
@@ -404,7 +404,7 @@ describe("Model fit: offers", () => {
   it("binds an offer to its conversation, organization and question, and lets it expire", () => {
     let now = 1_000;
     const offers = new ModelFitOffers(() => now);
-    const id = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     assert.equal(offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined }).id, id);
     assert.throws(() => offers.check(id, { conversationId: "chat_2", tenantId: "tenant-1", content: "q", workspaceKey: undefined }), /another question/);
     assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined }), /another question/);
@@ -465,7 +465,8 @@ describe("Model fit in Chat", () => {
       const events: IntuneChatStreamEvent[] = [];
       const result = await service.streamIntuneChatMessage({ content: QUESTION }, (event) => events.push(event));
       assert.equal(result.assistantMessage.status, "failed");
-      const { offerId, ...issue } = result.assistantMessage.modelFit!;
+      const { offerId, offerExpiresAt, ...issue } = result.assistantMessage.modelFit!;
+      assert.ok(offerExpiresAt && offerExpiresAt > Date.now());
       assert.deepEqual(issue, { reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
       assert.match(offerId!, /^fit_/);
       assert.ok(events.some((event) => event.type === "failed"));
@@ -474,6 +475,7 @@ describe("Model fit in Chat", () => {
       assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.neededTokens, 40652);
       // The offer is in memory only and single use, so it is not stored.
       assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.offerId, undefined);
+      assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.offerExpiresAt, undefined);
     });
   });
 

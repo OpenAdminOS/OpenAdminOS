@@ -2750,8 +2750,8 @@ Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
 answer that may be run again carries a host-issued, single-use `offerId`,
 bound to its conversation, organization, the exact question, its workspace
 selection and the provider and model active at the time; offers live in
-memory for 15 minutes. The
-renderer sends `modelOverride` (`offerId`, chosen provider and model) on
+memory for 15 minutes. At the deadline Chat withdraws the choices, closes
+any open confirmation, and says to send the question again. The renderer sends `modelOverride` (`offerId`, chosen provider and model) on
 `SendIntuneChatMessageInput`. The service refuses it unless the offer exists
 for this conversation (not deleted), organization and question, the same
 provider and model are still active, the chosen provider is listed and ready,

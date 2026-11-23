@@ -2786,7 +2786,7 @@ function noOrganizationReportLine(destinations: { mayGo: string[]; skipped: stri
 
 /** The fit reason a setup detour keeps; the single-use offer id belongs to Chat and is never stored. */
 function modelFitForIntent(issue: ModelFitIssue): ModelFitIssue {
-  const { offerId: _offerId, ...rest } = issue;
+  const { offerId: _offerId, offerExpiresAt: _offerExpiresAt, ...rest } = issue;
   return rest;
 }
 

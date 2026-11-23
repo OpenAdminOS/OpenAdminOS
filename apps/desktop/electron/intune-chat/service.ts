@@ -3604,7 +3604,7 @@ export class IntuneChatService {
         ? {
             modelFit: {
               ...modelFit,
-              offerId: this.modelFitOffers.issue({
+              ...this.modelFitOffers.issue({
                 conversationId: conversation.id,
                 tenantId: noTenant ? undefined : tenant.id,
                 content,

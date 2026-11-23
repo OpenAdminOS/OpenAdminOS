@@ -61,14 +61,15 @@ export class ModelFitOffers {
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
-  issue(input: Omit<ModelFitOffer, "id" | "createdAt">): string {
+  issue(input: Omit<ModelFitOffer, "id" | "createdAt">): { offerId: string; offerExpiresAt: number } {
     this.prune();
     // The newest offer replaces earlier ones for the same conversation; the renderer holds only it.
     for (const [id, offer] of this.offers) if (offer.conversationId === input.conversationId) this.offers.delete(id);
     while (this.offers.size >= MAX_OFFERS) this.offers.delete(this.offers.keys().next().value!);
     const id = `fit_${randomUUID()}`;
-    this.offers.set(id, { ...input, id, createdAt: this.now() });
-    return id;
+    const createdAt = this.now();
+    this.offers.set(id, { ...input, id, createdAt });
+    return { offerId: id, offerExpiresAt: createdAt + MODEL_FIT_OFFER_TTL_MS };
   }
 
   /** The offer an override names, checked against this request. Not used up yet. */
@@ -94,7 +95,7 @@ export class ModelFitOffers {
    */
   claim(id: string): void {
     // An offer that expired since it was checked is gone too, and says so rather than "used".
-    const expired = this.offers.has(id) && this.offers.get(id)!.createdAt < this.now() - MODEL_FIT_OFFER_TTL_MS;
+    const expired = this.offers.has(id) && this.offers.get(id)!.createdAt <= this.now() - MODEL_FIT_OFFER_TTL_MS;
     this.prune();
     if (expired) throw new ModelOverrideError("This choice is no longer available, so nothing was sent. Send the question again.");
     if (!this.offers.delete(id)) {
@@ -104,7 +105,7 @@ export class ModelFitOffers {
 
   private prune(): void {
     const cutoff = this.now() - MODEL_FIT_OFFER_TTL_MS;
-    for (const [id, offer] of this.offers) if (offer.createdAt < cutoff) this.offers.delete(id);
+    for (const [id, offer] of this.offers) if (offer.createdAt <= cutoff) this.offers.delete(id);
   }
 }
 
