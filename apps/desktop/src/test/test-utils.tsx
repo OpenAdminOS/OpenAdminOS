@@ -699,6 +699,7 @@ export function makeMockBridge(
           : appState,
       ),
     ),
+    getProviderDestination: vi.fn(async (providerId: ProviderId) => `dest-${providerId}`),
     setActiveModel: vi.fn(async (providerId: ProviderId, model: string | null) =>
       updateState({
         ...appState,

@@ -40,6 +40,7 @@ import {
   type IntuneChatDocumentationSource,
   type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
+  type ModelFitIssue,
   type IntuneChatProgressStep,
   type IntuneChatStreamEvent,
   type IntuneChatStreamStage,
@@ -182,6 +183,7 @@ import {
   type DocsIndexPassage,
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
+import { chatModelFitFailure, guardModelFitLlm, loopFailureIssue, ModelFitOffers, ModelOverrideError, repeatedFailureIssue, resolveChatTurnProvider } from "./model-fit.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
 
 type WorkspacePromptContextPayload = {
@@ -470,8 +472,12 @@ export interface ChatServiceHost {
   requireIntelligenceStore(): IntelligenceSqliteStore;
   resolveTenant(persisted: ChatPersistedState, tenantId?: string): TenantRecord;
   listProviders(): Promise<ProviderSummary[]>;
+  /** A fresh check that this provider runs this model on this device, before a model fit retry on it. */
+  verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
+  /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
+  providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
-  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined }): Promise<RunLlmApi>;
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -549,7 +555,7 @@ export interface IntuneChatStreamOptions {
    * OpenAI resource and deployment). A configuration saved after the fire
    * decision makes the build fail before anything is sent.
    */
-  providerBinding?: { endpoint: string | undefined };
+  providerBinding?: { endpoint: string | undefined; scope?: "model-fit" };
 }
 
 /**
@@ -566,6 +572,8 @@ export function deterministicChatSystemPrompt(isLocalProvider: boolean, voice: b
 }
 
 export class IntuneChatService {
+  /** Requests the local model could not do, each of which may be run again once with another provider. */
+  private readonly modelFitOffers = new ModelFitOffers();
   private readonly preloadJobs = new Map<
     string,
     {
@@ -653,7 +661,7 @@ export class IntuneChatService {
    * starts closing, and stops with its signal. Agent Team does the same in
    * its host; runs stop through their lease-cancelled controller.
    */
-  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[], binding?: { endpoint: string | undefined }): Promise<RunLlmApi> {
+  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[], binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi> {
     const llm = await this.host.buildLlm(providerId, model, binding);
     const writable = this.host.tenantWritable;
     if (!writable) return llm;
@@ -2118,6 +2126,8 @@ export class IntuneChatService {
     if (!content) {
       throw new Error("Chat message must not be empty.");
     }
+    // A per-request provider is offered only in the streaming Chat the renderer uses.
+    if (input.modelOverride || input.hostedProviderConsent?.modelFitOfferId !== undefined) throw new ModelOverrideError("Choosing another provider for one request works only in Chat. Send the question there.");
 
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -2630,8 +2640,45 @@ export class IntuneChatService {
     return this.leasedScope(noTenant ? undefined : tenant.id, options.signal, async (leaseSignal) => {
     if (leaseSignal) options = { ...options, signal: leaseSignal };
     const providers = await this.host.listProviders();
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const activeProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    // One request may run on a provider the admin chose after the local model could not do it (model-fit.ts),
+    // once, for the offer the host made with that failed answer.
+    const fitOffer = input.modelOverride
+      ? this.modelFitOffers.check(input.modelOverride.offerId, { conversationId: input.conversationId, tenantId: persisted.activeTenantId ?? undefined, content, workspaceKey: workspaceKeyOf(input.workspaceContext) })
+      : undefined;
+    if (fitOffer && !store.getConversation(fitOffer.conversationId)) {
+      throw new ModelOverrideError("That conversation was deleted, so nothing was sent. Send the question again.");
+    }
+    const turn = resolveChatTurnProvider({
+      override: input.modelOverride,
+      offer: fitOffer,
+      providers,
+      active: activeProvider,
+      activeModel: resolveProviderDefaultModel(activeProvider, persisted.activeModelByProviderId).model,
+      activeModelByProviderId: persisted.activeModelByProviderId,
+      consent: input.hostedProviderConsent,
+      nova: Boolean(options.voice || options.scope),
+    });
+    const provider = turn.provider;
     const providerId = provider.id;
+    // An on-device retry goes out only after a fresh check that the model runs here.
+    if (turn.switchedFrom && provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, turn.model))) {
+      throw new ModelOverrideError(`OpenAdminOS could not confirm that ${turn.model ?? provider.name} runs on this device, so nothing was sent. Choose another model, or a hosted provider.`);
+    }
+    // A hosted choice goes only to the destination its accept step saw (for
+    // Azure OpenAI the resource and deployment, not only the deployment name),
+    // and the request is built only for it. One read serves the check and the
+    // binding, so a settings change in between cannot redirect it.
+    if (turn.switchedFrom && this.host.providerTarget) {
+      const target = await this.host.providerTarget(providerId);
+      if (!provider.isLocal && input.modelOverride?.destination !== target.destination) {
+        throw new ModelOverrideError(`${provider.name}'s settings changed after you chose it, so nothing was sent. Choose it again to review where the request goes.`);
+      }
+      if (!options.providerBinding) options = { ...options, providerBinding: { endpoint: target.endpoint, scope: "model-fit" } };
+    }
+    // Whether a model request of this turn went out, so the answer names where it went ("Answered by",
+    // or "Attempted through" for a failed or stopped call) only when one did.
+    let modelFitDispatched = false;
     // A closing tenant ends the send here. Stop pressed while providers were still being read goes on to the
     // designed cancelled answer below, never out of the send as an abort error.
     if (!userSignal?.aborted) options.signal?.throwIfAborted();
@@ -2641,10 +2688,7 @@ export class IntuneChatService {
     }
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
-    const selectedModel = resolveProviderDefaultModel(
-      provider,
-      persisted.activeModelByProviderId,
-    ).model;
+    const selectedModel = turn.model;
     if (options.scope && (("model" in options.scope && options.scope.model !== selectedModel) || (options.scope.isLocal !== undefined && options.scope.isLocal !== provider?.isLocal)))
       throw new Error("Nova's reasoning model or provider trust changed. Start a new conversation.");
     const chatBudget = intuneChatProviderBudget(providerId);
@@ -2667,6 +2711,38 @@ export class IntuneChatService {
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
+    const now = new Date().toISOString();
+
+    let conversation = input.conversationId
+      ? store.getConversation(input.conversationId)
+      : undefined;
+    if (conversation) {
+      if (noTenant) assertNoTenantConversation(conversation, store.listMessages(conversation.id));
+      else {
+        assertConversationTenant(conversation, tenant.id);
+        // A conversation started without a tenant belongs to the first tenant it is continued in.
+        if (!conversation.tenantId) store.bindConversationTenant(conversation.id, tenant.id);
+      }
+    }
+    // The offer is used up once this request is cleared to send: consent and conversation checks passed.
+    // The conversation is read again here, after the awaits above.
+    if (fitOffer) {
+      if (!conversation || conversation.id !== fitOffer.conversationId) throw new ModelOverrideError("That conversation was deleted, so nothing was sent. Send the question again.");
+      // The organization and model the offer was made for are read again here, after the awaits above,
+      // and the claim follows with no await in between.
+      const latest = await this.host.read();
+      if (
+        (latest.activeTenantId ?? undefined) !== (persisted.activeTenantId ?? undefined) ||
+        latest.activeProviderId !== persisted.activeProviderId ||
+        resolveProviderDefaultModel(activeProvider, latest.activeModelByProviderId).model !== fitOffer.anchor.model
+      ) {
+        throw new ModelOverrideError("The organization or model in Chat changed, so nothing was sent. Send the question again.");
+      }
+      // The conversation is read again after that await too; a deletion in between refuses the send.
+      if (!store.getConversation(fitOffer.conversationId)) throw new ModelOverrideError("That conversation was deleted, so nothing was sent. Send the question again.");
+      this.modelFitOffers.claim(fitOffer.id);
+    }
+    // Audited once the send is cleared: a refused send records no consent.
     // The consent audit is per tenant; a no-tenant send has none to record against.
     // A follow-up's consent was recorded when it was set; the fire time adds none.
     if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant && !options.scheduledConsent) {
@@ -2682,19 +2758,6 @@ export class IntuneChatService {
           ? { workspaceContext: workspaceContext.summary }
           : {}),
       });
-    }
-    const now = new Date().toISOString();
-
-    let conversation = input.conversationId
-      ? store.getConversation(input.conversationId)
-      : undefined;
-    if (conversation) {
-      if (noTenant) assertNoTenantConversation(conversation, store.listMessages(conversation.id));
-      else {
-        assertConversationTenant(conversation, tenant.id);
-        // A conversation started without a tenant belongs to the first tenant it is continued in.
-        if (!conversation.tenantId) store.bindConversationTenant(conversation.id, tenant.id);
-      }
     }
     // A new chat is named after the question until the answer gives it a title.
     const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
@@ -2751,6 +2814,7 @@ export class IntuneChatService {
       createdAt: new Date().toISOString(),
       providerId,
       ...(selectedModel ? { model: selectedModel } : {}),
+      ...(turn.switchedFrom ? { switchedFrom: turn.switchedFrom } : {}),
     };
     const initialCacheStatus: GraphCacheStatus = {
       ...(noTenant ? {} : { tenantId: tenant.id }),
@@ -2808,6 +2872,8 @@ export class IntuneChatService {
         createdAt: cancelledAt,
         providerId,
         ...(selectedModel ? { model: selectedModel } : {}),
+        // A stopped request on a chosen provider still says where it went, once a request went out.
+        ...(turn.switchedFrom && modelFitDispatched ? { switchedFrom: turn.switchedFrom } : {}),
         ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
         steps: steps.steps,
         sources: buildIntuneChatSources({
@@ -3044,6 +3110,10 @@ export class IntuneChatService {
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
+    let modelFit: ModelFitIssue | undefined;
+    // The model this turn runs on: the selected one, or the adapter's own default when none is named
+    // (a provider list that reports no models). A model fit issue and its on-device check name it.
+    let fitModel = selectedModel;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
     let documentationSources: IntuneChatDocumentationSource[] = [];
@@ -3105,7 +3175,35 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
-      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel, options.providerBinding) : await this.tenantLlm(providerId, selectedModel, [tenant.id], options.providerBinding), verifyConsent));
+      let built: RunLlmApi;
+      try {
+        built = noTenant ? await this.host.buildLlm(providerId, selectedModel, options.providerBinding) : await this.tenantLlm(providerId, selectedModel, [tenant.id], options.providerBinding);
+      } catch (error) {
+        if (turn.switchedFrom && error instanceof Error && error.name === "ProviderEndpointChangedError") {
+          throw new ModelOverrideError("The provider's settings changed after you chose it, so nothing was sent. Send the question again.");
+        }
+        throw error;
+      }
+      // A model fit request checks an on-device model again before every call, and records that a call went out.
+      if (turn.switchedFrom) {
+        built = guardModelFitLlm(built, {
+          before: async () => {
+            // The check reads the address the provider is reached at now; the adapter sends to the
+            // bound one, so a moved address stops the call instead of checking the wrong server.
+            const bound = options.providerBinding;
+            if (bound && this.host.providerTarget && (await this.host.providerTarget(providerId)).endpoint !== bound.endpoint) {
+              throw new ModelOverrideError(`${provider.name}'s settings changed while this request ran, so nothing more was sent.`);
+            }
+            if (provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel))) {
+              throw new ModelOverrideError(`OpenAdminOS could not confirm that ${selectedModel ?? provider.name} still runs on this device, so nothing more was sent to it.`);
+            }
+          },
+          dispatched: () => { modelFitDispatched = true; },
+          model: selectedModel,
+        });
+      }
+      const llm = withTenantDataOutputFilter(gateHostedLlm(built, verifyConsent));
+      fitModel = selectedModel ?? llm.defaultModel;
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
@@ -3357,10 +3455,18 @@ export class IntuneChatService {
                       : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";
                 assistantContent = assistantError;
                 emitDelta(assistantContent);
-              } else await streamDeterministicAnswer(agentic.fallbackNotice, localChat);
+              } else {
+                // The local model could not do this request (a prompt too large for its context, a
+                // reasoning-only reply), or failed the investigation often enough that Chat stops trying
+                // it: the cached-data answer carries the model fit offer. Nothing goes elsewhere unless
+                // the admin chooses it.
+                if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, fitModel) ?? (agentic.reason !== "context-limit" && agentic.reason !== "provider-unavailable" && agenticModelHasFailedRepeatedly(providerId, fitModel) ? repeatedFailureIssue(provider, fitModel) : undefined);
+                await streamDeterministicAnswer(agentic.fallbackNotice, localChat);
+              }
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
+            if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice && !options.scope) modelFit = repeatedFailureIssue(provider, fitModel);
             // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
             // A too-small model also reports capability-fallback; it never failed the loop, so it keeps the normal fallback.
             const failureRouted = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
@@ -3392,10 +3498,16 @@ export class IntuneChatService {
             accessBlockedMessage = caught.message;
             assistantContent = caught.message;
             responseModel = undefined;
+            // Another provider would be blocked the same way, so an issue the loop found is not offered.
+            modelFit = undefined;
             emitDelta(assistantContent);
           } else {
             assistantStatus = "failed";
-            assistantError = caught instanceof Error ? caught.message : String(caught);
+            assistantError = turn.switchedFrom && caught instanceof Error && caught.name === "ProviderEndpointChangedError"
+              ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
+              : caught instanceof Error ? caught.message : String(caught);
+            // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
+            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
@@ -3403,6 +3515,10 @@ export class IntuneChatService {
         }
       }
     }
+    // The model's locality is confirmed when the request failed: a provider list read before an
+    // alias turned remote-backed must not let the notice say nothing left this device. It runs
+    // before the last stop check, so a Stop during the check still ends the request as stopped.
+    if (modelFit && !(await this.host.verifyOnDeviceModel?.(providerId, fitModel).catch(() => false))) modelFit = undefined;
     if (isCancelled()) {
       const result = finishCancelled();
       sendProgress({
@@ -3460,6 +3576,25 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
+      ...(modelFit
+        ? {
+            modelFit: {
+              ...modelFit,
+              offerId: this.modelFitOffers.issue({
+                conversationId: conversation.id,
+                tenantId: noTenant ? undefined : tenant.id,
+                content,
+                workspaceKey: workspaceKeyOf(input.workspaceContext),
+                // A failed one-request retry keeps the active model as the one it stands in for.
+                anchor: turn.switchedFrom ? { providerId: turn.switchedFrom.providerId, model: turn.switchedFrom.model } : { providerId, model: selectedModel },
+                failed: { providerId, model: fitModel },
+                reason: modelFit.reason,
+              }),
+            },
+          }
+        : {}),
+      // Named only when a model request of this turn went out: an answer made without the model says nothing about it.
+      ...(turn.switchedFrom && modelFitDispatched ? { switchedFrom: turn.switchedFrom } : {}),
       ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
       ...(notConnectedFor(accessBlockedMessage, restriction, Boolean(namedAgent) || planned.hasWriteIntent)),
       steps: steps.steps,
@@ -4239,6 +4374,11 @@ type AgenticCapabilityDecision = {
   tooSmall?: true;
   notice?: string;
 };
+
+/** The workspace selection of a send, for binding a model fit offer to it. The IPC validator fixes its key order. */
+function workspaceKeyOf(context: SendIntuneChatMessageInput["workspaceContext"]): string | undefined {
+  return context ? JSON.stringify(context) : undefined;
+}
 
 /** The plain line Chat and the Marketplace show when the model is too small for tool use. */
 export function smallModelNotice(model: string): string {

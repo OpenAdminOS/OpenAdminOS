@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -1069,5 +1070,84 @@ describe("structured device questions", () => {
     assert.equal(structuredQueryForQuestion({ question: "only Windows", generatedAt: at, previous: large }), undefined);
     // A different compliance value without a switch lead is ambiguous at any size, never a silent swap.
     assert.equal(structuredQueryForQuestion({ question: "only the compliant ones", generatedAt: at, previous: large }), undefined);
+  });
+});
+
+/** A mock Ollama that answers only the model list: the on-device check reads it, nothing loads a model. */
+async function withMockOllamaTags(run: () => Promise<void>): Promise<string[]> {
+  const paths: string[] = [];
+  const server = createServer((request, response) => {
+    paths.push(request.url ?? "");
+    if (request.url === "/api/tags") {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ models: [{ name: "openadminos/openadmin-8b", model: "openadminos/openadmin-8b" }] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end("{}");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const saved = process.env.OPENAGENTS_OLLAMA_URL;
+  process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  try {
+    await run();
+  } finally {
+    if (saved === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+    else process.env.OPENAGENTS_OLLAMA_URL = saved;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  assert.ok(paths.every((path) => !path.startsWith("/api/chat") && !path.startsWith("/api/generate")), paths.join(", "));
+  return paths;
+}
+
+describe("Model fit after a local model failure (PR #213 with #215)", () => {
+  it("offers a provider on the cached-data answer when the 8B model's context is too small, with the numbers", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      // Every loop call overflows the 16k context, as the Ollama adapter reports it; the cached-data answer then works.
+      reply(({ loop }) => {
+        if (loop) throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give openadminos/openadmin-8b 16,384, usually because free memory ran out.");
+        return "Deterministic answer.";
+      });
+      const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(answered.status, "completed");
+      assert.equal(answered.engineNotice, LOCAL_FALLBACK_NOTICES["context-too-small"]);
+      assert.equal(answered.content, "Deterministic answer.");
+      // The answer carries the offer, with the numbers from the provider error; nothing went elsewhere.
+      assert.equal(answered.modelFit?.reason, "context-too-small");
+      assert.equal(answered.modelFit?.model, "openadminos/openadmin-8b");
+      assert.equal(answered.modelFit?.neededTokens, 40652);
+      assert.equal(answered.modelFit?.limitTokens, 16384);
+      assert.ok(answered.modelFit?.offerId);
+      assert.equal(answered.switchedFrom, undefined);
+    }));
+  });
+
+  it("keeps the overflow's offer when the cached-data answer then fails too", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      reply(({ loop }) => {
+        if (loop) throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give openadminos/openadmin-8b 16,384, usually because free memory ran out.");
+        throw new Error("Ollama stopped while answering.");
+      });
+      const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(answered.status, "failed");
+      assert.equal(answered.modelFit?.reason, "context-too-small");
+      assert.equal(answered.modelFit?.neededTokens, 40652);
+      assert.ok(answered.modelFit?.offerId);
+    }));
+  });
+
+  it("offers a provider once the 8B model has failed the tool loop repeatedly, and not after one malformed answer", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "Deterministic answer."));
+      const first = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(first.engineNotice, LOCAL_FALLBACK_NOTICES.malformed);
+      assert.equal(first.modelFit, undefined);
+      await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {});
+      // Two failed answers: Chat stops trying the tool loop on this model and offers the alternatives with its answer.
+      const third = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(third.status, "completed");
+      assert.equal(third.modelFit?.reason, "repeated-failure");
+      assert.ok(third.modelFit?.offerId);
+    }));
   });
 });

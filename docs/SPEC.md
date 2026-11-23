@@ -2565,6 +2565,218 @@ summarized in chunks before a final summary. Local embeddings can be added later
 for free-text policy retrieval, but the first implementation should work without
 embedding infrastructure.
 
+#### Model fit: when the local model cannot do a request (2026-11-19)
+
+Decided by the maintainer on 2026-11-19: Chat may run a request with a hosted
+provider when the local model is a poor fit for it, but only after a notice
+inside Chat that says what happens and where data goes, and an explicit accept.
+Never silently and never preselected. This keeps the admin in the loop and
+helps with cost. Design: mockup 36 (`docs/mockups/36-model-fit.html`; 35 is
+taken by the personal agent mockup in PR #207).
+
+Signals. Only a model on this device gets the offer: a local provider, and not
+a remote-backed or Ollama Cloud model, whose prompt already left the device.
+Its locality is confirmed when the request fails (the same fresh check), not
+from a provider list read earlier. For runs the host records the fit issue on
+the run (`RunRecord.modelFit`) when it fails, after that check, and the run page
+offers only from it.
+- The prompt does not fit the context window. Today this is the provider's own
+  error: the Ollama adapter's "context size too small" message with the tokens
+  needed and the limit (PR #211 and later), including the form where Ollama could
+not load the model with the larger context for lack of memory, the LM Studio
+adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 400 ("request (N tokens) exceeds
+  the available context size (L tokens)"), llama.cpp's
+  `exceed_context_size_error` (LM Studio, Lemonade) and its "Context size has been exceeded" wording, which Lemonade passes through, Apple Foundation's
+  context error, and the agent runtime's own prompt fit message ("This request
+  needs about N tokens of context (P for the prompt and A for the answer), but
+  <model> accepts L") when only that text survives in a stored run error. The
+  loop's `failureDetail` gives a cached-data fallback its numbers. On a local
+  model in auto mode a context overflow no longer fails the turn (PR #215): the
+  loop ends with `failureReason: "context-too-small"` and Chat answers from
+  cached data, and that answer carries the offer ("Ask this again with"). A
+  `thinking-only` loop failure does the same; repeated malformed or unfinished
+  loop answers give the repeated-failure offer once the failure memory takes the
+  model off the loop. The issue names the model the turn ran on, the adapter's
+  own default when the provider list names none. A typed runtime failure, where `kind`, `code` or `reason`
+  carries `context-too-small` with needed and limit numbers, on the error, on
+  its `failure` record or through `cause`, is read by its shape, and a run's
+  typed `failureReason` comes before its error text, so the runtime's prompt
+  fit check slots in without a second estimator.
+- The investigation failed on this local model often enough that Chat stops
+  trying it (the in-memory repeated-failure counter); the answer still comes
+  from cached data and carries the offer. When the investigation loop reports
+  a finer `failureReason` with its fallback (`context-too-small` or
+  `thinking-only`, from the local model accuracy work), that reason is used.
+- A thinking-only answer that ran out of budget, once the runtime reports it as
+  its own typed reason (`thinking-only`). There is no text guessing for it.
+
+The notice replaces the generic error above the composer. It says why in
+plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
+8B is set to 16,384."), that nothing goes to another provider unless the admin chooses one, and lists choices as
+separate buttons with none focused or highlighted: each configured and ready
+hosted provider with its production location label (`providerDataLocation`)
+and a cost note that says where the cost lands (the app knows no plan or
+price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
+Ollama, LM Studio or Lemonade server outside this device is not offered and
+the host refuses it, because its location is not stated and its adapter
+follows redirects; up to two installed local models with a larger parameter count in
+their name, marked as on this device and not checked against the request
+size; Split the question (a hint, and the question back in an empty
+composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
+sent. Narrow the question ... then send again." Providers the managed policy
+does not allow are not in the provider list, so they are never offered; when
+the policy allows no hosted provider the notice says so, and with none ready
+it links to Settings, Providers.
+
+Accept step. A hosted choice opens the hosted send confirmation in a
+per-request form: it names the provider, where data goes with the detail
+line, the model, what is sent, what stays and the cost; it says the next
+message goes to the local model again; it shows the exact question that is
+sent, has no remember box, and Enter does not send, only the Send button
+does. Editing the composer or the attachments while it is open closes it
+unsent with a line that says so. Approval is per request in v1: a
+remembered "do not ask again" for that provider never covers it.
+A local choice sends at once, since nothing leaves the device, but only
+after a fresh check that the model runs here: the host reads Ollama's
+`/api/tags` again (model metadata only; nothing is loaded) and refuses a
+model that is no longer listed or is now remote-backed, or when the list
+cannot be read; for LM Studio and Lemonade it classifies the address they
+are reached at, and refuses one outside this device (Lemonade's address can
+be set to another machine, so its local choice is bound to that address too). That check runs again
+before every model call of the request, not only once. The Ollama adapter's
+own context retry inside one call goes to the same address and model name and
+is not checked again; a hook there is a follow-up for the adapter
+(packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
+(`getProviderDestination`: its address, or the Azure OpenAI resource and
+deployment) when its accept step opens, and the host refuses the send if the destination
+changed since. The check and the binding come from one read of the
+destination, and the binding is checked again on the address the adapter is
+built with. A lookup for an earlier choice is dropped when the admin picks
+another provider. A model fit acceptance (`modelFitOfferId`)
+is refused on an ordinary send and on the non-streaming send. Right before
+the offer is claimed, the host reads the active organization and model again.
+
+Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
+answer that may be run again carries a host-issued, single-use `offerId`,
+bound to its conversation, organization, the exact question, its workspace
+selection and the provider and model active at the time; offers live in
+memory for 15 minutes. The
+renderer sends `modelOverride` (`offerId`, chosen provider and model) on
+`SendIntuneChatMessageInput`. The service refuses it unless the offer exists
+for this conversation (not deleted), organization and question, the same
+provider and model are still active, the chosen provider is listed and ready,
+lists the model and is not the model that failed, a model on this device is
+not remote-backed (Ollama marks those with `remote_host` or `remote_model` in
+`/api/tags`, kept as `remoteModels` on the provider; an Ollama Cloud name,
+`name:tag-cloud` or `name:cloud`, counts too), and a hosted one comes with a
+`hostedProviderConsent` for that offer (`modelFitOfferId`), acknowledged after
+the offer was made, for that model, and not a remembered one. Choices also
+follow a managed model lock. The usual consent check (age, tenant, model,
+workspace selection) and `buildLlm`'s policy check then apply as for any
+hosted send, the consent is audited, and the offer is claimed once the
+request is cleared to send: the claim is synchronous and re-reads the
+conversation, so of two concurrent sends only one gets it. A larger local model tried for one request that fails too
+gets a new offer that still names the active model as the one it stands in
+for. The override changes nothing persistent: the next send uses the active
+provider. Nova and the non-streaming send refuse an override. Masking from the
+data policy (PR #209 onward) applies to this send like any hosted send, since
+it goes through the same model choke point; no masking exists on main yet. The
+renderer shows an offer only in its own conversation and withdraws it when the
+organization or the active model changes.
+
+Apple Foundation reports the prompt's own tokens and the model's total; the
+helper also reserves room for the answer, so a prompt below the total reads
+"uses about N of the M tokens <model> supports, which leaves too little room
+for an answer."
+
+A failed answer keeps its reason in history: after a reload or a switch of
+conversation, its bubble shows the notice's title and why line, without the
+choices, which belong to the live request only.
+
+While the accepted request runs, its turn says "Sending to <location label>
+for this request only."
+
+After. The stored answer carries `switchedFrom` (the provider and model it
+replaced, why, and whether the provider that took it was on this device when
+it was sent, so later settings cannot relabel it) and shows "Answered by <location label> for this request
+only. Chat is back on <model>." The last sentence shows only while Chat still
+uses the model it left; read later, after the admin changed the provider or
+model, the line ends at "for this request only." A failed answer carries `modelFit` with the
+reason and numbers, kept in the answer metadata.
+
+Agent runs. A run that failed on a local provider with a context failure shows
+the same notice on the run page ("Run again with"). Choosing a provider opens
+the run review with that provider and model, which is the run's accept step:
+it names where prompts go and says "<model> could not fit the last run, so
+this run uses <provider>. This run only: the agent keeps its model for later
+runs." Start run starts the agent with `providerId` and `model` for that run
+only, pinned to the organization the review showed (`tenantId`), or with
+`expectNoTenant` when it showed none, so an organization switch before the
+host admits the run refuses it instead of running elsewhere. A failed dry run
+stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
+host makes the same fresh check before it admits the run, and the run record
+keeps it so every later phase (plan, replan after the diff, apply) checks
+again before it builds the model and before every model call. Every fit rerun passes
+`bindProviderEndpoint`: the run is bound to where its provider was reached at
+admission (Ollama or LM Studio address, Azure OpenAI resource and
+deployment), and a later phase built for another endpoint fails with nothing
+sent. The run review takes the destination fingerprint when it opens and
+Start passes it (`expectedProviderDestination`); Start stays disabled until
+it is read, a failed read says so in the review, and a change refuses the
+start. A refused model fit start is not retried from the same review (no Try
+again): where the provider is reached may have changed to a place the review
+does not show, so the review says to close it and open the run again. Start is
+disabled while a start is being admitted, so one review never queues two runs.
+The setup picker for a model fit rerun lists only providers the run host
+admits for it (no self-hosted server outside this device, and no connected
+hosted provider without a model the run could name), and setup does not treat
+such a provider as ready for it. Start passes the provider and model the review showed, never one the
+host resolves again. A model the choice named that the provider no longer
+lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
+provider picked there stays on that run: setup does not change the active
+provider for a model fit rerun or for Run for real of a model fit dry run, and
+checks the picked provider in full the way selecting it does. A run resumed
+from setup opens only its own review, and setup moves on from a provider
+picked for one run only once its full check is done. A hosted provider that
+reports no model, or only a CLI default placeholder such as Gemini's
+`gemini-default`, or only the model a managed policy lock put in its empty
+list (`modelsFromPolicy`: allowed, not reported), is not offered. A hosted
+choice names its pinned or default model when the provider lists it, else the
+first model the provider lists (a CLI's configured default can be one it does
+not list); Chat, the run page, the run review and the Chat host use that same
+rule. For a hosted provider that cannot be offered, the review does not start, Try again waits
+for the same thing as Start, and the host refuses a hosted model fit rerun (or
+Run for real of one) unless it names a model the provider lists now, since the
+approval names one model. Run for real of a model fit dry run goes only where
+its dry run planned; a different endpoint after setup refuses it. Every model
+call of a model fit request or rerun is refused when it names another model
+than the reviewed one, and an on-device rerun needs a model named. An open
+accept step closes unsent, with a line saying why, when its provider stops
+being a choice (the offer stays) or when the organization or model changes
+(the offer goes and focus returns to the composer). A retry the host refuses
+before the send starts shows its choices again, once, since the refusal says
+to choose again; a refusal that ends the offer (expired, used, another
+question, the model changed) says "Send the question again." and its choices
+do not come back. A prompt that did not fit a local model whose size cannot be
+read from its name (Apple Foundation, a custom alias) is offered the sized
+models on this device. A multi-tenant review
+withdraws an open offer, and a new offer replaces earlier ones for the same
+conversation.
+An Azure OpenAI model fit request is refused when the deployment configured
+now is not the one the admin reviewed.
+Run for real of a model fit dry run keeps the on-device requirement and the
+endpoint binding, and so does Run again of a model fit rerun. A model fit request in Chat is bound the same way for its
+own duration, and its answer names where it went only once a model request
+was sent. A write agent still stops at the diff and its typed confirmation. Team
+runs keep their own review in Agent Team.
+
+Open questions (TODO(ugur) in code): a "remember for this conversation"
+option; reading each local model's context length so only models that can
+take the request are offered; whether hosted rows should show a cost estimate;
+whether provider detection should read Ollama's `remote_host` and label Ollama
+Cloud models everywhere (today an active cloud model on a loopback Ollama is
+treated as local outside this offer).
+
 #### Agents as skills
 
 Installed agents expose routing metadata derived from their manifests: name,

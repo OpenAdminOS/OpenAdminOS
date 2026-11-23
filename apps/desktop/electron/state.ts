@@ -56,6 +56,8 @@ import {
   createAppleFoundationLlm,
   createLmStudioLlm,
   createLemonadeLlm,
+  classifyLemonadeEndpoint,
+  resolveLemonadeEndpoint,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
   GRAPH_DEFAULT_SCOPE,
@@ -408,6 +410,7 @@ import {
   checkLmStudio,
   checkOllama,
   isProviderId,
+  ollamaModelIsOnDevice,
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
@@ -1797,6 +1800,8 @@ function errorText(cause: unknown): string {
 /** What a model build is bound to: where a provider is reached, as novaProviderEndpoint reads it. */
 export interface ProviderEndpointBinding {
   endpoint: string | undefined;
+  /** A model fit binding also covers Lemonade's address (modelFitProviderEndpoint); a Nova binding keeps its own scope. */
+  scope?: "model-fit";
 }
 
 /** A bound model build found its provider configured for another endpoint; nothing was sent. */
@@ -1824,6 +1829,33 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
     return azure ? `${azure.endpoint.trim().replace(/\/$/, "")}#${azure.deployment.trim()}` : "azure-openai:unset";
   }
   return undefined;
+}
+
+/**
+ * Where a provider is reached, for a model fit binding: Nova's endpoint plus
+ * Lemonade's address, which can be set outside this device and so makes it a
+ * hosted choice. Nova follow-ups keep novaProviderEndpoint, so their saved
+ * bindings do not change meaning.
+ */
+function modelFitProviderEndpoint(providerId: ProviderId, persisted?: Pick<PersistedState, "providerConfigs">): string | undefined {
+  if (providerId === "lemonade") return resolveLemonadeEndpoint().replace(/\/$/, "");
+  return novaProviderEndpoint(providerId, persisted);
+}
+
+/**
+ * A model fit retry on a model on this device is sent only after a fresh
+ * check that it runs here. Ollama can list remote-backed models next to local
+ * ones, so it is read again; LM Studio serves loaded model files, Lemonade
+ * reads its list on every request and refuses cloud models, and Apple
+ * Foundation runs only on this Mac.
+ */
+// LM Studio and Lemonade are checked on the address they are reached at now,
+// so a change to one outside this device stops the next call too.
+async function verifyOnDeviceModel(providerId: ProviderId, model: string | undefined): Promise<boolean> {
+  if (providerId === "ollama") return model ? ollamaModelIsOnDevice(model) : false;
+  if (providerId === "lm-studio") return classifyLmStudioEndpoint(resolveLmStudioEndpoint()).isLocal;
+  if (providerId === "lemonade") return classifyLemonadeEndpoint(resolveLemonadeEndpoint()).isLocal;
+  return providerId === "apple-foundation";
 }
 
 export class AppStateStore {
@@ -2084,6 +2116,8 @@ export class AppStateStore {
       resolveTenant: (persisted, tenantId) =>
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
+      verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      providerTarget: (providerId) => host.providerTarget(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
@@ -2168,9 +2202,11 @@ export class AppStateStore {
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
+      verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      providerTarget: (providerId) => host.providerTarget(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
-      buildLlm: (providerId, model) => host.buildLlm(providerId, model),
+      buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
@@ -7708,7 +7744,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
   }
 
-  /** Where a provider is reached now; see novaProviderEndpoint. */
+  /** An opaque fingerprint of where a provider is reached now, for a model fit review to compare later. */
+  async providerDestination(providerId: ProviderId): Promise<string> {
+    return (await this.providerTarget(providerId)).destination;
+  }
+
+  /** Where a provider is reached and its fingerprint, from one read, so a check and a binding cannot disagree. */
+  async providerTarget(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }> {
+    const endpoint = modelFitProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
+    return { endpoint, destination: createHash("sha256").update(`${providerId}\0${endpoint ?? ""}`).digest("hex").slice(0, 32) };
+  }
+
   async novaProviderEndpoint(providerId: ProviderId): Promise<string | undefined> {
     return novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
   }
@@ -9207,7 +9253,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const requireBound = (endpoint: string | undefined) => {
       if (binding && (endpoint ?? undefined) !== (binding.endpoint ?? undefined)) throw new ProviderEndpointChangedError();
     };
-    if (binding) requireBound(novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined));
+    if (binding) {
+      const persistedForEndpoint = providerId === "azure-openai" ? await this.read() : undefined;
+      requireBound(binding.scope === "model-fit" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
+      // An Azure OpenAI request goes to the configured deployment, so a model fit request for the
+      // deployment the admin reviewed is refused when another one is configured now.
+      if (binding.scope === "model-fit" && persistedForEndpoint && model !== undefined && model.trim() !== this.azureOpenAIConfigFromState(persistedForEndpoint).deployment.trim()) {
+        throw new ProviderEndpointChangedError();
+      }
+    }
     if (this.llmFactory) {
       // Test seam only: it returns before the in-branch endpoint comparison
       // below, so only the check above applies to it. Production adapters
@@ -9247,6 +9301,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       return createLmStudioLlm(options);
     }
     if (providerId === "lemonade") {
+      // A model fit binding is checked on the address the adapter is built with.
+      if (binding?.scope === "model-fit") {
+        const endpoint = resolveLemonadeEndpoint();
+        requireBound(endpoint.replace(/\/$/, ""));
+        return createLemonadeLlm({ endpoint, ...(defaultModel ? { defaultModel } : {}) });
+      }
       return createLemonadeLlm(defaultModel ? { defaultModel } : {});
     }
     if (providerId === "anthropic") {
@@ -9266,6 +9326,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         return noopLlm;
       }
       requireBound(`${options.endpoint.trim().replace(/\/$/, "")}#${options.deployment.trim()}`);
+      if (binding?.scope === "model-fit" && model !== undefined && model.trim() !== options.deployment.trim()) throw new ProviderEndpointChangedError();
       return createAzureOpenAiLlm(options);
     }
     return noopLlm;

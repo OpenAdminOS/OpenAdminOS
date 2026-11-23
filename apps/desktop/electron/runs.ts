@@ -1,3 +1,5 @@
+import { guardModelFitLlm } from "./intune-chat/model-fit.js";
+import { classifyModelFitFailure, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -369,11 +371,15 @@ export interface RunServiceHost {
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
   listProviders(): Promise<ProviderSummary[]>;
+  /** A fresh check that this provider runs this model on this device (model fit reruns). */
+  verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
   providerCanRun(
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
   validateOfficeApproval?(run: RunRecord): Promise<void>;
-  buildLlm(providerId: ProviderId, model: string | undefined): Promise<RunLlmApi>;
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi>;
+  /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
+  providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -594,6 +600,10 @@ export class RunService {
       // manually, from Chat or from a schedule.
       const manifestError = this.host.agentManifestError?.(agent);
       if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
+      // A run reviewed with no organization does not start in one that became active since.
+      if (options.expectNoTenant && persisted.activeTenantId) {
+        throw new OrganizationBoundaryError("An organization became active after you reviewed this run, so it did not start. Review it again.");
+      }
       const requestedTenantId =
         typeof options.tenantId === "string" ? options.tenantId : persisted.activeTenantId;
       // Admission closes before a disconnect drains its work, under this lock.
@@ -635,6 +645,7 @@ export class RunService {
       if (options.dryRun && (options.office || options.officeContext)) {
         throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
       }
+      let inheritedEndpointBinding: RunRecord["providerEndpointBinding"];
       if (options.runForRealOfRunId) {
         const original = persisted.runs.find(run => run.id === options.runForRealOfRunId);
         if (
@@ -661,7 +672,10 @@ export class RunService {
           tenantId: original.tenantId,
           providerId: original.providerId,
           model: original.model,
+          // A model fit dry run keeps its safeguards into Run for real.
+          ...(original.requireOnDeviceModel ? { requireOnDeviceModel: true } : {}),
         };
+        inheritedEndpointBinding = original.providerEndpointBinding;
       }
       assertAgentCompatible(
         withAgentCompatibility(agent, this.host.appVersion),
@@ -736,6 +750,33 @@ export class RunService {
         throw new Error(
           `${activeProvider.name} isn't ready. Open Settings → LLM Providers to check the connection.`,
         );
+      }
+
+      // A model fit rerun on a hosted provider (and Run for real of one) runs the model its review
+      // named and the provider reports now, never a default the host or the provider picks after the approval.
+      const modelFitStart = options.bindProviderEndpoint === true || inheritedEndpointBinding?.scope === "model-fit";
+      if (modelFitStart && activeProvider && !activeProvider.isLocal) {
+        if (!explicitModel || isPlaceholderModel(explicitModel) || knownModels.length === 0 || activeProvider.modelsFromPolicy === true) {
+          throw new Error(`${activeProvider.name} does not report a model yet, so the run did not start. Check it in Settings, Providers, then review the run again.`);
+        }
+        if (!isListedHostedModel(activeProvider, explicitModel)) {
+          throw new Error(`${activeProvider.name} no longer lists ${explicitModel}, so the run did not start. Choose a provider again on the run page.`);
+        }
+      }
+
+      // A model fit rerun on a model on this device is admitted only after a fresh check that it runs here,
+      // and only with a model named, so every phase runs the same one.
+      if (options.requireOnDeviceModel && !model) {
+        throw new Error(`OpenAdminOS could not tell which ${activeProvider?.name ?? providerId} model this run uses, so it did not start. Choose a model, then review the run again.`);
+      }
+      if (options.requireOnDeviceModel) {
+        if (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+          throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
+        }
+        // The check reads the network; the organization this start was admitted for must still be active.
+        if ((await this.host.read()).activeTenantId !== persisted.activeTenantId) {
+          throw new OrganizationBoundaryError("The active organization changed while this run was starting, so it did not start. Review it again.");
+        }
       }
 
       if (options.retryOfRunId && activeProvider?.isLocal !== true) {
@@ -832,6 +873,31 @@ export class RunService {
         agent = { ...agent, settings: { ...defaults, ...agent.settings } };
       }
       const queuedRun = createQueuedRun({ agent, providerId, model, dryRun: options.dryRun });
+      // A model fit rerun keeps its admission checks for every later phase (plan, replan, apply).
+      if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
+      if (options.bindProviderEndpoint) {
+        // A server outside this device that OpenAdminOS reaches directly (LM Studio, Lemonade, Ollama) is
+        // not a model fit choice: its location is not stated and it may redirect a request elsewhere.
+        if (activeProvider && !activeProvider.isLocal && SELF_HOSTED_PROVIDER_IDS.has(activeProvider.id)) {
+          throw new Error(`${activeProvider.name} is set to a server outside this device, so it is not offered for a run the local model could not do. Choose a hosted provider.`);
+        }
+        // The destination the run review saw; a change since refuses the start before anything is sent.
+        // One read for the check and the binding, so they cannot disagree.
+        const target = await this.host.providerTarget?.(providerId);
+        if (!target || options.expectedProviderDestination === undefined) {
+          throw new Error("OpenAdminOS could not read where the provider is reached when the run was reviewed, so it did not start. Review it again.");
+        }
+        if (options.expectedProviderDestination !== target.destination) {
+          throw new Error("The provider's settings changed after this run was reviewed, so it did not start. Review it again.");
+        }
+        // Run for real goes only where its dry run planned: a new review cannot move it elsewhere.
+        if (inheritedEndpointBinding && (inheritedEndpointBinding.endpoint ?? undefined) !== (target.endpoint ?? undefined)) {
+          throw new Error("The provider is reached somewhere else than when the dry run planned, so Run for real did not start. Start a new run from the agent page.");
+        }
+        queuedRun.providerEndpointBinding = { endpoint: target.endpoint, scope: "model-fit" };
+      } else if (inheritedEndpointBinding) {
+        queuedRun.providerEndpointBinding = inheritedEndpointBinding;
+      }
       if (options.dryRun || options.runForRealOfRunId) queuedRun.inputSettings = structuredClone(agent.settings ?? {});
       if (options.runForRealOfRunId) queuedRun.runForRealOfRunId = options.runForRealOfRunId;
       queuedRun.assessmentKey = createHash("sha256").update(JSON.stringify({ schema: 1,
@@ -1360,12 +1426,51 @@ export class RunService {
 
   /** Every run builds the provider LLM. */
   private async baseRunLlm(
-    _run: RunRecord,
+    run: RunRecord,
     _agent: AgentSummary,
     providerId: ProviderId,
     model: string | undefined,
   ): Promise<RunLlmApi> {
-    return await this.host.buildLlm(providerId, model);
+    // A model fit rerun on a model on this device is checked again at every phase,
+    // since a diff can stay open while the model's alias or address changes.
+    if (run.requireOnDeviceModel) {
+      const provider = (await this.host.listProviders()).find((entry) => entry.id === providerId);
+      if (provider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+        throw new Error(`OpenAdminOS could not confirm that ${model ?? provider?.name ?? providerId} still runs on this device, so nothing was sent to it. Start the run again.`);
+      }
+    }
+    let llm: RunLlmApi;
+    try {
+      llm = run.providerEndpointBinding
+        ? await this.host.buildLlm(providerId, model, run.providerEndpointBinding)
+        : await this.host.buildLlm(providerId, model);
+    } catch (error) {
+      if (run.providerEndpointBinding && error instanceof Error && error.name === "ProviderEndpointChangedError") {
+        throw new Error("The provider's settings changed after this run was reviewed, so nothing was sent with the new settings. Review the run again.");
+      }
+      throw error;
+    }
+    // A hosted model fit rerun runs only the model its review named, call by call.
+    if (!run.requireOnDeviceModel) {
+      return run.providerEndpointBinding?.scope === "model-fit" ? guardModelFitLlm(llm, { before: async () => undefined, dispatched: () => undefined, model }) : llm;
+    }
+    // Every model call of the phase checks again, since evidence gathering and the
+    // diff can take long enough for the model's alias or address to change.
+    return guardModelFitLlm(llm, {
+      before: async () => {
+        // The adapter sends to the bound address; a moved address stops the call before the check.
+        const bound = run.providerEndpointBinding;
+        if (bound && this.host.providerTarget && (await this.host.providerTarget(providerId)).endpoint !== bound.endpoint) {
+          throw new Error("The provider's settings changed while this run ran, so nothing more was sent. Review the run again.");
+        }
+        const current = (await this.host.listProviders()).find((entry) => entry.id === providerId);
+        if (current?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+          throw new Error(`OpenAdminOS could not confirm that ${model ?? current?.name ?? providerId} still runs on this device, so nothing more was sent to it. Start the run again.`);
+        }
+      },
+      dispatched: () => undefined,
+      model,
+    });
   }
 
   private withOverlay(_run: RunRecord, llm: RunLlmApi, tenantId: string, agentSlug: string): RunLlmApi {
@@ -1811,11 +1916,40 @@ export class RunService {
     });
   }
 
+  /**
+   * A failed run whose model on this device could not do it gets the fit
+   * issue the run page offers from. The model's locality is confirmed now,
+   * when it failed, never later against changed provider settings.
+   */
+  private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
+    if (run.status !== "failed" || run.modelFit || !run.providerId || run.origin !== undefined || run.officeContext) return run;
+    try {
+      // Only when the run turns failed: a later snapshot of a failure already checked keeps what
+      // that check found (persistRunSnapshot carries an issue over), so no later state decides it.
+      if ((await this.host.read()).runs.find((existing) => existing.id === run.id)?.status === "failed") return run;
+      // Classified first, so an unrelated failure (a Graph permission error) is saved without
+      // waiting on provider discovery; only a fit candidate checks where its model runs.
+      const context = { providerId: run.providerId, model: run.model, isLocal: true };
+      const issue = classifyModelFitFailure(run.failureReason ?? run.error, context) ?? classifyModelFitFailure(run.error, context);
+      if (!issue) return run;
+      const provider = (await this.host.listProviders()).find((entry) => entry.id === run.providerId);
+      if (!provider || !isOnDeviceModel(provider, run.model)) return run;
+      if (!(await this.host.verifyOnDeviceModel?.(provider.id, run.model))) return run;
+      return { ...run, modelFit: issue };
+    } catch {
+      // A check that cannot run offers nothing; the run keeps its failure as it is.
+      return run;
+    }
+  }
+
   async persistRunSnapshot(run: RunRecord): Promise<void> {
+    run = await this.withModelFitIssue(run);
     let deliveryCandidate: RunRecord | undefined;
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const previous = persisted.runs.find((existing) => existing.id === run.id);
+      // A later snapshot of the same failure keeps the fit issue confirmed when it failed.
+      if (run.status === "failed" && !run.modelFit && previous?.modelFit && previous.error === run.error) run = { ...run, modelFit: previous.modelFit };
       // A run deleted with its disconnected tenant never comes back from a
       // late snapshot, and its report is never delivered.
       if (!previous && run.tenantId && this.host.tenantWritable && !this.host.tenantWritable(run.tenantId)) return;
