@@ -54,7 +54,7 @@ the installed app's scheduler, login item or caches.
 - [x] Store: close tenant work, bounded awaited shutdown, applying-run check
 - [x] Renderer: Data section row, `ResetOpenAdminOSDialog`, reset incomplete
       screen, post-reset notice, settings search item, copy
-- [x] NSIS research and `TODO(ugur)` on `deleteAppDataOnUninstall`
+- [x] NSIS research; maintainer decision 2026-11-23: `deleteAppDataOnUninstall` on
 - [x] Docs page "Uninstall and reset" (gitbook + generated web docs)
 - [x] Tests (electron + renderer), typecheck, Node 22
 - [x] End-to-end check in a development build with a throwaway profile (see Review)
@@ -415,6 +415,12 @@ the installed app's scheduler, login item or caches.
   database keeps its companions whatever sorts between them (Sol medium,
   tested), each handoff wait gets its own minute (Muse), SPEC wording on
   the shutdown and the AppImage restart (Claude, Muse).
+- 2026-11-23: merged origin/main (clean). Maintainer decision: the Windows
+  uninstaller deletes local data (`deleteAppDataOnUninstall: true`), guide,
+  SPEC and CHANGELOG say so, with the IT policy.json caveat; macOS and Linux
+  sections say removing the app removes only the app. The two reset tests
+  close their stores before cleanup; the mockup's first run frame shows the
+  model scan instead of the removed pilot mode.
 - Process lesson: twice I edited the tree while a reviewer was reading it;
   parked the edits as patches. Recorded in tasks/lessons.md.
 - Found in the end to end run and fixed: the incomplete screen called the
