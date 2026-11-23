@@ -156,8 +156,9 @@ import type {
   UpdateWorkspaceInput,
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
+  WritePlan,
 } from "@openadminos/agent-sdk";
-import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, servicePartById } from "@openadminos/agent-sdk";
+import { OPENADMINOS_APP_CLIENT_ID, ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, servicePartById } from "@openadminos/agent-sdk";
 import { companionUpcomingSchedules, runDueCompanionSchedules } from "./companion-schedules.js";
 import {
   blockConnectorConfirmations,
@@ -166,6 +167,7 @@ import {
 } from "./connector-confirm-bridge.js";
 import {
   OPENADMINOS_MXC_FLAG,
+  assessWritePlanSafely,
   listRegisteredConnectors,
   probeMxcSandbox,
 } from "@openadminos/runtime";
@@ -656,6 +658,35 @@ function seedScreenshotCaptureState(userDataDir: string): void {
     ...(entry.execution ? { execution: entry.execution } : {}),
   }));
 
+  const writePlan: WritePlan = {
+    summary: "Retire two stale Windows devices after offboarding review.",
+    confirmationPhrase: "RETIRE 2 DEVICES",
+    actions: [
+      {
+        id: "screenshot-action-1",
+        kind: "retire-managed-device",
+        label: "Retire WIN-OLD-001",
+        description: "Last synced 96 days ago.",
+        severity: "destructive",
+        request: {
+          method: "POST",
+          path: "/deviceManagement/managedDevices/device-1/retire",
+        },
+      },
+      {
+        id: "screenshot-action-2",
+        kind: "retire-managed-device",
+        label: "Retire WIN-OLD-002",
+        description: "Last synced 104 days ago.",
+        severity: "destructive",
+        request: {
+          method: "POST",
+          path: "/deviceManagement/managedDevices/device-2/retire",
+        },
+      },
+    ],
+  };
+
   writeFileSync(
     join(userDataDir, "state.json"),
     JSON.stringify(
@@ -678,50 +709,25 @@ function seedScreenshotCaptureState(userDataDir: string): void {
             summary: "Write plan is ready for review.",
             steps: [],
             logs: [],
-            plan: {
-              summary: "Retire two stale Windows devices after offboarding review.",
-              confirmationPhrase: "RETIRE 2 DEVICES",
-              actions: [
-                {
-                  id: "screenshot-action-1",
-                  kind: "retire-device",
-                  label: "Retire WIN-OLD-001",
-                  description: "Last synced 96 days ago.",
-                  severity: "destructive",
-                  request: {
-                    method: "POST",
-                    path: "/deviceManagement/managedDevices/device-1/retire",
-                  },
-                },
-                {
-                  id: "screenshot-action-2",
-                  kind: "retire-device",
-                  label: "Retire WIN-OLD-002",
-                  description: "Last synced 104 days ago.",
-                  severity: "destructive",
-                  request: {
-                    method: "POST",
-                    path: "/deviceManagement/managedDevices/device-2/retire",
-                  },
-                },
-              ],
-            },
+            plan: writePlan,
+            ...(isLandingCapture ? { riskAssessment: assessWritePlanSafely(writePlan) } : {}),
           },
         ],
         tenants: [
           {
             id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo: European Endpoint Administration and Security",
-            username: isLandingCapture
-              ? "admin@contoso.com"
-              : isWebsiteCapture
-                ? "admin@contoso.invalid"
-                : "admin@contoso-demo.invalid",
+            username: isWebsiteCapture
+              ? "admin@contoso.invalid"
+              : "admin@contoso-demo.invalid",
             homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
             entraTier: "p2",
+            ...(isLandingCapture
+              ? { appRegistration: { kind: "openadminos", clientId: OPENADMINOS_APP_CLIENT_ID } }
+              : {}),
           },
-          ...(isWebsiteCapture ? [
+          ...(isWebsiteCapture && !isLandingCapture ? [
             { id: "website-dev", displayName: "Dev Tenant", username: "admin@dev.invalid", homeAccountId: "website-dev-account", addedAt: now, entraTier: "p2" },
             { id: "website-customer", displayName: "Customer Tenant", username: "admin@customer.invalid", homeAccountId: "website-customer-account", addedAt: now, entraTier: "p2" },
           ] : []),
@@ -1408,10 +1414,15 @@ async function runScreenshotCaptureStep(
   window: BrowserWindow,
   step: ScreenshotCaptureStep,
 ): Promise<string> {
-  return window.webContents.executeJavaScript(
-    `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)})`,
+  const result: { hash: string } | { error: string } = await window.webContents.executeJavaScript(
+    `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)}).then(
+      (hash) => ({ hash }),
+      (error) => ({ error: String(error) }),
+    )`,
     true,
   );
+  if ("error" in result) throw new Error(result.error);
+  return result.hash;
 }
 
 async function captureScreenshotPng(
@@ -1588,10 +1599,10 @@ async function screenshotCaptureStepScript(
         "settled Chat transcript",
       );
       await waitFor(
-        () => !bodyText().includes("Chat answer ready."),
+        () => Boolean(findButton("Copy response")),
         "completed Chat progress cleared",
-        4500,
       );
+      resetScroll();
     } else if (step.prepare === "write-confirmation") {
       await waitFor(
         () => Boolean(document.querySelector('input[placeholder="Type here to enable Apply"]')),
@@ -1604,11 +1615,12 @@ async function screenshotCaptureStepScript(
         "[data-drawer-scroll-root], .app-page-body",
       );
       if (confirmationInput && scrollRoot) {
+        const riskReview = scrollRoot.querySelector('[aria-label="Write plan risk flags"]');
+        const top = riskReview
+          ? scrollRoot.scrollTop + riskReview.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top - 12
+          : confirmationInput.offsetTop - scrollRoot.clientHeight / 2;
         scrollRoot.scrollTo({
-          top: Math.max(
-            0,
-            confirmationInput.offsetTop - scrollRoot.clientHeight / 2,
-          ),
+          top: Math.max(0, top),
           behavior: "auto",
         });
       }

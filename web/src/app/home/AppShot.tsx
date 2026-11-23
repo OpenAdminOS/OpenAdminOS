@@ -7,8 +7,8 @@ import type { CSSProperties } from "react";
 export type AppScreen =
   | "agent-team"
   | "chat-transcript"
-  | "hub-grid"
-  | "settings"
+  | "connections"
+  | "marketplace"
   | "write-confirmation";
 
 /** The app laid out at 1280 x 800 and captured at 2x. */

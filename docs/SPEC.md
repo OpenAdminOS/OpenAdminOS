@@ -194,8 +194,9 @@ Mistral, Cohere, Sierra, Harvey, Factory, Cognition, Linear, ElevenLabs,
 Decagon, Glean): product windows always sit on an art stage, the site owns a
 visual language, and credibility comes from real momentum rather than claims.
 Order: a release announcement bar; a split hero (serif headline left, deck and
-OS-aware download right); the real Chat capture in a window frame on a
-relief-map stage with two floating cards quoting real app strings; a
+OS-aware download right); the Offboarding agent paused for write confirmation
+in a window frame on a relief-map stage, with the proposed device retirements
+and typed confirmation field visible; a
 works-with grid of model providers and model families (Ollama, LM Studio,
 Apple Foundation, Mistral, Muse by Meta, Claude Code, OpenAI Codex, GitHub
 Copilot, Google Gemini, Microsoft AI, Azure OpenAI, and a closing "Other local
@@ -209,8 +210,8 @@ use of its logo); on hover each cell
 fills from the bottom with
 a shaded tint of that company's brand color; a
 two-tone lead and three isometric line figures (FIG 0.1 to 0.3) that draw
-themselves once on reveal; a product tour of real captures (Chat, Agents,
-Agent Team, Write confirmation, Models), shown as five tabs over one
+themselves once on reveal; a product tour of real captures (Chat, Marketplace,
+Agent Team, Write confirmation, Connections), shown as five tabs over one
 full-width capture on large screens and as an accordion with a sidebar-free
 crop below that, that auto-advances while visible unless reduced motion is
 set, pauses under the pointer or while keyboard focus is inside it, offers a
@@ -238,8 +239,8 @@ desktop captures from `npm run screenshots:landing`: the app lays out at
 Xvfb with X11 forced so a Wayland session cannot clamp the window), in light
 and dark, into `docs/screenshots/landing/`, then converted to WebP under
 `web/public/app/` and swapped with the site theme. The landing capture uses the
-website demo tenant (Contoso, three Agent Team teammates) and realistic display
-values (`gpt-oss:20b`, `admin@contoso.com`, the connected Ollama endpoint) in
+single fictional Contoso tenant (with three Agent Team teammates) and demo display
+values (`gpt-oss:20b`, `admin@contoso.invalid`, the simulated Ollama endpoint) in
 place of the smoke-test fixtures; smoke tests and the layout captures are
 unchanged. Captures are taken with no focused control and the pointer parked,
 so no focus rings or hover states appear. Crops scale a region of a capture

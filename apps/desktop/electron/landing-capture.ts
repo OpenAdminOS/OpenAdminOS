@@ -33,7 +33,7 @@ const SHOTS: Array<LandingCaptureStep & { name: string }> = [
     selector: '[id^="intune-chat-composer"]',
   },
   {
-    name: "hub-grid",
+    name: "marketplace",
     route: "/marketplace",
     waitFor: ["MCP tools", "agents"],
     heading: "Marketplace",
@@ -55,10 +55,11 @@ const SHOTS: Array<LandingCaptureStep & { name: string }> = [
     prepare: "write-confirmation",
   },
   {
-    name: "settings",
-    route: "/settings/providers",
-    waitFor: ["Settings", "Providers"],
-    heading: "Settings",
+    name: "connections",
+    route: "/connections",
+    waitFor: ["Reads from", "This device", "Leaves this device"],
+    heading: "Contoso connections",
+    selector: ".reach-map",
   },
 ];
 
@@ -127,6 +128,7 @@ export async function captureLandingShots(
               ...shot,
               route: transcriptRoute!,
               prepare: undefined,
+              selector: 'article button[aria-label="Copy response"]',
               waitFor: [
                 ...shot.waitFor,
                 "WIN-01 is stale based on cached Intune and Entra device evidence.",

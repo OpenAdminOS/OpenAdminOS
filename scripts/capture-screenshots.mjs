@@ -39,8 +39,8 @@ try {
   // This flag is confined to the synthetic capture process, never the packaged app.
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
   // The landing set renders a 2560 x 1600 window, so it must run on the Xvfb
-  // display (xvfb-run -s "-screen 0 2560x1600x24" or larger). Force X11 so a
-  // Wayland desktop session cannot capture the window at its own screen size.
+  // display with room for the window frame (xvfb-run -s "-screen 0 2880x1800x24").
+  // Force X11 so a Wayland session cannot clamp it to its own screen size.
   if (landing && process.platform === "linux") electronArgs.push("--ozone-platform=x11");
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,
