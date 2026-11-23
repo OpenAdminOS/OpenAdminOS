@@ -141,7 +141,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
         return installed;
       };
-      let installedModel = await settleInstalledModel();
+      // Read right before the first send, after context sizing, so a model
+      // replaced under the name while the request was sized is the one known.
+      let installedModel = ollamaModelName(model);
 
       // Each request to /api/chat gets its own controller and timeout, so a
       // retry is not charged for the time the first request and the model
@@ -433,6 +435,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.
         const firstSent = numCtx;
+        installedModel = await settleInstalledModel();
         captureThink();
         let detail: string;
         [response, detail] = await sendWithThinkFallback(numCtx);
@@ -629,9 +632,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               actualModel = chunk.model;
             }
             const tokenUsage = extractTokenUsage(chunk);
-            const content = inlineThink.push(chunk.message?.content ?? "");
-            const delta = chunk.done ? content + inlineThink.flush() : content;
-            if (inlineThink.reasoned) reasoned = true;
             // Track reasoning-model chain-of-thought separately so a
             // reply with reasoning and no answer fails with that cause.
             const reasoningDelta = chunk.message?.thinking ?? "";
@@ -642,6 +642,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // later requests.
               if (body.think === false) learn("low");
             }
+            const content = inlineThink.push(chunk.message?.content ?? "");
+            if (inlineThink.reasoned) reasoned = true;
+            // At the end, text held back as a possible tag is the answer's,
+            // unless the reply reasoned and has no answer: then it is the
+            // start of a tag the token limit cut off.
+            const held = chunk.done ? inlineThink.flush() : "";
+            const delta = content + (reasoned && (accumulated + content).trim().length === 0 ? "" : held);
             accumulated += delta;
             // Reasoning is not an answer, so it is never returned as one,
             // and the caller sees no completed chunk before this is known.
@@ -672,8 +679,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           if (done) break;
         }
-        // Text held back as a possible tag is the answer's once the body ends.
-        const tail = inlineThink.flush();
+        // Text held back as a possible tag is the answer's once the body
+        // ends, unless the reply reasoned and has no answer.
+        const held = inlineThink.flush();
+        const tail = reasoned && accumulated.trim().length === 0 ? "" : held;
         accumulated += tail;
         // The body ended without a final record after reasoning alone.
         if (accumulated.trim().length === 0 && reasoned) {

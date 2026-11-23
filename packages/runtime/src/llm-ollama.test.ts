@@ -2152,6 +2152,58 @@ describe("Ollama reasoning models", () => {
   });
 
 
+  it("reads the model list after context sizing, so a model replaced while the request was sized gets its own value", async () => {
+    let shown = false;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // The name held a Llama until the sizing lookup; a gpt-oss copy replaced it then.
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [shown
+            ? { name: "resized-report:latest", digest: "sha256:oss", details: { family: "gptoss" } }
+            : { name: "resized-report:latest", digest: "sha256:llama", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shown = true;
+          res.end(JSON.stringify({ model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "resized-report:latest" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(sent, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("fails on reasoning with only a cut-off tag start as content, at the token limit or the end of the body", async () => {
+    for (const final of [true, false]) {
+      const fake = await fakeChat([
+        thinking("We need to produce a report."),
+        { model: "gpt-oss:20b", message: { content: "<thi" }, done: final, ...(final ? { done_reason: "length", eval_count: 1100 } : {}) },
+      ]);
+      try {
+        await assert.rejects(
+          createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+          (error) => isReasoningWithoutAnswerError(error),
+          String(final),
+        );
+      } finally {
+        await fake.close();
+      }
+    }
+  });
+
   it("sends the think value known right before the send, after a list read that applied while it was sized", async () => {
     let installed = { digest: "sha256:llama", family: "llama" };
     let shows = 0;
