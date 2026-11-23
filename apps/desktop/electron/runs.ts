@@ -42,6 +42,7 @@ import {
   type RunLlmApi,
   type RunLogLevel,
   type RunRecord,
+  type ScheduleModelDestination,
   type RunStepStatus,
   type SecretAccessor,
   type StartRunOptions,
@@ -72,6 +73,21 @@ export interface RunPersistedState {
   tenants: TenantRecord[];
   activeTenantId?: string;
   organizations?: OrganizationRecord[];
+}
+
+export function scheduleModelDestination(
+  state: Pick<RunPersistedState, "activeProviderId" | "activeModelByProviderId">,
+  agent: Pick<AgentSummary, "preferredModel">,
+  providers: readonly ProviderSummary[],
+): ScheduleModelDestination {
+  const provider = providers.find((entry) => entry.id === state.activeProviderId) ?? providers[0];
+  const model = resolveRunModel({ provider, activeModelByProviderId: state.activeModelByProviderId, preferredModel: agent.preferredModel }).model;
+  const cloud = provider?.id === "ollama" && isRemoteBackedModel(provider, model);
+  return {
+    providerId: provider?.id ?? state.activeProviderId,
+    ...(model ? { model } : {}),
+    ...(provider?.id === "ollama" && (provider.isLocal || cloud) ? { ollamaCloud: cloud } : {}),
+  };
 }
 
 /**
@@ -385,11 +401,12 @@ export interface RunServiceHost {
   /** A fresh check that this provider runs this model on this device (model fit reruns). */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
   verifyLocalOllamaModel?(model: string): Promise<boolean>;
+  readLocalOllamaModelCloud?(model: string, endpoint?: string): Promise<boolean | undefined>;
   providerCanRun(
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
   validateOfficeApproval?(run: RunRecord): Promise<void>;
-  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi>;
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" | "schedule" }): Promise<RunLlmApi>;
   /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
   providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   buildGraph(
@@ -653,6 +670,7 @@ export class RunService {
         if (!active || agent.schedule.organizationId !== active.id) {
           throw new OrganizationBoundaryError(SCHEDULE_OTHER_ORGANIZATION_COPY);
         }
+        if (!agent.schedule.enabled) throw new Error("This schedule is off. Enable automatic runs on the agent page.");
       }
       if (options.dryRun && (options.office || options.officeContext)) {
         throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
@@ -704,6 +722,59 @@ export class RunService {
       }
 
       const providers = await this.host.listProviders();
+      let scheduledBinding: RunRecord["providerEndpointBinding"];
+      if (agentSchedule && agent.schedule?.enabled) {
+        const schedule = agent.schedule;
+        if (schedule.lastSkipReason) throw new Error(schedule.lastSkipReason);
+
+        const current = scheduleModelDestination(persisted, agent, providers);
+        const target = await this.host.providerTarget?.(current.providerId);
+        const expected = schedule.modelDestination ?? current;
+        // A provider scan can be cached. Check the saved alias at the actual local endpoint.
+        const liveCloud = current.model && current.ollamaCloud !== undefined && this.host.readLocalOllamaModelCloud
+          ? await this.host.readLocalOllamaModelCloud(current.model, target?.endpoint)
+          : current.ollamaCloud;
+        const currentCloud = liveCloud ?? current.ollamaCloud;
+        const changed = current.providerId !== expected.providerId || current.model !== expected.model ||
+          currentCloud !== expected.ollamaCloud ||
+          (expected.endpointFingerprint !== undefined && target?.destination !== expected.endpointFingerprint);
+        if (changed || (expected.ollamaCloud === false && expected.model && liveCloud === undefined)) {
+          const reason = currentCloud && expected.ollamaCloud !== true && current.model
+            ? `Skipped: ${current.model} now runs on ollama.com. Review the schedule to continue.`
+            : changed
+              ? "Skipped: The model destination changed. Review the schedule to continue."
+              : `Skipped: OpenAdminOS could not confirm that ${expected.model} runs on this device. Review the schedule to continue.`;
+          this.assertTenantOpen(persisted.activeTenantId);
+          const now = new Date().toISOString();
+          const skippedRun: RunRecord = {
+            id: `run_${randomUUID()}`,
+            agentSlug,
+            tenantId: persisted.activeTenantId,
+            trigger: "schedule",
+            initiator: "schedule",
+            providerId: expected.providerId,
+            model: expected.model,
+            status: "failed",
+            queuedAt: now,
+            finishedAt: now,
+            summary: reason,
+            error: reason,
+            graphDenialChecked: true,
+            steps: [],
+            logs: [],
+          };
+          await this.host.write({
+            ...persisted,
+            installedAgents: persisted.installedAgents.map((entry) => entry === agent
+              ? { ...entry, schedule: { ...schedule, lastSkipReason: reason } }
+              : entry),
+            runs: [skippedRun, ...persisted.runs],
+          });
+          return { agent, providerId: expected.providerId, model: expected.model, queuedRun: skippedRun };
+        }
+        options = { ...options, providerId: expected.providerId, model: expected.model, expectedOllamaCloud: expected.ollamaCloud };
+        if (target) scheduledBinding = { endpoint: target.endpoint, scope: "schedule" };
+      }
       // Honor a per-run provider override if supplied; otherwise fall
       // back to the globally-active provider. Unknown ids are an error
       // because silently dropping the override would be misleading.
@@ -750,7 +821,9 @@ export class RunService {
         explicitModel,
       }).model;
 
-      const ollamaCloud = activeProvider?.id === "ollama" && isRemoteBackedModel(activeProvider, model);
+      const ollamaCloud = scheduledBinding && options.expectedOllamaCloud !== undefined
+        ? options.expectedOllamaCloud
+        : activeProvider?.id === "ollama" && isRemoteBackedModel(activeProvider, model);
       if (options.expectedOllamaCloud !== undefined && (
         providerId !== "ollama" || ollamaCloud !== options.expectedOllamaCloud || (!ollamaCloud && activeProvider?.isLocal !== true)
       )) {
@@ -921,6 +994,8 @@ export class RunService {
           throw new Error("The provider is reached somewhere else than when the dry run planned, so Run for real did not start. Start a new run from the agent page.");
         }
         queuedRun.providerEndpointBinding = { endpoint: target.endpoint, scope: "model-fit" };
+      } else if (scheduledBinding) {
+        queuedRun.providerEndpointBinding = scheduledBinding;
       } else if (inheritedEndpointBinding) {
         queuedRun.providerEndpointBinding = inheritedEndpointBinding;
       }
@@ -945,12 +1020,21 @@ export class RunService {
 
       await this.host.write({
         ...persisted,
+        ...(agentSchedule ? {
+          installedAgents: persisted.installedAgents.map((entry) => entry.slug === agentSlug && entry.schedule
+            ? { ...entry, schedule: { ...entry.schedule, lastScheduledRunAt: queuedRun.queuedAt } }
+            : entry),
+        } : {}),
         runs: [queuedRun, ...persisted.runs],
       });
 
       return { agent, providerId, model, queuedRun };
     });
 
+    if (queued.queuedRun.status === "failed") {
+      this.host.emitStateChanged("run-updated", queued.queuedRun.id);
+      return queued.queuedRun;
+    }
     if (options.source?.type === "intune-chat" && this.host.intelligenceStore) {
       const now = new Date().toISOString();
       const statusNote = queued.queuedRun.dryRun

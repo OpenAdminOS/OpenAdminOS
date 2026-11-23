@@ -243,6 +243,8 @@ import {
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
+  type AgentScheduleInput,
+  type ScheduleModelDestination,
   type AgentSignalDelivery,
   type AgentSlackDelivery,
   type AgentSummary,
@@ -373,7 +375,7 @@ import {
 } from "./telemetry/usage.js";
 import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
 import { LOCAL_RESET_MARKER_FILES } from "./local-reset.js";
-import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
+import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, scheduleModelDestination, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -414,6 +416,7 @@ import {
   checkOllama,
   isProviderId,
   ollamaModelIsOnDevice,
+  readLocalOllamaModelCloud,
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
@@ -1804,7 +1807,7 @@ function errorText(cause: unknown): string {
 export interface ProviderEndpointBinding {
   endpoint: string | undefined;
   /** A model fit binding also covers Lemonade's address (modelFitProviderEndpoint); a Nova binding keeps its own scope. */
-  scope?: "model-fit";
+  scope?: "model-fit" | "schedule";
 }
 
 /** A bound model build found its provider configured for another endpoint; nothing was sent. */
@@ -2207,7 +2210,7 @@ export class AppStateStore {
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
-      ...(!host.llmFactory ? { verifyLocalOllamaModel: ollamaModelIsOnDevice } : {}),
+      ...(!host.llmFactory ? { verifyLocalOllamaModel: ollamaModelIsOnDevice, readLocalOllamaModelCloud } : {}),
       providerTarget: (providerId) => host.providerTarget(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
@@ -4018,7 +4021,10 @@ export class AppStateStore {
     const pendingScan = (await this.read()).firstRunScan === "pending";
     // listProviders serves the scan's results or "not checked" while pending.
     const providers = await this.listProviders();
-    const persisted = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
+    const selected = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
+    const persisted = selected.installedAgents.some((agent) => agent.schedule && !agent.schedule.modelDestination)
+      ? await this.migrateScheduleDestinations(providers)
+      : selected;
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
@@ -6182,9 +6188,38 @@ export class AppStateStore {
     return this.getAppState();
   }
 
+  private async captureScheduleModel(
+    state: PersistedState,
+    agent: AgentSummary,
+    providers: readonly ProviderSummary[],
+  ): Promise<ScheduleModelDestination> {
+    const destination = scheduleModelDestination(state, agent, providers);
+    return { ...destination, endpointFingerprint: await this.providerDestination(destination.providerId) };
+  }
+
+  private async migrateScheduleDestinations(providers?: readonly ProviderSummary[]): Promise<PersistedState> {
+    const persisted = await this.read();
+    const unpinned = (agent: AgentSummary) => agent.schedule && !agent.schedule.modelDestination;
+    if (!persisted.installedAgents.some(unpinned)) return persisted;
+
+    return this.serialize(async () => {
+      const current = await this.read();
+      if (!current.installedAgents.some(unpinned)) return current;
+      const listed = providers ?? await this.listProviders();
+      const installedAgents = await Promise.all(current.installedAgents.map(async (agent) => {
+        if (!agent.schedule || agent.schedule.modelDestination) return agent;
+        const modelDestination = await this.captureScheduleModel(current, agent, listed);
+        return { ...agent, schedule: { ...agent.schedule, modelDestination } };
+      }));
+      const next = { ...current, installedAgents };
+      await this.write(next);
+      return next;
+    });
+  }
+
   async updateAgentSchedule(
     slug: string,
-    schedule: AgentSchedule | null,
+    schedule: AgentScheduleInput | null,
   ): Promise<AppState> {
     const updatedAt = new Date().toISOString();
     if (schedule !== null) {
@@ -6229,10 +6264,12 @@ export class AppStateStore {
         const { schedule: _, ...rest } = existing;
         next[idx] = rest;
       } else {
-        const activationAnchor =
-          schedule.enabled && existing.schedule?.enabled !== true
-            ? updatedAt
-            : undefined;
+        const reviewModel = schedule.enabled && (existing.schedule?.enabled !== true || schedule.reviewModelDestination === true);
+        const modelDestination = reviewModel || !existing.schedule?.modelDestination
+          ? await this.captureScheduleModel(persisted, existing, await this.listProviders())
+          : existing.schedule.modelDestination;
+        const activationAnchor = reviewModel ? updatedAt : undefined;
+        const lastSkipReason = reviewModel ? undefined : existing.schedule?.lastSkipReason;
         // Ownership is decided once, when the schedule is created: it
         // belongs to the active organization, or waits unassigned with
         // none active. An edit keeps it, including unassigned, so changing
@@ -6249,6 +6286,8 @@ export class AppStateStore {
             ...(organizationId ? { organizationId } : {}),
             enabled: schedule.enabled,
             intervalSeconds: Math.floor(schedule.intervalSeconds),
+            modelDestination,
+            ...(lastSkipReason ? { lastSkipReason } : {}),
             notifyOnSuccess: schedule.notifyOnSuccess ?? existing.schedule?.notifyOnSuccess ?? true,
             notifyOnFailure: schedule.notifyOnFailure ?? existing.schedule?.notifyOnFailure ?? true,
             notifyOnChangeOnly:
@@ -6319,7 +6358,7 @@ export class AppStateStore {
    * same app entrypoint in hidden mode while the user is signed in.
    */
   async fireDueSchedules(): Promise<void> {
-    const persisted = await this.read();
+    const persisted = await this.migrateScheduleDestinations();
     const nowMs = Date.now();
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
@@ -6346,7 +6385,7 @@ export class AppStateStore {
 
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
-      if (!schedule?.enabled) continue;
+      if (!schedule?.enabled || schedule.lastSkipReason) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
       if (!activeOrganization || schedule.organizationId !== activeOrganization.id) {
         waiting += 1;
@@ -6372,14 +6411,6 @@ export class AppStateStore {
 
       try {
         await this.startRun(agent.slug, { trigger: "schedule" });
-        await this.updateAgentSchedule(agent.slug, {
-          enabled: true,
-          intervalSeconds: schedule.intervalSeconds,
-          notifyOnSuccess: schedule.notifyOnSuccess,
-          notifyOnFailure: schedule.notifyOnFailure,
-          notifyOnChangeOnly: schedule.notifyOnChangeOnly,
-          lastScheduledRunAt: new Date(nowMs).toISOString(),
-        });
       } catch (error) {
         // The organization changed after this tick read the state, or the
         // schedule lost its assignment: it waits for its organization. No
@@ -6454,13 +6485,15 @@ export class AppStateStore {
       ],
     };
     if (failedRun.tenantId) await this.persistRunSnapshot(failedRun);
-    await this.updateAgentSchedule(agent.slug, {
-      enabled: true,
-      intervalSeconds: schedule.intervalSeconds,
-      notifyOnSuccess: schedule.notifyOnSuccess,
-      notifyOnFailure: schedule.notifyOnFailure,
-      notifyOnChangeOnly: schedule.notifyOnChangeOnly,
-      lastScheduledRunAt: now,
+    await this.serialize(async () => {
+      const latest = await this.read();
+      const installedAgents = latest.installedAgents.map((entry) =>
+        entry.slug === agent.slug && entry.schedule && JSON.stringify(entry.schedule) === JSON.stringify(schedule)
+          ? { ...entry, schedule: { ...entry.schedule, lastScheduledRunAt: now } }
+          : entry);
+      if (installedAgents.some((entry, index) => entry !== latest.installedAgents[index])) {
+        await this.write({ ...latest, installedAgents });
+      }
     });
   }
 
@@ -9212,6 +9245,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.localResetStarted) throw new LocalResetInProgressError();
     this.localResetWorkInFlight += 1;
     try {
+      if (options.trigger === "schedule" && !options.office) await this.migrateScheduleDestinations();
       return await this.runService.startRun(agentSlug, options, boundary);
     } finally {
       this.localResetWorkInFlight -= 1;
@@ -9262,7 +9296,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (binding) {
       const persistedForEndpoint = providerId === "azure-openai" ? await this.read() : undefined;
-      requireBound(binding.scope === "model-fit" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
+      requireBound(binding.scope === "model-fit" || binding.scope === "schedule" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
       // An Azure OpenAI request goes to the configured deployment, so a model fit request for the
       // deployment the admin reviewed is refused when another one is configured now.
       if (binding.scope === "model-fit" && persistedForEndpoint && model !== undefined && model.trim() !== this.azureOpenAIConfigFromState(persistedForEndpoint).deployment.trim()) {
@@ -9326,7 +9360,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     if (providerId === "lemonade") {
       // A model fit binding is checked on the address the adapter is built with.
-      if (binding?.scope === "model-fit") {
+      if (binding?.scope === "model-fit" || binding?.scope === "schedule") {
         const endpoint = resolveLemonadeEndpoint();
         requireBound(endpoint.replace(/\/$/, ""));
         return createLemonadeLlm({ endpoint, ...(defaultModel ? { defaultModel } : {}) });

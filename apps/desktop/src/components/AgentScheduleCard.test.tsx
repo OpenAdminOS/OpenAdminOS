@@ -37,6 +37,24 @@ describe("schedule usage before enabling", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ intervalSeconds: 14400 }));
   });
 
+  it("shows the recorded skip and lets the admin review the current cloud model", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const model = "writer:latest";
+    const reason = `Skipped: ${model} now runs on ollama.com. Review the schedule to continue.`;
+    const provider = { ...mockProviders.find((item) => item.id === "ollama")!, models: [model], defaultModel: model, remoteModels: [model] };
+    const agent = createMockAgent({ schedule: {
+      enabled: true, intervalSeconds: 3600, lastSkipReason: reason,
+      modelDestination: { providerId: "ollama", model, ollamaCloud: false },
+    } });
+    const state = createMockAppState({ activeProviderId: "ollama", providers: [provider] });
+    renderWithAppState(<AgentScheduleCard agent={agent} onChange={onChange} />, { bridge: makeMockBridge({}, state) });
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+    expect(screen.queryByText(/^Next run/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: `Use ${model} · Ollama Cloud` }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ reviewModelDestination: true }));
+  });
+
   for (const providerId of ["azure-openai", "openai", "anthropic"] as const) {
     it(`renders tokens and honest billing for ${providerId}`, async () => {
       const agent = createMockAgent();

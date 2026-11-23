@@ -554,6 +554,15 @@ export interface OfficeState {
   messages?: OfficeMessage[];
 }
 
+export interface ScheduleModelDestination {
+  providerId: ProviderId;
+  model?: string | undefined;
+  ollamaCloud?: boolean | undefined;
+  endpointFingerprint?: string | undefined;
+}
+
+export type AgentScheduleInput = AgentSchedule & { reviewModelDestination?: boolean };
+
 export interface AgentSchedule {
   enabled: boolean;
   intervalSeconds: number;
@@ -562,6 +571,10 @@ export interface AgentSchedule {
   notifyOnChangeOnly?: boolean;
   /** When the scheduler last fired this agent. Updated by the host. */
   lastScheduledRunAt?: string;
+  /** Host-owned model settings reviewed for this schedule. */
+  modelDestination?: ScheduleModelDestination;
+  /** A destination change pauses automatic sends until this schedule is reviewed. */
+  lastSkipReason?: string;
   /**
    * The organization this schedule runs in. A schedule never runs while
    * another organization is active. Absent means unassigned: the schedule
@@ -1105,7 +1118,7 @@ export interface RunRecord {
    */
   modelFit?: ModelFitIssue;
   /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
-  providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" };
+  providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" | "schedule" };
   /** Machine readable reason for a failed run, such as `context-too-small`. */
   failureReason?: RunFailureReason;
   /**
@@ -4018,7 +4031,7 @@ export interface OpenAdminOSApi {
    * scheduler fires the agent every `intervalSeconds`; with OS scheduler
    * enabled, OpenAdminOS can run due schedules while the UI is closed.
   */
-  updateAgentSchedule(slug: string, schedule: AgentSchedule | null): Promise<AppState>;
+  updateAgentSchedule(slug: string, schedule: AgentScheduleInput | null): Promise<AppState>;
   /**
    * Persist per-agent Microsoft Teams delivery. Pass null to remove
    * the route. Delivery posts terminal run reports through the Teams

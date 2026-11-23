@@ -102,7 +102,7 @@ import type {
   CompanionLaunchSettings,
   AgentDiscordDelivery,
   AgentOutlookDelivery,
-  AgentSchedule,
+  AgentScheduleInput,
   AgentSignalDelivery,
   AgentSlackDelivery,
   AgentTeamsDelivery,
@@ -2730,16 +2730,8 @@ async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult
   const nowMs = Date.now();
   return runDueCompanionSchedules(state, nowMs, {
     startScheduledRun: async (agent) => {
-      await store.startRun(agent.slug, { trigger: "schedule" });
-      const schedule = agent.schedule!;
-      await store.updateAgentSchedule(agent.slug, {
-        enabled: true,
-        intervalSeconds: schedule.intervalSeconds,
-        notifyOnSuccess: schedule.notifyOnSuccess,
-        notifyOnFailure: schedule.notifyOnFailure,
-        notifyOnChangeOnly: schedule.notifyOnChangeOnly,
-        lastScheduledRunAt: new Date(nowMs).toISOString(),
-      });
+      const run = await store.startRun(agent.slug, { trigger: "schedule" });
+      if (run.status === "failed") throw new Error(run.summary ?? run.error);
     },
   });
 }
@@ -3562,7 +3554,7 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
   return options;
 }
 
-function validateAgentSchedule(value: unknown): AgentSchedule | null {
+function validateAgentSchedule(value: unknown): AgentScheduleInput | null {
   if (value === null) return null;
   if (!isPlainRecord(value)) {
     throw new Error("agent schedule must be an object or null.");
@@ -3579,11 +3571,11 @@ function validateAgentSchedule(value: unknown): AgentSchedule | null {
   if (typeof value.enabled !== "boolean") {
     throw new Error("agent schedule enabled must be a boolean.");
   }
-  const schedule: AgentSchedule = {
+  const schedule: AgentScheduleInput = {
     enabled: value.enabled,
     intervalSeconds,
   };
-  for (const key of ["notifyOnSuccess", "notifyOnFailure", "notifyOnChangeOnly"] as const) {
+  for (const key of ["notifyOnSuccess", "notifyOnFailure", "notifyOnChangeOnly", "reviewModelDestination"] as const) {
     if (value[key] !== undefined) {
       if (typeof value[key] !== "boolean") {
         throw new Error(`agent schedule ${key} must be a boolean.`);

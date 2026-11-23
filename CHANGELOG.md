@@ -84,6 +84,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Agent schedules pause for review when the model destination changes. The schedule card and run history show why.
 - A managed provider list with no hosted providers blocks Ollama Cloud unless IT explicitly locks a cloud model.
 
 - Ollama Cloud models show where prompts are processed and require the usual hosted Chat confirmation. On-device reruns only offer models that run on this device.

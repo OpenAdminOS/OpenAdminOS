@@ -3550,6 +3550,15 @@ defaults to a local model when no model is pinned. An on-device rerun can
 use only a listed model that runs on this device, and setup and review show
 a recovery message when none is available.
 
+When an agent schedule is enabled or its model is reviewed, the host records
+the provider, model, endpoint fingerprint and Ollama Cloud status. Existing
+schedules record their current destination on first load and keep their
+enabled state. The scheduler checks the saved destination at admission and
+reads Ollama model aliases again before an automatic run. A changed or
+unverifiable local destination pauses the schedule and records why on its
+card and in run history. Reviewing the current model on the schedule card
+resumes the schedule after one full interval.
+
 The cost cell follows the same pattern: green `$0.00 local` for local providers, real cost numbers for hosted.
 
 ---

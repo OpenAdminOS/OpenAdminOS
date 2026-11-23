@@ -188,10 +188,18 @@ export default function AgentsHome() {
         // Each start is a scheduled start, so the host refuses it if the
         // schedule's organization is no longer the active one.
         for (const agent of agents) {
-          await startRun(agent.slug, { trigger: "schedule" });
-          started += 1;
+          if (agent.schedule?.lastSkipReason) {
+            toast.error(agent.schedule.lastSkipReason);
+            continue;
+          }
+          const run = await startRun(agent.slug, { trigger: "schedule" });
+          if (run?.status === "failed") {
+            toast.error(run.summary ?? run.error ?? "Review the schedule before running it again.");
+          } else {
+            started += 1;
+          }
         }
-        toast.success(`${started} scheduled ${started === 1 ? "run" : "runs"} queued.`);
+        if (started > 0) toast.success(`${started} scheduled ${started === 1 ? "run" : "runs"} queued.`);
       } catch (caught) {
         toast.error(caught instanceof Error ? caught.message : String(caught));
       } finally {
@@ -705,7 +713,7 @@ function toInstalledDisplay(agent: AgentSummary): AgentDisplay {
 
 function nextRunTime(agent: AgentSummary) {
   const schedule = agent.schedule;
-  if (!schedule?.enabled) return Number.POSITIVE_INFINITY;
+  if (!schedule?.enabled || schedule.lastSkipReason) return Number.POSITIVE_INFINITY;
   return schedule.lastScheduledRunAt
     ? Date.parse(schedule.lastScheduledRunAt) + schedule.intervalSeconds * 1000
     : Date.parse(agent.installedAt) + schedule.intervalSeconds * 1000;

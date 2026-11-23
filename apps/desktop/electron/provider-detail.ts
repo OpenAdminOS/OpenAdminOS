@@ -113,18 +113,24 @@ function isRemoteOllamaTag(entry: NonNullable<OllamaTagsResponse["models"]>[numb
  * be confirmed is not sent.
  */
 export async function ollamaModelIsOnDevice(model: string, address = resolveOllamaEndpoint()): Promise<boolean> {
+  return (await readLocalOllamaModelCloud(model, address)) === false;
+}
+
+/** True for a cloud model, false for an installed local model, undefined if unverifiable. */
+export async function readLocalOllamaModelCloud(model: string, address = resolveOllamaEndpoint()): Promise<boolean | undefined> {
   const endpoint = address.replace(/\/$/, "");
-  if (!classifyOllamaEndpoint(endpoint).isLocal || isOllamaCloudModel(model)) return false;
+  if (!classifyOllamaEndpoint(endpoint).isLocal) return undefined;
+  if (isOllamaCloudModel(model)) return true;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
   try {
     const response = await fetchLocal(`${endpoint}/api/tags`, { signal: controller.signal });
-    if (!response.ok) return false;
+    if (!response.ok) return undefined;
     const payload = (await response.json()) as OllamaTagsResponse;
     const entry = payload.models?.find((candidate) => (candidate.name ?? candidate.model) === model);
-    return Boolean(entry && !isRemoteOllamaTag(entry, model));
+    return entry ? isRemoteOllamaTag(entry, model) : undefined;
   } catch {
-    return false;
+    return undefined;
   } finally {
     clearTimeout(timeout);
   }
