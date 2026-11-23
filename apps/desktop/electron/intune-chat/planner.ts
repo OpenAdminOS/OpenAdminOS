@@ -2183,6 +2183,8 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
     "riskLevel",
     "riskState",
     "status",
+    // Not tenant data: set by the sampler on a device the question names, so the model does not read it as a filter match.
+    "namedInQuestion",
   ];
   const out: Record<string, unknown> = {};
   for (const key of keys) {

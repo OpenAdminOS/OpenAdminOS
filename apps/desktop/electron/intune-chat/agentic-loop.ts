@@ -877,8 +877,10 @@ export async function runAgenticChat(
     if (action.tool === 'query_cache' || action.tool === 'count_cached') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
       if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
-      // A retry that found nothing cached ("cached": false) is no evidence: the failed lookup stays pending.
-      else if ((execution.result as { cached?: unknown } | undefined)?.cached !== false) {
+      // Only a read of a refreshed cache is evidence: a retry that found nothing cached (no refreshed snapshot, or
+      // "cached": false) leaves the failed lookup pending.
+      else if ((execution.result as { cached?: unknown; snapshot?: { refreshedAt?: string } } | undefined)?.cached !== false
+        && Boolean((execution.result as { snapshot?: { refreshedAt?: string } } | undefined)?.snapshot?.refreshedAt)) {
         invalidQueries.delete(resource); invalidQueries.delete('unknown');
         const graphKey = `graph:${pathForResource(resource as GraphCacheResourceKind).path}`;
         const result = execution.result as { availableFields?: string[]; snapshot?: { refreshedAt?: string; lastError?: string } };

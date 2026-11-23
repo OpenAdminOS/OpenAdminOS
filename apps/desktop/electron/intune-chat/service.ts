@@ -2504,7 +2504,8 @@ export class IntuneChatService {
             }
           } else {
             // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
-            const failureRouted = provider?.isLocal === true && investigationSettings.mode === "auto" && capability.reason === "capability-fallback";
+            // A too-small model also reports capability-fallback; it never failed the loop, so it keeps the normal fallback.
+            const failureRouted = provider?.isLocal === true && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
             const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false), failureRouted);
             assistantContent = deterministic.content;
             responseModel = deterministic.model ?? responseModel;
@@ -3361,7 +3362,8 @@ export class IntuneChatService {
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
             // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
-            const failureRouted = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback";
+            // A too-small model also reports capability-fallback; it never failed the loop, so it keeps the normal fallback.
+            const failureRouted = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
             if (capability.reason === "capability-fallback" && notice) {
               sendProgress({
                 // Said as pending: the cached-data answer does not exist yet and can still fail.
@@ -4108,41 +4110,57 @@ export class IntuneChatService {
 const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
 
 /**
- * A reply in the tool loop's JSON protocol, read the way the loop reads one: `{ answer }` when it carries an
- * answer text, `{ request }` when it is a tool request or a protocol object with no answer, undefined for
- * prose. Only the reply's own structure counts: a whole-reply object (bare or in one fence), a request naming
- * a Chat tool anywhere (also after prose), or a final answer object. A JSON example inside a prose answer
- * ({"answer": ...} in an FAQ, "kind" in a policy) is prose. A protocol object cut short (a missing brace) is a
- * request, not an answer.
+ * A reply in the tool loop's JSON protocol: `{ answer }` when it carries an answer text, `{ request }` when it
+ * is a tool request or a protocol object with no answer, undefined for prose.
+ * - A "tool" naming a Chat tool anywhere in the reply is a request: before or after prose, next to a JSON
+ *   example, or cut short with its closing brace missing.
+ * - A whole-reply object (bare or in one fence) is read as the loop reads it: final with an answer or content
+ *   text is the answer; otherwise a tool, final or kind key makes it a request.
+ * - A final answer object after prose ("Hope this helps." after it, or before it) is the answer.
+ * - A reply that opens as a protocol object and does not parse was cut short: a request.
+ * - Any other JSON, such as an FAQ example inside a prose answer, stays prose.
  */
 function protocolReply(text: string): { answer: string } | { request: true } | undefined {
-  const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").replace(/^```(?:json)?\s*/i, "").trim();
-  let wholeValue: unknown;
-  let wholeParses = false;
+  for (const match of text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)) {
+    if (CHAT_TOOL_NAME.test(match[1]!.trim())) return { request: true };
+  }
+  const answerOf = (record: Record<string, unknown>): string | undefined => {
+    const value = typeof record.answer === "string" ? record.answer : typeof record.content === "string" ? record.content : undefined;
+    return value?.trim() ? value.trim() : undefined;
+  };
+  const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
   if (bare.startsWith("{")) {
+    let whole: unknown;
+    let parses = true;
     try {
-      wholeValue = JSON.parse(bare);
-      wholeParses = true;
+      whole = JSON.parse(bare);
     } catch {
-      // A reply that opens as a protocol object and does not parse was cut short: a request, never an answer.
-      if (/^\{\s*"(?:tool|kind|final|answer|sources)"\s*:/.test(bare)) return { request: true };
+      parses = false;
+    }
+    if (parses && whole && typeof whole === "object" && !Array.isArray(whole)) {
+      const record = whole as Record<string, unknown>;
+      const tool = typeof record.tool === "string" ? record.tool.trim() : "";
+      const answer = answerOf(record);
+      if (record.final === true && answer) return { answer };
+      if (tool && tool.toLowerCase() !== "none") return { request: true };
+      if (answer) return { answer };
+      return "final" in record || "kind" in record || "tool" in record ? { request: true } : undefined;
     }
   }
   const extracted = extractLastJsonObject(text);
-  if (!extracted.found || !extracted.valid) return undefined;
-  const parsed = extracted.value;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-  const record = parsed as Record<string, unknown>;
-  const whole = wholeParses && JSON.stringify(wholeValue) === JSON.stringify(parsed);
-  const tool = typeof record.tool === "string" ? record.tool.trim() : "";
-  if (tool && tool.toLowerCase() !== "none" && (whole || CHAT_TOOL_NAME.test(tool))) return { request: true };
-  if (typeof record.answer === "string" && record.answer.trim() && (whole || record.final === true)) return { answer: record.answer.trim() };
-  return whole && ("final" in record || "kind" in record || "tool" in record) ? { request: true } : undefined;
+  if (extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)) {
+    const record = extracted.value as Record<string, unknown>;
+    const answer = answerOf(record);
+    if (record.final === true && answer) return { answer };
+  }
+  // Opens as a protocol object and does not parse: cut short, never an answer.
+  if (/^(?:```(?:json)?\s*)?\{\s*"(?:tool|kind|final|answer|sources)"\s*:/.test(text.trim()) && !(extracted.found && extracted.valid)) return { request: true };
+  return undefined;
 }
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */
 const LOCAL_FALLBACK_UNFINISHED =
-  "The local model did not finish an answer. Its tool loop stopped, and its answer from cached data was empty, only a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
+  "The local model did not finish an answer. Its answer from cached data was empty, only a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.

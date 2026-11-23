@@ -68,12 +68,13 @@ after(() => {
   else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
 });
 
-async function withHarness(run: (harness: Harness) => Promise<void>): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { model?: string } = {}): Promise<void> {
+  const model = options.model ?? "openadminos/openadmin-8b";
   const dir = await mkdtemp(join(tmpdir(), "openadminos-local-accuracy-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
     activeProviderId: "ollama", providerChosenByUser: true,
-    activeModelByProviderId: { ollama: "openadminos/openadmin-8b" },
+    activeModelByProviderId: { ollama: model },
     installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
   }));
   const calls: Harness["calls"] = [];
@@ -86,7 +87,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>): Promise<vo
   };
   const llm: RunLlmApi = {
     available: true,
-    defaultModel: "openadminos/openadmin-8b",
+    defaultModel: model,
     async complete(options) {
       return { text: answer(options), model: "openadminos/openadmin-8b" };
     },
@@ -473,6 +474,10 @@ describe("local model accuracy on the tester's tenant", () => {
         rows: [...managedDevices, { id: "md-wlab", deviceName: "Windows-Lab", operatingSystem: "macOS", complianceState: "noncompliant", lastSyncDateTime: recent }] });
       const sampled = readPlannedChatRows(cache, { tenantId: tenant.id, question: "Is Windows-Lab compliant?", generatedAt: at, resources: ["managedDevices"], searchTerms: ["windows-lab", "compliant"], limitPerResource: 5 });
       assert.ok((sampled.managedDevices ?? []).some((row) => (row as { id?: string }).id === "md-wlab"), "the named Mac is in the samples");
+      // The marker reaches the model through the answer pack.
+      const cacheStatus = cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const pack = buildAnswerPack({ question: "Is Windows-Lab compliant?", tenant, cacheStatus, rows: sampled, hasWriteIntent: false, agentSuggestions: [] });
+      assert.match(pack, /"namedInQuestion":\s*true/);
 
       // The named device goes first even when twenty longer names that start with it fill the sample before it.
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
@@ -636,6 +641,12 @@ describe("The fallback after a failed compact loop", () => {
         // Cut short: the closing brace is missing.
         ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}'],
         ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}'],
+        // Prose, then a request cut short.
+        ["send", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
+        ["stream", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
+        // A complete request, then an unrelated JSON example.
+        ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
+        ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
       ] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
         reply(() => request);
@@ -670,6 +681,34 @@ describe("The fallback after a failed compact loop", () => {
         assert.equal(message.engineNotice, undefined, send);
       }
     });
+  });
+
+  it("reads a final answer object followed by prose, and a content field, as the answer", async () => {
+    await withHarness(async ({ store, reply }) => {
+      for (const [send, fallbackReply, expected] of [
+        ["send", '```json\n{"final":true,"answer":"Six managed devices are not compliant."}\n```\nHope this helps.', "Six managed devices are not compliant."],
+        ["stream", '{"final":true,"answer":"Six managed devices are not compliant."} Done.', "Six managed devices are not compliant."],
+        ["send", '{"final":true,"content":"Six managed devices are not compliant."}', "Six managed devices are not compliant."],
+      ] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : fallbackReply));
+        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+        assert.equal(message.status, "completed", fallbackReply);
+        assert.equal(message.content, expected, fallbackReply);
+      }
+    });
+  });
+
+  it("keeps the promise retries for a model too small for tool use", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      let answered = 0;
+      reply(({ loop }) => (loop ? "unused" : ++answered === 1 ? "I'll check that now." : "WIN-01 to WIN-04 need attention."));
+      const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+      assert.equal(calls.filter((call) => call.loop).length, 0, "no tool loop for a too-small model");
+      assert.equal(message.status, "completed");
+      assert.equal(message.content, "WIN-01 to WIN-04 need attention.", "the progress reply was retried");
+    }, { model: "llama3.2:3b" });
   });
 
   it("shows the answer text when the one cached-data call replies with the loop's final JSON, in both send paths", async () => {
@@ -735,6 +774,26 @@ describe("A retry that finds nothing cached", () => {
       const message = (await store.sendIntuneChatMessage({ content: "How many users and groups do we have?", refreshIfStale: false })).assistantMessage;
       assert.doesNotMatch(message.content, /0 groups/);
       assert.match(message.content, /a data lookup failed/);
+    });
+  });
+
+  it("keeps the failed lookup pending after a query_cache retry on an uncached resource, in both send paths", async () => {
+    await withHarness(async ({ store, reply }) => {
+      for (const send of ["send", "stream"] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        let turn = 0;
+        reply(({ loop }) => {
+          if (!loop) return "There are 0 groups.";
+          turn += 1;
+          if (turn === 1) return JSON.stringify({ tool: "count_cached", params: { resource: "users" } });
+          if (turn === 2) return JSON.stringify({ tool: "count_cached", params: { resource: "groups", groupBy: ["noSuchField"] } });
+          if (turn === 3) return JSON.stringify({ tool: "query_cache", params: { resource: "groups" } });
+          return final("There are 0 groups.");
+        });
+        const input = { content: "How many users and groups do we have?", refreshIfStale: false };
+        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+        assert.doesNotMatch(message.content, /0 groups/, send);
+      }
     });
   });
 });

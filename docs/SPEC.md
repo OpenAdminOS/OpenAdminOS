@@ -3983,22 +3983,25 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  only the reply's own structure counts as the loop's JSON: a whole-reply
-  object shows its answer text, a request naming a Chat tool counts anywhere
-  (also after prose), a protocol object cut short is a request, and a JSON
+  a "tool" naming a Chat tool anywhere in the reply (before or after prose,
+  next to a JSON example, cut short) makes it a request; a whole-reply object
+  is read as the loop reads it (final with an answer or content text is the
+  answer); a final answer object after prose is the answer; any other JSON
   example inside a prose answer stays prose; when the reply is empty, only
   promises work or is a request, the message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the
   failed message. A local model the failure memory took off the tool loop
-  gets the same one-call, checked fallback. Stop pressed while the providers
+  gets the same one-call, checked fallback; a model too small for tool use
+  never ran the loop and keeps the normal fallback with its promise retries. Stop pressed while the providers
   are still being read ends
   in the designed cancelled answer, not an abort error. A second
   progress-only reply falls back as `unfinished` instead of being kept, unless
   a lookup in the turn failed: then, as for an empty answer, the turn says no
-  verified count is available instead of falling back. A retry that finds the
-  resource not cached keeps that failed lookup pending. A rejected `count_cached` call blocks a zero answer as a
+  verified count is available instead of falling back. Only a read of a
+  refreshed cache clears a failed lookup; a retry that finds the resource not
+  cached keeps it pending. A rejected `count_cached` call blocks a zero answer as a
   rejected `query_cache` does. A context overflow falls back instead of failing
   the message and returns the provider's error as `failureDetail`.
   Always investigative mode and hosted providers keep the established budget,
