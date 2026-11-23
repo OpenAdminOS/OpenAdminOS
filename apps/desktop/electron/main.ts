@@ -1,4 +1,4 @@
-import { providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { hostedOllamaDestination, providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
@@ -2661,6 +2661,7 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
   const endpoint = state.providers.find((provider) => provider.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(endpoint, state.activeModelByProviderId).model;
   const activeProvider = providerForModel(endpoint, activeModel);
+  const ollamaDestination = hostedOllamaDestination(activeProvider, activeModel);
   const scheduler = await getSchedulerLaunchSettings();
   const cacheStatus = activeTenant
     ? await store.getGraphCacheStatus(activeTenant.id).catch(() => null)
@@ -2707,6 +2708,7 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
           label: activeProvider.name,
           isLocal: activeProvider.isLocal,
           trustLabel: state.trust.label,
+          ...(ollamaDestination ? { ollamaDestination } : {}),
           ...(activeModel ? { model: activeModel } : {}),
           status: activeProvider.status,
         }

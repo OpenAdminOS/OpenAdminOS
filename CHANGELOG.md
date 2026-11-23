@@ -84,6 +84,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- The menu bar shows the selected model and uses the same hosted consent as Chat.
 - Chat asks for separate consent for Ollama Cloud and an off-device Ollama server.
 - Agent Team checks that reviewed local Ollama models still run on this device before sending evidence.
 - Runs saved before Ollama Cloud tracking verify that the saved model is still on this device before they resume.

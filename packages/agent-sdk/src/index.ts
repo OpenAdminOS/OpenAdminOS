@@ -3363,6 +3363,7 @@ export interface CompanionSnapshot {
     id: ProviderId;
     label: string;
     isLocal: boolean;
+    ollamaDestination?: HostedOllamaDestination;
     trustLabel: string;
     model?: string;
     status: ProviderStatus;

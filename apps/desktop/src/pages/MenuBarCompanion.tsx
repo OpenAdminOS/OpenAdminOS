@@ -15,11 +15,12 @@ import {
 } from "../components/icons";
 import { Badge, EmptyState } from "../components/ui";
 import { useAppState } from "../state";
+import { activeModelProvider, hostedOllamaDestination, resolveProviderDefaultModel } from "../shared/openAdminOS";
+import { hasRememberedHostedChatConsent } from "../shared/hosted-chat-consent";
 import type {
   AppState,
   CompanionSnapshot,
   IntuneChatSource,
-  ProviderId,
   SendIntuneChatMessageInput,
 } from "../shared/openAdminOS";
 
@@ -122,19 +123,13 @@ export default function MenuBarCompanion() {
       await openMain("/settings");
       return;
     }
-    if (
-      !snapshot.provider.isLocal &&
-      !rememberedHostedProviderConsent(snapshot.activeTenant.id, snapshot.provider.id)
-    ) {
+    const hostedProviderConsent = rememberedHostedProviderConsent(snapshot.activeTenant.id, snapshot.provider);
+    if (!snapshot.provider.isLocal && !hostedProviderConsent) {
       setNotice("Hosted-provider confirmation is required in the full app.");
       await openMain("/chat");
       return;
     }
 
-    const hostedProviderConsent = rememberedHostedProviderConsent(
-      snapshot.activeTenant.id,
-      snapshot.provider.id,
-    );
     const input: SendIntuneChatMessageInput = {
       content,
       refreshIfStale: true,
@@ -731,7 +726,10 @@ function fallbackSnapshot(state: AppState): CompanionSnapshot {
   const tenant = state.activeTenantId
     ? state.tenants.find((item) => item.id === state.activeTenantId) ?? null
     : null;
-  const provider = state.providers.find((item) => item.id === state.activeProviderId) ?? null;
+  const endpoint = state.providers.find((item) => item.id === state.activeProviderId);
+  const model = resolveProviderDefaultModel(endpoint, state.activeModelByProviderId).model;
+  const provider = activeModelProvider(endpoint, state.activeModelByProviderId);
+  const ollamaDestination = hostedOllamaDestination(provider, model);
   return {
     activeTenant: tenant ? { id: tenant.id, displayName: tenant.displayName } : null,
     provider: provider
@@ -741,7 +739,8 @@ function fallbackSnapshot(state: AppState): CompanionSnapshot {
           isLocal: provider.isLocal,
           trustLabel: state.trust.label,
           status: provider.status,
-          ...(provider.defaultModel ? { model: provider.defaultModel } : {}),
+          ...(model ? { model } : {}),
+          ...(ollamaDestination ? { ollamaDestination } : {}),
         }
       : null,
     cache: { stale: true, refreshing: false },
@@ -764,30 +763,18 @@ function fallbackSnapshot(state: AppState): CompanionSnapshot {
 
 function rememberedHostedProviderConsent(
   tenantId: string,
-  providerId: ProviderId | undefined,
+  provider: NonNullable<CompanionSnapshot["provider"]>,
 ): SendIntuneChatMessageInput["hostedProviderConsent"] | undefined {
-  if (!providerId || !hasRememberedHostedChatConsent(tenantId, providerId)) return undefined;
+  if (provider.isLocal || (provider.id === "ollama" && !provider.ollamaDestination) ||
+      !hasRememberedHostedChatConsent(tenantId, provider.id, provider.model, provider.ollamaDestination)) return undefined;
   return {
     tenantId,
-    providerId,
+    providerId: provider.id,
+    ...(provider.model ? { model: provider.model } : {}),
+    ...(provider.ollamaDestination ? { ollamaDestination: provider.ollamaDestination } : {}),
     acknowledgedAt: new Date().toISOString(),
     remember: true,
   };
-}
-
-function hostedChatConsentKey(tenantId: string, providerId: ProviderId): string {
-  return `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`;
-}
-
-function hasRememberedHostedChatConsent(
-  tenantId: string,
-  providerId: ProviderId,
-): boolean {
-  try {
-    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId)) === "true";
-  } catch {
-    return false;
-  }
 }
 
 function formatRelative(iso: string): string {
