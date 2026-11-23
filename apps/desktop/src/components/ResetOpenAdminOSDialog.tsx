@@ -132,6 +132,7 @@ export function ResetOpenAdminOSDialog({ open, onClose }: { open: boolean; onClo
             </li>
             {info?.policyFilePresent ? <li>{LOCAL_RESET_COPY.keepsPolicy}</li> : null}
             <li>{LOCAL_RESET_COPY.keepsExports}</li>
+            <li>{LOCAL_RESET_COPY.keepsOllamaModels} <code>{LOCAL_RESET_COPY.removeOllamaIndexModel}</code>.</li>
           </ul>
         </section>
         <p className="text-sm text-[var(--color-text-muted)]">{LOCAL_RESET_COPY.restartNote}</p>

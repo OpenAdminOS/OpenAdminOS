@@ -2389,6 +2389,7 @@ export class AppStateStore {
   }
 
   close(): void {
+    this.stopEmbeddingModelDownload();
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
@@ -2487,6 +2488,7 @@ export class AppStateStore {
    */
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
+    this.stopEmbeddingModelDownload();
     this.auditLog.freezeSideFiles();
     // The work that writes on its own stops first, so a guard that failed
     // to install would still leave nothing running.
@@ -3323,6 +3325,14 @@ export class AppStateStore {
     }
   }
 
+  private readonly embeddingDownload = new AbortController();
+  private embeddingDownloadInProgress = false;
+
+  /** Stops the app's embedding model pull and prevents new ones before exit. */
+  stopEmbeddingModelDownload(): void {
+    this.embeddingDownload.abort();
+  }
+
   /**
    * Pull the embedding model in the background when Ollama is running
    * and the model is missing. Same contract as the index install: never
@@ -3332,11 +3342,15 @@ export class AppStateStore {
    * on the next launch rather than a day later.
    */
   async autoInstallEmbeddingModel(): Promise<void> {
+    const { signal } = this.embeddingDownload;
+    if (signal.aborted || this.localResetStarted || this.embeddingDownloadInProgress) return;
+    this.embeddingDownloadInProgress = true;
     try {
       const persisted = await this.read();
-      if (persisted.retrievalAutoInstall === false) return;
+      if (signal.aborted || persisted.retrievalAutoInstall === false) return;
       const endpoint = embeddingEndpoint();
       const state = await embeddingModelState(endpoint);
+      if (signal.aborted) return;
       if (state.error) throw new Error(state.error);
       if (!state.ollamaReachable || state.installed) return;
 
@@ -3345,17 +3359,12 @@ export class AppStateStore {
         const age = Date.now() - new Date(lastAttempt).getTime();
         if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
       }
-      await this.serialize(async () => {
-        const current = await this.read();
-        await this.write({
-          ...current,
-          embeddingModelPullAttemptedAt: new Date().toISOString(),
-        });
-      });
-
+      // Record only settled attempts so quitting during a pull doesn't delay the next launch.
+      const attemptedAt = new Date().toISOString();
       try {
-        await pullEmbeddingModel(endpoint);
+        await pullEmbeddingModel(endpoint, undefined, undefined, signal);
       } catch (error) {
+        if (signal.aborted) return;
         // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
         // A stall of the local Ollama is not a registry failure; its own message names the recovery.
         const message = error instanceof EmbeddingPullStalledError ? error.message :
@@ -3364,22 +3373,29 @@ export class AppStateStore {
         // Like an unreachable Ollama, a stalled one is not the day's attempt, so the next launch tries again.
         const stalled = error instanceof EmbeddingPullStalledError;
         await this.serialize(async () => {
-          const { embeddingModelPullAttemptedAt, ...current } = await this.read();
-          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt }), embeddingModelPullError: message });
+          const { embeddingModelPullAttemptedAt: _previous, ...current } = await this.read();
+          if (signal.aborted) return;
+          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt: attemptedAt }), embeddingModelPullError: message });
         });
+        if (signal.aborted) return;
         this.emitStateChanged("retrieval-embedding-failed");
         throw error;
       }
       await this.serialize(async () => {
         const { embeddingModelPullError: _cleared, ...rest } = await this.read();
-        await this.write(rest);
+        if (signal.aborted) return;
+        await this.write({ ...rest, embeddingModelPullAttemptedAt: attemptedAt });
       });
+      if (signal.aborted) return;
       this.emitStateChanged("retrieval-embedding-installed");
     } catch (error) {
+      if (signal.aborted) return;
       console.info(
         "[retrieval] automatic embedding model pull skipped:",
         error instanceof Error ? error.message : error,
       );
+    } finally {
+      this.embeddingDownloadInProgress = false;
     }
   }
 

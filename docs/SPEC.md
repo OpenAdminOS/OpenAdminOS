@@ -2959,7 +2959,7 @@ reinstall restored tenant access with no sign-in (tester finding, 18 Nov,
 macOS). Settings > Data has
 **Reset OpenAdminOS**: a product modal with the data folder, what is removed and
 what stays (the enterprise application and admin consent in each tenant, the IT
-`policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
+`policy.json`, exports, and models already in Ollama's own store), and the typed phrase `RESET OPENADMINOS`, checked again
 in the main process. The impact list scrolls and the buttons stay in view at
 the smallest window height; a refusal from the main process is shown in full.
 Mockup: `docs/mockups/34-local-reset.html`.
@@ -3095,6 +3095,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   rejections and resets are gated the same way. A documentation index
   download is refused once a reset has started but does not hold one: the
   commit aborts it, and it stops by itself after 30 minutes.
+  The reset commit and app quit also abort OpenAdminOS's Ollama index model
+  pull. The dialog gives `ollama rm nomic-embed-text` for admins who want to
+  remove the already downloaded model from Ollama.
 - **Data folder guard** (review round 36). Beneath the writers' own checks,
   the commit wraps every path based change through Node's file system API
   in the main process (writes, appends, folders, removals, renames, copies,
