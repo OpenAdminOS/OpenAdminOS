@@ -4034,7 +4034,7 @@ function validateHostedProviderConsent(
   if (ollamaDestination !== undefined && (providerId !== "ollama" || (ollamaDestination !== "ollama-cloud" && ollamaDestination !== "ollama-endpoint"))) {
     throw new Error("hostedProviderConsent.ollamaDestination must name a hosted Ollama destination.");
   }
-  const ollama = ollamaDestination ? { ollamaDestination } : {};
+  const ollama = ollamaDestination ? { ollamaDestination } as const : {};
   const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
   // Bound to no tenant or to one tenant, never both: a no-tenant
   // acknowledgement covers no tenant context and no workspace.

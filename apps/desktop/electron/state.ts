@@ -1,4 +1,4 @@
-import { isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
+import { activeModelProvider, isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -3082,7 +3082,7 @@ export class AppStateStore {
       appVersion: this.appVersion,
       platform: process.platform,
       arch: process.arch,
-      providerIsLocal: activeProvider?.isLocal === true,
+      providerIsLocal: activeModelProvider(activeProvider, persisted.activeModelByProviderId)?.isLocal === true,
       tenantCount: persisted.tenants.length,
       installedAgentCount: persisted.installedAgents.length,
       runCount: persisted.runs.length,
@@ -6636,9 +6636,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           },
     );
 
-    const provider = (await this.listProviders()).find(
+    const endpoint = (await this.listProviders()).find(
       (candidate) => candidate.id === persisted.activeProviderId,
     );
+    const provider = activeModelProvider(endpoint, persisted.activeModelByProviderId);
     checks.push(
       this.providerCanRun(provider)
         ? {

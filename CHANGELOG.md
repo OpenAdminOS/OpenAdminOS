@@ -84,6 +84,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Agent Team, Run with, install checks and delivered reports label Ollama Cloud models as hosted. Opt-in usage counts them as hosted.
 - The menu bar shows the selected model and uses the same hosted consent as Chat.
 - Chat asks for separate consent for Ollama Cloud and an off-device Ollama server.
 - Agent Team checks that reviewed local Ollama models still run on this device before sending evidence.

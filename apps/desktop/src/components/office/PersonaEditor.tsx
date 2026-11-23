@@ -1,4 +1,4 @@
-import { providerForModel } from "@openadminos/agent-sdk";
+import { activeModelProvider, providerForModel } from "@openadminos/agent-sdk";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   AppState,
@@ -447,11 +447,14 @@ export function PersonaEditor({
                           }))
                         }
                       >
-                        {state.providers.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} · {p.isLocal ? "Local" : "Hosted"}
-                          </option>
-                        ))}
+                        {state.providers.map((entry) => {
+                          const option = entry.id === form.providerId ? provider ?? entry : activeModelProvider(entry);
+                          return (
+                            <option key={entry.id} value={entry.id}>
+                              {option.name} · {option.isLocal ? "Local" : "Hosted"}
+                            </option>
+                          );
+                        })}
                       </select>
                     </label>
                   </div>

@@ -1,4 +1,4 @@
-import { OLLAMA_CLOUD_LOCATION, isRemoteBackedModel } from "@openadminos/agent-sdk";
+import { OLLAMA_CLOUD_LOCATION, activeModelProvider, isRemoteBackedModel } from "@openadminos/agent-sdk";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
@@ -132,6 +132,7 @@ export function RunWithMenu({
               const isActive = provider.id === activeProviderId;
               const models = provider.models ?? [];
               const pinnedModel = activeModelByProviderId?.[provider.id];
+              const headerProvider = activeModelProvider(provider, activeModelByProviderId);
 
               return (
                 <div
@@ -139,7 +140,7 @@ export function RunWithMenu({
                   className="border-b border-[var(--color-border-soft)] last:border-b-0"
                 >
                   <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-xs font-medium text-[var(--color-text-muted)]">
-                    {provider.isLocal ? (
+                    {headerProvider.isLocal ? (
                       <IconHardDrive
                         size={11}
                         className="text-[var(--color-success)]"
@@ -147,7 +148,7 @@ export function RunWithMenu({
                     ) : (
                       <IconCloud size={11} className="text-[var(--color-info)]" />
                     )}
-                    <span>{provider.name}</span>
+                    <span>{headerProvider.name}</span>
                     {isActive && enabled && (
                       <Badge tone="info">Active</Badge>
                     )}
