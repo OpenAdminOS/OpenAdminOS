@@ -53,6 +53,7 @@ function docsRedirects() {
 
 /** @type {import("next").NextConfig} */
 const config = {
+  agentRules: process.env.ADVENT_SMOKE_EVENTS ? false : undefined,
   outputFileTracingRoot: webRoot,
   poweredByHeader: false,
   async redirects() {
