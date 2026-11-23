@@ -379,6 +379,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       let accumulated = "";
       // Whether the model streamed any reasoning, whitespace included.
       let reasoned = false;
+      // A model can also reason inline in its content, in think tags.
+      const inlineThink = createInlineThinkFilter();
       let actualModel = model;
 
       try {
@@ -430,7 +432,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               actualModel = chunk.model;
             }
             const tokenUsage = extractTokenUsage(chunk);
-            const delta = chunk.message?.content ?? "";
+            const content = inlineThink.push(chunk.message?.content ?? "");
+            const delta = chunk.done ? content + inlineThink.flush() : content;
+            if (inlineThink.reasoned) reasoned = true;
             // Track reasoning-model chain-of-thought separately so a
             // reply with reasoning and no answer fails with that cause.
             const reasoningDelta = chunk.message?.thinking ?? "";
@@ -472,6 +476,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (done) break;
         }
         // The body ended without a final record after reasoning alone.
+        accumulated += inlineThink.flush();
         if (accumulated.trim().length === 0 && reasoned) {
           throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, undefined));
         }
@@ -480,6 +485,60 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         opts.signal?.removeEventListener("abort", abortFromCaller);
         reader.releaseLock();
       }
+    },
+  };
+}
+
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/**
+ * Takes reasoning a model writes inline in its content, in `<think>` blocks,
+ * out of the answer as it streams: a tag split across chunks is held back
+ * until it is known, and a block never closed is reasoning to the end.
+ */
+export function createInlineThinkFilter(): { push(text: string): string; flush(): string; readonly reasoned: boolean } {
+  let inThink = false;
+  let pending = "";
+  let reasoned = false;
+  // The longest end of `text` that could start `tag`.
+  const partialTag = (text: string, tag: string): number => {
+    for (let length = Math.min(tag.length - 1, text.length); length > 0; length -= 1) {
+      if (tag.startsWith(text.slice(-length).toLowerCase())) return length;
+    }
+    return 0;
+  };
+  return {
+    push(text) {
+      let rest = pending + text;
+      pending = "";
+      let visible = "";
+      while (rest.length > 0) {
+        const tag = inThink ? THINK_CLOSE : THINK_OPEN;
+        const at = rest.toLowerCase().indexOf(tag);
+        if (at >= 0) {
+          if (!inThink) {
+            visible += rest.slice(0, at);
+            reasoned = true;
+          }
+          rest = rest.slice(at + tag.length);
+          inThink = !inThink;
+          continue;
+        }
+        const held = partialTag(rest, tag);
+        pending = rest.slice(rest.length - held);
+        if (!inThink) visible += rest.slice(0, rest.length - held);
+        rest = "";
+      }
+      return visible;
+    },
+    flush() {
+      const rest = inThink ? "" : pending;
+      pending = "";
+      return rest;
+    },
+    get reasoned() {
+      return reasoned;
     },
   };
 }

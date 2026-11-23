@@ -5,7 +5,7 @@ import { getEventListeners } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { beginOllamaModelRead, classifyOllamaEndpoint, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, recordOllamaModelList, refreshOllamaModelFamily } from "./llm-ollama.js";
+import { beginOllamaModelRead, classifyOllamaEndpoint, createInlineThinkFilter, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, recordOllamaModelList, refreshOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -1150,6 +1150,54 @@ describe("Ollama reasoning models", () => {
     } finally {
       await fake.close();
     }
+  });
+
+  it("fails, without yielding it, on reasoning written inline in the content with a tag split across chunks", async () => {
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<thi" }, done: false },
+      { model: "qwen3:8b", message: { content: "nk>We need to produce a report." }, done: false },
+      { model: "qwen3:8b", message: { content: " Must not invent policies." }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).stream({ prompt: "p" })) {
+            seen.push(chunk.accumulated);
+          }
+        })(),
+        (error) => isReasoningWithoutAnswerError(error) && /at the token limit while it was still reasoning/.test((error as Error).message),
+      );
+      assert.deepEqual(seen, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns only the answer after an inline reasoning block", async () => {
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<think>Plan the report.</th" }, done: false },
+      { model: "qwen3:8b", message: { content: "ink>\n\n# Report" }, done: false },
+      { model: "qwen3:8b", message: { content: " body <" }, done: true, eval_count: 9 },
+    ]);
+    try {
+      const result = await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" });
+      assert.equal(result.text, "\n\n# Report body <");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("holds back only a possible think tag and keeps other text", () => {
+    const filter = createInlineThinkFilter();
+    assert.equal(filter.push("a <b> <"), "a <b> ");
+    assert.equal(filter.push("T"), "");
+    assert.equal(filter.push("HINK>hidden</THINK>shown <thin"), "shown ");
+    assert.equal(filter.flush(), "<thin");
+    assert.equal(filter.reasoned, true);
+    const unclosed = createInlineThinkFilter();
+    assert.equal(unclosed.push("<think>never closed </thi"), "");
+    assert.equal(unclosed.flush(), "");
   });
 
   it("fails when a reply that stopped normally has reasoning and no answer", async () => {
