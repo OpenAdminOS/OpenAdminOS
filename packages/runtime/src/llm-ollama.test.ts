@@ -2844,6 +2844,40 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("keeps an alias's family from /api/show when another request's list read leaves the alias out", async () => {
+    let shows = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = JSON.stringify({ details: { family: "gptoss" }, modelfile: "FROM gpt-oss:20b", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } });
+          // The audit's sizing lookup is slow; another request reads the list meanwhile.
+          if (shows === 2) {
+            void refreshOllamaModelFamily(endpoint, "gpt-oss:20b");
+            setTimeout(() => res.end(answer), 100);
+          } else res.end(answer);
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-audit:latest" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
     let version: string | undefined = "0.17.7";
     const sent: unknown[] = [];

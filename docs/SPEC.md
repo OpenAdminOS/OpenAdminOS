@@ -398,10 +398,12 @@ Reasoning models on Ollama (added 2026-11-21, PR #222). Every request sends
 it gets `think: "low"`. The model family that provider detection reads from
 `/api/tags` on every check (`gptoss` or `gpt-oss`) decides, so a copy under
 another name, or a name replaced and restored, gets the right value before its
-first request; the chat path adds no `/api/show` call. Before each request, the
+first request; the chat path adds no `/api/show` call for a model the list
+names. Before each request, the
 app reads the model's entry from `/api/tags` (which loads no model; a name
 it does not list, such as a server alias, is read with `/api/show`, which
-reports the family of the model it points to), so a model
+reports the family of the model it points to; a list read without such a
+name keeps what `/api/show` showed), so a model
 replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
 resolves them (a `:local` after a tag is dropped; a lone `x:local` is

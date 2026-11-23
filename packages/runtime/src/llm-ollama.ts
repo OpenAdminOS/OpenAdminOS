@@ -916,6 +916,12 @@ const ollamaModelGenerations = new Map<string, number>();
 const nextGeneration = (key: string) => ollamaModelGenerations.set(key, (ollamaModelGenerations.get(key) ?? 0) + 1);
 /** The model version (digest) each recorded family belongs to. */
 const ollamaModelDigests = new Map<string, string>();
+/**
+ * Names known from /api/show and not from the list, such as server aliases:
+ * a list read never names them, so one without them keeps what is known. A
+ * failed /api/show for the name forgets it; a list that names it records it.
+ */
+const ollamaShownOnly = new Set<string>();
 /** When each listed model was last changed (`modified_at`), to compare with the revision a context lookup saw. */
 const ollamaModelRevisions = new Map<string, string>();
 const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${ollamaModelName(model)}`;
@@ -981,12 +987,13 @@ export function recordOllamaModelList(endpoint: string, models: readonly unknown
     const name = entryName(entry);
     if (name === ollamaModelName("")) continue;
     listed.add(familyKey(endpoint, name));
+    ollamaShownOnly.delete(familyKey(endpoint, name));
     recordOllamaModelFamily(endpoint, name, entry, read);
   }
   const prefix = familyKey(endpoint, "").split("\0")[0] + "\0";
   const known = new Set([...ollamaThinkLearned.keys(), ...ollamaModelFamilies.keys(), ...ollamaModelDigests.keys(), ...ollamaModelGenerations.keys()]);
   for (const key of known) {
-    if (key.startsWith(prefix) && !listed.has(key)) forgetOllamaModelKey(key, read);
+    if (key.startsWith(prefix) && !listed.has(key) && !ollamaShownOnly.has(key)) forgetOllamaModelKey(key, read);
   }
   return true;
 }
@@ -1003,6 +1010,7 @@ function forgetOllamaModelKey(key: string, read: number): void {
   ollamaModelFamilies.delete(key);
   ollamaModelDigests.delete(key);
   ollamaModelRevisions.delete(key);
+  ollamaShownOnly.delete(key);
   nextGeneration(key);
 }
 
@@ -1160,6 +1168,7 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
       if (typeof details === "object" && details !== null && (ollamaFamilyReadApplied.get(key) ?? 0) <= seq) {
         ollamaFamilyReadApplied.set(key, seq);
         recordFamily(key, details);
+        ollamaShownOnly.add(key);
         return;
       }
     }
