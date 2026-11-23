@@ -648,8 +648,10 @@ to the model revision the lookup that chose it saw (`/api/show`
 `modified_at`), even when the request finishes after the model was created
 again; a model created again under the same name starts from its own settings.
 When Ollama fails to load or answer with a kept context size, or refuses it
-without reporting token counts, the run failure panel and schedule status
-advise re-running first. If the failure repeats, the advice is to free memory
+without reporting token counts, the adapter drops the kept size. An uncounted
+refusal from a kept size carries `ollamaKeptContext: true` in its typed reason
+and names the kept size in the saved error. The run failure panel and schedule
+status advise re-running first. If the failure repeats, the advice is to free memory
 or choose a smaller model. The run page shows this recovery in place of the
 model-fit offer.
 LM Studio reports no context limit for now because its context fields could

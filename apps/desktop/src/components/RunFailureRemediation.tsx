@@ -170,14 +170,14 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   // A cause the runtime classified from its typed error decides, whatever
   // wrapper the app put in front of the message.
   const exclusive = typed
-    ? undefined
+    ? (typed.ollamaKeptContext === true ? isOllamaKeptContextFailure : undefined)
     : run.failureCause === "reasoning-without-answer"
       ? isReasoningWithoutAnswer
       : EXCLUSIVE.find((match) => match(own));
-  const matched = typed
-    ? [contextTooSmallSuggestion(typed)]
-    : exclusive
-      ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+  const matched = exclusive
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+    : typed
+      ? [contextTooSmallSuggestion(typed)]
       : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
   // Only a Graph error gets Graph recovery advice. Runs stored by earlier
   // versions can carry an accessDenial for a 403 from a model server, a

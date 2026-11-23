@@ -4162,6 +4162,35 @@ describe("Ollama context for an unpinned model", () => {
     }
   });
 
+  it("marks an uncounted agent overflow from a kept context and drops that size", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: unpinned });
+    try {
+      globalThis.fetch = ollama.fetchImpl;
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "uncounted-kept" });
+      await llm.complete({ prompt: words(18000), maxTokens: 1000, enforceContextWindow: true });
+      const kept = ollama.chats.at(-1);
+      assert.ok(kept !== undefined && kept > 16_384);
+      ollama.handlers.push(() => new Response(JSON.stringify({ error: "the prompt is longer than the context length currently available" }), { status: 400 }));
+      await assert.rejects(
+        llm.complete({ prompt: "short", enforceContextWindow: true }),
+        (error: unknown) => {
+          assert.ok(error instanceof ContextTooSmallError);
+          assert.equal(error.failure.sentToProvider, true);
+          assert.equal(error.failure.limitTokens, kept);
+          assert.equal(error.failure.ollamaKeptContext, true);
+          assert.match(error.message, /token context kept from an earlier request/);
+          return true;
+        },
+      );
+      assert.equal(ollama.chats.at(-1), kept);
+      await llm.complete({ prompt: "short", enforceContextWindow: true });
+      assert.equal(ollama.chats.at(-1), undefined);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it("holds an agent run to Ollama's own size when no lookup says whether the model is pinned", async () => {
     const original = globalThis.fetch;
     try {

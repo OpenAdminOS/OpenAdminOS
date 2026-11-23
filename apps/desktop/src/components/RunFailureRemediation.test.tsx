@@ -242,6 +242,20 @@ it.each([
   expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
 });
 
+it("uses the kept context playbook for a typed Ollama overflow", () => {
+  const failureReason: ContextTooSmallFailure = {
+    code: "context-too-small", promptTokens: 44_033, answerTokens: 1_024, neededTokens: 45_057,
+    limitTokens: 45_056, model: "gpt-oss:20b", sentToProvider: true, ollamaKeptContext: true,
+  };
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z",
+    steps: [], logs: [], error: contextTooSmallMessage(failureReason), failureReason,
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
+  expect(screen.queryByText("Prompt larger than the model's context")).not.toBeInTheDocument();
+});
+
 it("gives the overall deadline during a streaming answer the Ollama generation playbook", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat." };
   render(<RunFailureRemediation run={run} />);
