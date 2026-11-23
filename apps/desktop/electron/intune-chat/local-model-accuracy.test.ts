@@ -647,6 +647,9 @@ describe("The fallback after a failed compact loop", () => {
         ["stream", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
         // A long promise before a fenced request: the prose announces the lookup.
         ["send", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so that the answer rests on the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        // The same with a purpose clause after the promise, and a negation before it.
+        ["stream", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so I can answer from the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        ["send", `I can't answer that from memory, so I will check the cached Intune device data now and come back with the exact numbers for the devices that need attention in this organization today. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
         // A lead-in, then an unclosed fence with a long request cut short.
         ["stream", `I need to check:\n\`\`\`json\n{"tool":"query_cache","params":{"resource":"managedDevices","select":[${Array.from({ length: 20 }, (_, i) => `"field${i}"`).join(",")}],"where":{"complianceState":"noncompliant"`],
         // A complete request, then an unrelated JSON example.

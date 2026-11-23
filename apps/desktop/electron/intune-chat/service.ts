@@ -4333,7 +4333,8 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
   }
   if (namesChatTool) {
     const unclosedFence = ((text.match(/```/g) ?? []).length % 2) === 1;
-    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || leavesBraceOpen(text);
+    // Braces are counted from the first one, so a stray quote in the prose before it cannot hide an open brace.
+    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || leavesBraceOpen(text.slice(Math.max(0, text.indexOf("{"))));
     const outside = proseOutsideJson(text);
     if (cutShort || outside.length < PROSE_AROUND_REQUEST_LIMIT || announcesLookup(outside)) return { request: true };
   }

@@ -9,6 +9,9 @@ describe("announced lookups", () => {
       `I understand the question about the devices in this organization, and I will check the cached Intune device data now so that the answer rests on the current snapshot. ${"Thank you for waiting. ".repeat(3)}`,
       "Let me look into the device inventory.",
       "I'm checking the sign-in logs now.",
+      // A purpose after the promise, and a negation before it, do not undo the announcement.
+      "I will check the cached Intune device data now so I can answer from the current snapshot.",
+      "I can't answer that from memory, so I will check the cached data now.",
     ]) assert.equal(announcesLookup(text), true, text.slice(0, 40));
     for (const text of [
       "WIN-01 to WIN-04 are not compliant. If you want, I will check the compliance policy next.",

@@ -40,6 +40,13 @@ const CHECKING_NOW = /^(?:i(?:'m|’m| am)\s+)?(?:just\s+|still\s+)?(?:checking|
  */
 const BARE_PROGRESS = /^(?:i(?:'m|’m| am)\s+)?(?:now\s+|currently\s+|just\s+|still\s+)?(?:on it|(?:checking|looking|querying|searching|investigating|retrieving|verifying|fetching|reviewing|digging|researching|working)(?:\s+(?:on|into|at)?\s*(?:it|that|this))?)(?:\s+(?:now|for you|right now))?$/i;
 
+/**
+ * An offer or a step that depends on the admin, for announcesLookup: CONDITIONAL without "I can" and "I could",
+ * which also match "I can't" and say nothing about the admin.
+ */
+const OFFER =
+  /\b(?:if (?:you|needed|that helps|it helps|useful|wanted|required)|should i|do you want|would you like|let me know|when you|whenever you|once you|if you ask|on request|just ask|tell me)\b/i;
+
 /** A promise that depends on the admin, or an offer, is not unkept work. */
 const CONDITIONAL =
   /\b(?:if (?:you|needed|that helps|it helps|useful|wanted|required)|should i|do you want|would you like|let me know|i can\b|i could\b|when you|whenever you|once you|if you ask|on request|just ask|tell me)\b/i;
@@ -120,12 +127,16 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
  * on length or code blocks: the prose around a tool request a model wrote instead of an answer.
  */
 export function announcesLookup(text: string): boolean {
-  // An offer that depends on the admin ("If you want, I will check the policy next.") announces no lookup.
-  const sentences = withoutInlineQuotes(text.trim()).split(/(?<=[.!?…])\s+|\n+/).filter((sentence) => !CONDITIONAL.test(sentence));
-  for (const clause of clauses(sentences.join("\n"))) {
-    if (CHECKING_NOW.test(clause)) return true;
-    const match = PROMISE.exec(clause);
-    if (match && isFiller(clause.slice(0, match.index))) return true;
+  for (const sentence of withoutInlineQuotes(text.trim()).split(/(?<=[.!?…])\s+|\n+/)) {
+    // Clauses in order: an offer that depends on the admin before the promise ("If you want, I will check the
+    // policy next.") makes it no announcement; a purpose after it ("I will check the data now so I can answer")
+    // does not undo one.
+    for (const clause of clauses(sentence)) {
+      if (OFFER.test(clause)) break;
+      if (CHECKING_NOW.test(clause)) return true;
+      const match = PROMISE.exec(clause);
+      if (match && isFiller(clause.slice(0, match.index))) return true;
+    }
   }
   return false;
 }
