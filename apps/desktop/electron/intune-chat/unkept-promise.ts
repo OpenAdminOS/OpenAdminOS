@@ -128,11 +128,11 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
  */
 export function announcesLookup(text: string): boolean {
   for (const sentence of withoutInlineQuotes(text.trim()).split(/(?<=[.!?…])\s+|\n+/)) {
-    // Clauses in order: an offer that depends on the admin before the promise ("If you want, I will check the
-    // policy next.") makes it no announcement; a purpose after it ("I will check the data now so I can answer")
-    // does not undo one.
+    // An offer that depends on the admin anywhere in the sentence ("If you want, I will check the policy next.",
+    // "I will check it next, if you want.") makes it no announcement, whatever the punctuation. OFFER has no
+    // "I can", so a purpose ("so I can answer") or a negation ("I can't answer that, so I will check") does not.
+    if (OFFER.test(sentence)) continue;
     for (const clause of clauses(sentence)) {
-      if (OFFER.test(clause)) break;
       if (CHECKING_NOW.test(clause)) return true;
       const match = PROMISE.exec(clause);
       if (match && isFiller(clause.slice(0, match.index))) return true;

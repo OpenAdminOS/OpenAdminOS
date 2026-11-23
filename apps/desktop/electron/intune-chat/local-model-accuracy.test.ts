@@ -650,6 +650,8 @@ describe("The fallback after a failed compact loop", () => {
         // The same with a purpose clause after the promise, and a negation before it.
         ["stream", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so I can answer from the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
         ["send", `I can't answer that from memory, so I will check the cached Intune device data now and come back with the exact numbers for the devices that need attention in this organization today. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        // Long prose with a stray quote, then a request cut short: the brace count starts at the first brace.
+        ["send", `I won't say "maybe here: the answer depends on the cached Intune device data, and the snapshot has to be read before any number can be stated for the devices in this organization today.\n{"tool":"count_cached","params":{"resource":"managedDevices"}`],
         // A lead-in, then an unclosed fence with a long request cut short.
         ["stream", `I need to check:\n\`\`\`json\n{"tool":"query_cache","params":{"resource":"managedDevices","select":[${Array.from({ length: 20 }, (_, i) => `"field${i}"`).join(",")}],"where":{"complianceState":"noncompliant"`],
         // A complete request, then an unrelated JSON example.
@@ -703,6 +705,7 @@ describe("The fallback after a failed compact loop", () => {
         [howTo, howTo],
         // A result, then an offer that depends on the admin, and a quoted call: still an answer.
         [`${howTo}\n\nIf you want, I will check the compliance policy next.`, `${howTo}\n\nIf you want, I will check the compliance policy next.`],
+        [`${howTo}\n\nI will check the compliance policy next, if you want.`, `${howTo}\n\nI will check the compliance policy next, if you want.`],
         // A brace inside a JSON string value does not make the quoted call cut short.
         [howTo.replace('"noncompliant"', '"WIN-{01"'), howTo.replace('"noncompliant"', '"WIN-{01"')],
       ] as const) {
