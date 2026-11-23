@@ -1,0 +1,51 @@
+export const DOOR_COUNT = 24;
+export const CAMPAIGN_ZONE = "Europe/Berlin";
+
+const offsetFormatter = new Intl.DateTimeFormat("en", {
+  timeZone: CAMPAIGN_ZONE,
+  timeZoneName: "longOffset",
+});
+
+function berlinTime(day: number, hour: number) {
+  const wallTime = Date.UTC(2026, 11, day, hour);
+  const offset = offsetFormatter.formatToParts(wallTime)
+    .find((part) => part.type === "timeZoneName")?.value;
+  if (offset === "GMT") return wallTime;
+
+  const match = /^GMT([+-])(\d{2}):(\d{2})$/.exec(offset ?? "");
+  if (!match) throw new Error("Could not resolve the campaign time zone.");
+  const minutes = Number(match[2]) * 60 + Number(match[3]);
+  return wallTime - (match[1] === "+" ? minutes : -minutes) * 60_000;
+}
+
+export const CAMPAIGN_CLOSE = berlinTime(32, 0);
+
+export function parseDay(value: string) {
+  return /^(?:[1-9]|1[0-9]|2[0-4])$/.test(value) ? Number(value) : null;
+}
+
+export function doorUnlock(day: number) {
+  return berlinTime(day, 6);
+}
+
+export function doorWindowEnd(day: number) {
+  return doorUnlock(day + 1);
+}
+
+export function doorState(day: number, now: number) {
+  if (now < doorUnlock(day)) return "locked";
+  if (now >= CAMPAIGN_CLOSE) return "closed";
+  return "open";
+}
+
+export function isOnTime(day: number, now: number) {
+  return now >= doorUnlock(day) && now < doorWindowEnd(day);
+}
+
+export function campaignNow(override?: string, environment = process.env.NODE_ENV) {
+  if (environment !== "production" && override && /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(override)) {
+    const timestamp = Date.parse(override);
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return Date.now();
+}

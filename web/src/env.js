@@ -3,6 +3,16 @@ import { z } from "zod";
 
 export const env = createEnv({
   server: {
+    // Campaign settings are optional and validated by the handlers that use them.
+    ADVENT_ENABLED: z.string().optional(),
+    ADVENT_SUPABASE_URL: z.string().optional(),
+    ADVENT_SUPABASE_SERVICE_KEY: z.string().optional(),
+    ADVENT_SESSION_SECRET: z.string().optional(),
+    ADVENT_RESEND_API_KEY: z.string().optional(),
+    ADVENT_EMAIL_FROM: z.string().optional(),
+    ADVENT_ADMIN_EMAILS: z.string().optional(),
+    ADVENT_NOW: z.string().optional(),
+    ADVENT_RULES_APPROVED: z.string().optional(),
     NODE_ENV: z.enum(["development", "test", "production"]),
     // Stats API — only required at runtime for the /api/install + /api/flush routes.
     // Validation is per-handler (so a request without these set fails 500 with a
@@ -21,6 +31,15 @@ export const env = createEnv({
   client: {},
   runtimeEnv: {
     NODE_ENV: process.env.NODE_ENV,
+    ADVENT_ENABLED: process.env.ADVENT_ENABLED,
+    ADVENT_SUPABASE_URL: process.env.ADVENT_SUPABASE_URL,
+    ADVENT_SUPABASE_SERVICE_KEY: process.env.ADVENT_SUPABASE_SERVICE_KEY,
+    ADVENT_SESSION_SECRET: process.env.ADVENT_SESSION_SECRET,
+    ADVENT_RESEND_API_KEY: process.env.ADVENT_RESEND_API_KEY,
+    ADVENT_EMAIL_FROM: process.env.ADVENT_EMAIL_FROM,
+    ADVENT_ADMIN_EMAILS: process.env.ADVENT_ADMIN_EMAILS,
+    ADVENT_NOW: process.env.ADVENT_NOW,
+    ADVENT_RULES_APPROVED: process.env.ADVENT_RULES_APPROVED,
     UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
     UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
     OPENADMINOS_GITHUB_TOKEN: process.env.OPENADMINOS_GITHUB_TOKEN,

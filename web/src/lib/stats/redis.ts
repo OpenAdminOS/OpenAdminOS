@@ -35,6 +35,8 @@ export const keys = {
   agentSubmissionRate: (ip: string, bucket: number) => `oa:rate:agent-submit:${ip}:${bucket}`,
   supportIssueRate: (ip: string, bucket: number) => `oa:rate:support-issue:${ip}:${bucket}`,
   supportIssueDedup: (hash: string) => `oa:dedup:support-issue:${hash}`,
+  adventEmailRate: (hash: string) => `oa:rate:advent:email:${hash}`,
+  adventIpRate: (hash: string) => `oa:rate:advent:ip:${hash}`,
   installs7d: (slug: string) => `oa:installs7d:${slug}`,
   knownSlugs: () => `oa:slugs`,
 } as const;

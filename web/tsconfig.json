@@ -20,6 +20,7 @@
       "ES2022"
     ],
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
