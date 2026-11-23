@@ -383,7 +383,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
        * Sends once, and once more without a level when Ollama rejects the
        * level this model was sent (a model named like gpt-oss that is not one).
        */
-      const sendWithThinkFallback = async (numCtx: number | undefined): Promise<[Response, string, number | undefined]> => {
+      // `resize` sizes the request again for a model that replaced the one it
+      // was sized for: by default as the first send is, the context retry
+      // passes its own, so a fallback keeps the room the retry asked for.
+      const sendWithThinkFallback = async (
+        numCtx: number | undefined,
+        resize?: () => Promise<number | undefined>,
+      ): Promise<[Response, string, number | undefined]> => {
         let sent = await send(numCtx);
         let text = await errorDetail(sent);
         // At most two resends: a model replaced or upgraded since the request
@@ -396,7 +402,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           await settleInstalledModel();
           const changed = () => ollamaInstalledModelNow(endpoint, model) !== previous.model ||
             (ollamaModelGenerations.get(familyKey(endpoint, ollamaInstalledModelNow(endpoint, model))) ?? 0) !== previous.generation;
-          if (changed()) {
+          if (changed() && resize) {
+            numCtx = await resize();
+            if (opts.signal?.aborted) throw stoppedByUser();
+          } else if (changed()) {
             // Another model now: the context this request was sized for was
             // another model's, so it is sized again, and refused when the
             // new one cannot take it.
@@ -564,62 +573,72 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           // A retry lookup for the same revision that omits something keeps
           // what the first lookup saw.
-          const retrySameRevision = retryShow?.revision === undefined || retryShow.revision === sized?.revision;
-          modelMax = retryShow?.modelMaxContext ?? (retrySameRevision ? sized?.modelMaxContext : undefined);
-          if (retryShow?.revision !== undefined) requestRevision = retryShow.revision;
-          captureThink();
-          const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
-          // An agent run holds a pinned model to its pin, on the retry too.
-          // Ollama counted more than the estimate, so the request did not fit.
-          // A retry lookup without a pin for the same revision keeps the pin the
-          // first lookup saw.
-          const pin = retryShow?.pinnedNumCtx ?? (retrySameRevision ? sized?.pinnedNumCtx : undefined);
-          // That the model is unpinned carries over from the first lookup only
-          // for a revision both lookups name.
-          const pinKnown = pin !== undefined || retryShow?.pinKnown === true ||
-            (retryShow?.revision !== undefined && retryShow.revision === sized?.revision && sized?.pinKnown === true);
-          // An agent run that never learned whether the model is pinned does
-          // not raise num_ctx, which would override a pin: the size Ollama
-          // ran it with is the limit it gets.
-          if (opts.enforceContextWindow && !pinKnown) {
-            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
-            throw new ContextTooSmallError({
-              code: "context-too-small",
-              promptTokens: overflow.requested,
-              answerTokens,
-              neededTokens: overflow.requested + answerTokens,
-              limitTokens: overflow.available,
-              model,
-              sentToProvider: true,
-            });
-          }
-          // An agent run is held to the pin, else to the model's maximum, with
-          // room for its answer.
-          const enforcedLimit = !opts.enforceContextWindow
-            ? undefined
-            : pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : modelMax;
-          if (enforcedLimit !== undefined) {
-            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
-            if (overflow.requested + answerTokens > enforcedLimit) {
+          // The size the retry asks for from a lookup, held to the model's pin
+          // and maximum (refused when an agent run cannot fit), for the retry
+          // and for a think fallback of it to a model that replaced this one.
+          const retrySize = (show: OllamaShowContext | undefined): number => {
+            const retrySameRevision = show?.revision === undefined || show.revision === sized?.revision;
+            modelMax = show?.modelMaxContext ?? (retrySameRevision ? sized?.modelMaxContext : undefined);
+            if (show?.revision !== undefined) requestRevision = show.revision;
+            const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
+            // An agent run holds a pinned model to its pin, on the retry too.
+            // Ollama counted more than the estimate, so the request did not fit.
+            // A retry lookup without a pin for the same revision keeps the pin the
+            // first lookup saw.
+            const pin = show?.pinnedNumCtx ?? (retrySameRevision ? sized?.pinnedNumCtx : undefined);
+            // That the model is unpinned carries over from the first lookup only
+            // for a revision both lookups name.
+            const pinKnown = pin !== undefined || show?.pinKnown === true ||
+              (show?.revision !== undefined && show.revision === sized?.revision && sized?.pinKnown === true);
+            // An agent run that never learned whether the model is pinned does
+            // not raise num_ctx, which would override a pin: the size Ollama
+            // ran it with is the limit it gets.
+            if (opts.enforceContextWindow && !pinKnown) {
+              const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
               throw new ContextTooSmallError({
                 code: "context-too-small",
                 promptTokens: overflow.requested,
                 answerTokens,
                 neededTokens: overflow.requested + answerTokens,
-                limitTokens: enforcedLimit,
+                limitTokens: overflow.available,
                 model,
                 sentToProvider: true,
               });
             }
-          }
-          if (modelMax !== undefined && overflow.requested > modelMax) {
-            throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
-          }
-          numCtx = Math.min(wanted, enforcedLimit ?? modelMax ?? Infinity);
+            // An agent run is held to the pin, else to the model's maximum, with
+            // room for its answer.
+            const enforcedLimit = !opts.enforceContextWindow
+              ? undefined
+              : pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : modelMax;
+            if (enforcedLimit !== undefined) {
+              const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+              if (overflow.requested + answerTokens > enforcedLimit) {
+                throw new ContextTooSmallError({
+                  code: "context-too-small",
+                  promptTokens: overflow.requested,
+                  answerTokens,
+                  neededTokens: overflow.requested + answerTokens,
+                  limitTokens: enforcedLimit,
+                  model,
+                  sentToProvider: true,
+                });
+              }
+            }
+            if (modelMax !== undefined && overflow.requested > modelMax) {
+              throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
+            }
+            return Math.min(wanted, enforcedLimit ?? modelMax ?? Infinity);
+          };
+          captureThink();
+          numCtx = retrySize(retryShow);
           retry = { requested: overflow.requested, numCtx };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
-          [response, detail, numCtx] = await sendWithThinkFallback(numCtx);
+          [response, detail, numCtx] = await sendWithThinkFallback(numCtx, async () => {
+            const size = retrySize(await readRetryShow());
+            attemptLabel = ` on the retry with a ${formatTokens(size)} token context`;
+            return size;
+          });
           // A fallback that sized the retry again for a replacement model sent its size.
           if (retry && numCtx !== retry.numCtx) retry = numCtx === undefined ? undefined : { ...retry, numCtx };
           if (response.ok) raisedCtx = numCtx;
@@ -1063,7 +1082,9 @@ export async function resolveOllamaModel(endpoint: string, model: string, signal
   const name = ollamaModelName(model);
   if (!name.endsWith(":local")) return name;
   const read = ++ollamaVersionReadSeq;
-  const version = await ollamaServerVersion(endpoint, signal);
+  // A failed read is tried once more: an older version known for the endpoint
+  // would otherwise decide, and an upgrade since then reads the name another way.
+  const version = await ollamaServerVersion(endpoint, signal) ?? (signal?.aborted ? undefined : await ollamaServerVersion(endpoint, signal));
   const key = ollamaEndpointKey(endpoint);
   const applied = ollamaServerVersions.get(key);
   // A read that started before the newest applied one is outdated: the newer one decides.

@@ -404,7 +404,8 @@ replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
 resolves them (a `:local` after a tag is dropped; a lone `x:local` is
 `x:latest` on Ollama 0.18 and later, which drop the suffix, and the model
-tagged `local` before that, read from `/api/version` only for such a name,
+tagged `local` before that, read from `/api/version` only for such a name
+(a failed read is tried once more),
 before each send and retry, so an upgraded server is followed; a version
 read that started before the newest one applied for the endpoint does not
 decide, and a newer one applied while the list was read does;
@@ -433,7 +434,8 @@ again, once. A think level resend to another model than the one the request
 was sized for sizes it again first, with its own timeout, and is refused when
 that model cannot take it; its think value is chosen after that lookup, and
 a context overflow on that resend is checked, and reported, against what the
-new lookup saw and the size that resend sent. The
+new lookup saw and the size that resend sent; a resend during the context
+retry keeps the retry's room, held to the new model's limits. The
 retry after a context overflow reads its lookup again when the list then
 names another revision or the name resolves to another installed model. A name that resolves to another
 installed model by the first send (an upgrade seen meanwhile) is sized again

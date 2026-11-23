@@ -2728,6 +2728,90 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("keeps the context retry's room when its think fallback goes to a model that replaced the one it was sized for", async () => {
+    let replaced = false;
+    const sent: Array<[unknown, number | undefined]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-chat:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-chat:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify({ modified_at: replaced ? "2026-11-20T10:00:00Z" : "2026-11-01T10:00:00Z", modelfile: "FROM m", model_info: { "general.architecture": "llama", "llama.context_length": 32768 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { think?: unknown; options?: { num_ctx?: number } };
+        sent.push([body.think, body.options?.num_ctx]);
+        if (body.options?.num_ctx === undefined) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (4096 tokens), try increasing it" }));
+          return;
+        }
+        if (!replaced) {
+          // The retry reaches a replacement that takes no level.
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-chat:latest" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-chat:latest" }).complete({ prompt: "p" })).text, "ok");
+      const last = sent.at(-1)!;
+      assert.ok((last[1] ?? 0) > 4096, JSON.stringify(sent));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the version once more when the first read fails, so an upgrade since the last read decides", async () => {
+    let version = "0.17.7";
+    let failNext = false;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") {
+          if (failNext) { failNext = false; res.statusCode = 500; res.end(); return; }
+          res.end(JSON.stringify({ version }));
+          return;
+        }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "probe-report:local", digest: "sha256:qwen", details: { family: "qwen3" } },
+            { name: "probe-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+          ] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "probe-report:local" });
+      await llm.complete({ prompt: "p" });
+      version = "0.18.0";
+      failNext = true;
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("starts the chat request's timeout after the model list read", async () => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       req.resume();
