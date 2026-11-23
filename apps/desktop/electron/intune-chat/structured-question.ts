@@ -545,10 +545,18 @@ function groupText(group: Record<string, number> | undefined): string {
 
 const FIELD_WORDS: Record<string, string> = { operatingSystem: "per OS", complianceState: "per compliance state" };
 
-/** Intune reports a device that never synced as 0001-01-01T00:00:00Z; any time before 1971 is read as no sync. */
+/**
+ * Intune reports a device that never synced as 0001-01-01T00:00:00Z; any time before 1971 is read as no sync.
+ * A time that does not parse is no readable sync either, never shown as a date.
+ */
 function syncReported(iso: string): boolean {
   const time = new Date(iso).getTime();
-  return !Number.isFinite(time) || new Date(time).getUTCFullYear() >= 1971;
+  return Number.isFinite(time) && new Date(time).getUTCFullYear() >= 1971;
+}
+
+/** A sync time that does not parse at all, as opposed to Intune's never-synced 0001-01-01. */
+function syncUnreadable(iso: string): boolean {
+  return !Number.isFinite(new Date(iso).getTime());
 }
 
 /** A timestamp's date on this device: the same calendar the "today" and "this month" windows use. */
@@ -560,7 +568,7 @@ function localDate(iso: string): string {
 }
 
 function rowLine(row: ComputedListedRow): string {
-  const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? (syncReported(row.lastSyncDateTime) ? `last sync ${localDate(row.lastSyncDateTime)}` : "no sync reported") : undefined].filter(Boolean);
+  const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? (syncReported(row.lastSyncDateTime) ? `last sync ${localDate(row.lastSyncDateTime)}` : syncUnreadable(row.lastSyncDateTime) ? "no readable sync time" : "no sync reported") : undefined].filter(Boolean);
   return `- ${row.name}${details.length ? ` (${details.join(", ")})` : ""}`;
 }
 
@@ -745,6 +753,9 @@ function computeDeviceDetail(
     // An old sync is a lead for a device short of a policy; a recent one, or any sync of a compliant device, is plain context.
     const lead = (FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod") && Number.isFinite(days) && days >= STALE_SYNC_LEAD_DAYS;
     facts.push(`${lead ? "Lead in the data: the last sync" : "The last sync"} was on ${lastSyncDate}${age}.`);
+  } else if (row.lastSyncDateTime && syncUnreadable(row.lastSyncDateTime)) {
+    // Not Intune's never-synced marker: the cached value is not a time at all, so neither a date nor "no sync" is claimed.
+    facts.push("The cached last sync time for this device is not readable.");
   } else if (row.lastSyncDateTime) {
     facts.push(FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod" ? "Lead in the data: Intune reports no sync for this device." : "Intune reports no sync for this device.");
   } else {

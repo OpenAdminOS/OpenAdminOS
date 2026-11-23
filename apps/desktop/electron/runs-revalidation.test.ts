@@ -99,7 +99,7 @@ const guest = (id: string): Guest => ({ id, displayName: id, days: 91, departmen
  */
 async function confirmAfter(
   change: (guests: Guest[]) => Guest[] | Error,
-  options: { withModel?: boolean; cancelDuringReplan?: boolean; applyHost?: { buildLlm?: Error; buildGraph?: Error } } = {},
+  options: { withModel?: boolean; cancelDuringReplan?: boolean; replanModelError?: Error; applyHost?: { buildLlm?: Error; buildGraph?: Error } } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "plan-revalidation-"));
   try {
@@ -150,6 +150,7 @@ async function confirmAfter(
           },
           async *stream() {
             modelCalls += 1;
+            if (options.replanModelError && modelCalls === 2) throw options.replanModelError;
             yield { delta: "Reviewed.", accumulated: "Reviewed.", done: true, model: "model-1", tokenUsage: CALL_USAGE };
             // The second call is the replan's: the admin cancels right after it.
             if (options.cancelDuringReplan && modelCalls === 2) await service.cancelRun(runId);
@@ -255,6 +256,15 @@ describe("write plans are checked against the tenant before apply", () => {
     assert.equal(writes.length, 0, "no Graph write is sent");
     assert.equal(run.status, "failed");
     assert.match(run.error ?? "", /^The plan could not be checked against the tenant before applying, so nothing was applied\. .*Graph is unavailable\./);
+  });
+
+  it("keeps a model reply with reasoning and no answer during the replan as the failure cause", async () => {
+    const failure = Object.assign(new Error("Ollama stopped \"gpt-oss:20b\" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning."), { name: "OllamaReasoningWithoutAnswerError" });
+    const { run, writes } = await confirmAfter((guests) => guests, { withModel: true, replanModelError: failure });
+    assert.equal(writes.length, 0, "no Graph write is sent");
+    assert.equal(run.status, "failed");
+    assert.match(run.error ?? "", /^The plan could not be checked against the tenant before applying, so nothing was applied\. Ollama stopped/);
+    assert.equal(run.failureCause, "reasoning-without-answer");
   });
 
   it("keeps the Graph denial when consent was lost after review", async () => {

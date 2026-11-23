@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
-import { classifyOllamaEndpoint, createOllamaLlm, ollamaEndpointOverride, ollamaHostEndpoint, parseContextOverflow } from "./llm-ollama.js";
+import { beginOllamaModelRead, classifyOllamaEndpoint, createInlineThinkFilter, createOllamaLlm, isReasoningWithoutAnswerError, ollamaEndpointOverride, ollamaHostEndpoint, ollamaThinkSetting, ollamaModelName, parseContextOverflow, recordOllamaModelFamily, recordOllamaModelList, refreshOllamaModelFamily } from "./llm-ollama.js";
 
 describe("classifyOllamaEndpoint", () => {
   it("treats loopback and Unix socket endpoints as local", () => {
@@ -130,6 +130,7 @@ describe("Ollama context size", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
         if (req.url === "/api/ps") {
           // Nothing loaded: the model loads at the size the request asks for.
           res.end(JSON.stringify({ models: [] }));
@@ -1094,6 +1095,2492 @@ describe("Ollama context size", () => {
       }
     });
   }
+});
+
+describe("Ollama reasoning models", () => {
+  async function fakeChat(lines: object[], options: { finalNewline?: boolean } = {}) {
+    const bodies: Array<{ think?: unknown }> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/chat") bodies.push(JSON.parse(raw) as { think?: unknown });
+        const body = lines.map((line) => JSON.stringify(line)).join("\n");
+        res.end(options.finalNewline === false ? body : `${body}\n`);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { endpoint, bodies, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  }
+  const thinking = (text: string) => ({ model: "gpt-oss:20b", message: { content: "", thinking: text }, done: false });
+
+  it("asks gpt-oss for low reasoning and every other model for none", () => {
+    for (const model of ["gpt-oss:20b", "gpt-oss", "gpt-oss-safeguard:20b", "hf.co/openai/gpt-oss:120b"]) {
+      assert.equal(ollamaThinkSetting(model), "low", model);
+    }
+    for (const model of ["qwen3:8b", "my-gpt-oss-finetune:latest"]) {
+      assert.equal(ollamaThinkSetting(model), false, model);
+    }
+    assert.equal(ollamaThinkSetting("office-report", "gptoss"), "low");
+    assert.equal(ollamaThinkSetting("gpt-oss:20b", "qwen3"), false);
+  });
+
+  it("sends the think setting and returns only the answer, not the reasoning", async () => {
+    const fake = await fakeChat([
+      thinking("We need to produce a report."),
+      { model: "gpt-oss:20b", message: { content: "# Report" }, done: true, eval_count: 5 },
+    ]);
+    try {
+      const result = await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" });
+      assert.equal(result.text, "# Report");
+      assert.equal(fake.bodies[0]?.think, "low");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("fails, without yielding the reasoning, when the token limit ends the reply mid-reasoning", async () => {
+    const fake = await fakeChat([
+      thinking("We need to produce a concise report. Must not invent policies."),
+      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).stream({ prompt: "p" })) {
+            seen.push(chunk.accumulated);
+          }
+        })(),
+        /stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer/,
+      );
+      assert.deepEqual(seen, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("fails, without yielding it, on reasoning written inline in the content with a tag split across chunks", async () => {
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<thi" }, done: false },
+      { model: "qwen3:8b", message: { content: "nk>We need to produce a report." }, done: false },
+      { model: "qwen3:8b", message: { content: " Must not invent policies." }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).stream({ prompt: "p" })) {
+            seen.push(chunk.accumulated);
+          }
+        })(),
+        (error) => isReasoningWithoutAnswerError(error) && /at the token limit while it was still reasoning/.test((error as Error).message),
+      );
+      assert.deepEqual(seen, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns only the answer after an inline reasoning block", async () => {
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<think>Plan the report.</th" }, done: false },
+      { model: "qwen3:8b", message: { content: "ink>\n\n# Report" }, done: false },
+      { model: "qwen3:8b", message: { content: " body <" }, done: true, eval_count: 9 },
+    ]);
+    try {
+      const result = await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" });
+      assert.equal(result.text, "\n\n# Report body <");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("finds think tags in text whose lowercase is longer, before and inside a block", async () => {
+    const filter = createInlineThinkFilter();
+    assert.equal(filter.push("<think>İstanbul</think>4"), "4");
+    const inside = createInlineThinkFilter();
+    assert.equal(inside.push("<think>İİİİ İstanbul secret</think>İİ answer"), "İİ answer");
+    // A character that only lowercases to a tag letter is not one.
+    const lookalike = createInlineThinkFilter();
+    assert.equal(lookalike.push("x <th\u0130"), "x <th\u0130");
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<think>İstanbul" }, done: false },
+      { model: "qwen3:8b", message: { content: "</think>4" }, done: true, eval_count: 3 },
+    ]);
+    try {
+      assert.equal((await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" })).text, "4");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns text held back as a possible tag when the body ends without a final record", async () => {
+    const fake = await fakeChat([{ model: "qwen3:8b", message: { content: "value <" }, done: false }]);
+    try {
+      assert.equal((await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" })).text, "value <");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps a think block that holds another one closed until its own end", async () => {
+    const filter = createInlineThinkFilter();
+    assert.equal(filter.push("<think>outer <think>inner</think> still reasoning</think>answer"), "answer");
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<think>outer <think>inner</th" }, done: false },
+      { model: "qwen3:8b", message: { content: "ink> still reasoning</think>" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).stream({ prompt: "p" })) seen.push(chunk.accumulated);
+        })(),
+        (error) => isReasoningWithoutAnswerError(error),
+      );
+      assert.deepEqual(seen, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns an answer that names a think tag whole, as Chat's JSON turn", async () => {
+    const turn = JSON.stringify({ final: true, answer: "Open a template block with `<think>` and close it with `</think>`." });
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: turn.slice(0, 50) }, done: false },
+      { model: "qwen3:8b", message: { content: turn.slice(50) }, done: true, eval_count: 9 },
+    ]);
+    try {
+      assert.equal((await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" })).text, turn);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("holds back only a possible think tag and keeps other text", () => {
+    const filter = createInlineThinkFilter();
+    assert.equal(filter.push("  <"), "  ");
+    assert.equal(filter.push("T"), "");
+    assert.equal(filter.push("HINK>hidden</THINK>shown <thin"), "shown <thin");
+    assert.equal(filter.flush(), "");
+    assert.equal(filter.reasoned, true);
+    // Once the answer started, a tag is its text: code that names one.
+    const literal = createInlineThinkFilter();
+    assert.equal(literal.push('{"final":true,"answer":"Open a block with `<think>` and close it'), '{"final":true,"answer":"Open a block with `<think>` and close it');
+    assert.equal(literal.push(' with `</think>`."}'), ' with `</think>`."}');
+    assert.equal(literal.reasoned, false);
+    const unclosed = createInlineThinkFilter();
+    assert.equal(unclosed.push("<think>never closed </thi"), "");
+    assert.equal(unclosed.flush(), "");
+  });
+
+  it("fails when a reply that stopped normally has reasoning and no answer", async () => {
+    const fake = await fakeChat([
+      thinking("Thinking about it."),
+      { model: "gpt-oss:20b", message: { content: "\n" }, done: true, done_reason: "stop", eval_count: 4 },
+    ]);
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+        (error) => isReasoningWithoutAnswerError(error) && /returned only reasoning from "gpt-oss:20b" and no answer/.test((error as Error).message),
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("gives a caller that stops at the last chunk no completed blank answer", async () => {
+    const fake = await fakeChat([
+      thinking("Thinking about it."),
+      { model: "gpt-oss:20b", message: { content: "\n" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const done: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).stream({ prompt: "p" })) {
+            if (chunk.done) {
+              done.push(chunk.accumulated);
+              break;
+            }
+          }
+        })(),
+        /at the token limit while it was still reasoning/,
+      );
+      assert.deepEqual(done, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("reads a last record without a newline", async () => {
+    const fake = await fakeChat([
+      thinking("Thinking about it."),
+      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
+    ], { finalNewline: false });
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+        /at the token limit while it was still reasoning/,
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("fails when the body ends after reasoning without a final record", async () => {
+    const fake = await fakeChat([thinking("Thinking about it.")]);
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+        /returned only reasoning from "gpt-oss:20b" and no answer/,
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
+
+  /** A fake /api/chat that answers by the think value each request sent. */
+  async function fakeByThink(answer: (think: unknown) => { status?: number; body: string }) {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        thinks.push(think);
+        const reply = answer(think);
+        res.statusCode = reply.status ?? 200;
+        res.end(reply.body);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    return { endpoint, thinks, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  }
+  const stream = (...lines: object[]) => `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+  const rejected = { status: 400, body: JSON.stringify({ error: 'think value "low" is not supported for this model' }) };
+  const answered = stream({ model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 });
+
+  it("asks again without a level when a model named like gpt-oss rejects it, and remembers that", async () => {
+    const fake = await fakeByThink((think) => (think === false ? { body: answered } : rejected));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-office" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(fake.thinks, ["low", false, false]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("asks a model that reasons although asked not to for the lowest level next time", async () => {
+    const fake = await fakeByThink(() => ({
+      body: stream(
+        { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+        { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+      ),
+    }));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "office-report" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(fake.thinks, [false, "low"]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("answers every request for a model that rejects a level and reasons anyway, with at most one retry each", async () => {
+    const fake = await fakeByThink((think) => (think === false
+      ? { body: stream(
+        { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+        { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+      ) }
+      : rejected));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-qwen-copy" });
+      for (let i = 0; i < 3; i += 1) assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.ok(fake.thinks.length <= 6, JSON.stringify(fake.thinks));
+      assert.equal(fake.thinks.filter((think) => think === false).length, 3);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps the family Ollama reported over what a reply suggests", async () => {
+    const fake = await fakeByThink(() => ({
+      body: stream(
+        { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+        { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+      ),
+    }));
+    try {
+      recordOllamaModelFamily(fake.endpoint, "team-model", { digest: "sha256:qwen", details: { family: "qwen3" } });
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "team-model" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, [false, false]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("ignores a reply from a model version that was replaced while it answered", async () => {
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    let replaceDuringReply = true;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        // A provider check records another version under the name before the old reply ends.
+        if (replaceDuringReply) recordOllamaModelFamily(endpoint, "swapped-model", { digest: "sha256:new" });
+        replaceDuringReply = false;
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: "Thinking." }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      recordOllamaModelFamily(endpoint, "swapped-model", { digest: "sha256:old" });
+      const llm = createOllamaLlm({ endpoint, defaultModel: "swapped-model" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("uses the family the provider check read, before the first request, for copies under any name", async () => {
+    const fake = await fakeByThink(() => ({ body: answered }));
+    try {
+      recordOllamaModelFamily(`${fake.endpoint}/`, "office-report", { details: { family: "gptoss" } });
+      recordOllamaModelFamily(fake.endpoint, "gpt-oss-office", { model_info: { "general.architecture": "qwen3" } });
+      recordOllamaModelFamily(fake.endpoint, "renamed-oss", { details: { family: "gpt-oss" } });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "office-report" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-office" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "renamed-oss" }).complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, ["low", false, "low"]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("asks again without a level when Ollama says the model does not support thinking", async () => {
+    const unsupported = { status: 400, body: JSON.stringify({ error: '"gpt-oss-plain" does not support thinking' }) };
+    const fake = await fakeByThink((think) => (think === false ? { body: answered } : unsupported));
+    try {
+      const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss-plain" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(fake.thinks, ["low", false, false]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+
+  it("reads the model's current family and version before a send, so a replacement that accepts a level is not sent one", async () => {
+    let installed = { digest: "sha256:qwen", family: "qwen3" };
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "team-model:latest", digest: installed.digest, details: { family: installed.family } }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      // The provider check saw gpt-oss under this name, and an answer confirmed it.
+      recordOllamaModelFamily(endpoint, "team-model", { digest: "sha256:oss", details: { family: "gptoss" } });
+      // Since then the name was replaced with a Qwen model that accepts a level.
+      await refreshOllamaModelFamily(endpoint, "team-model");
+      await createOllamaLlm({ endpoint, defaultModel: "team-model" }).complete({ prompt: "p" });
+      installed = { digest: "sha256:oss-2", family: "gpt-oss" };
+      await refreshOllamaModelFamily(endpoint, "team-model");
+      await createOllamaLlm({ endpoint, defaultModel: "team-model" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("lets the send go ahead when the model list cannot be read", async () => {
+    await assert.doesNotReject(refreshOllamaModelFamily("http://127.0.0.1:9", "unreachable-model", 200));
+  });
+
+
+  it("reads the model's family before each request, so one adapter follows a model replaced between requests", async () => {
+    let installed = { digest: "sha256:oss", family: "gptoss" };
+    const trace: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          trace.push("tags");
+          res.end(JSON.stringify({ models: [{ name: "team-model:latest", digest: installed.digest, details: { family: installed.family } }] }));
+          return;
+        }
+        trace.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "team-model", refreshModelFamily: true });
+      await llm.complete({ prompt: "p" });
+      installed = { digest: "sha256:qwen", family: "qwen3" };
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(trace, ["tags", "low", "tags", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("fails a reply whose only reasoning is whitespace, without a completed chunk", async () => {
+    const fake = await fakeChat([
+      { model: "gpt-oss:20b", message: { content: "", thinking: "\n" }, done: false },
+      { model: "gpt-oss:20b", message: { content: "" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const done: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).stream({ prompt: "p" })) {
+            if (chunk.done) done.push(chunk.accumulated);
+          }
+        })(),
+        /at the token limit while it was still reasoning/,
+      );
+      assert.deepEqual(done, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("keeps the newest model list read when an older one ends after it", async () => {
+    const thinks: unknown[] = [];
+    let tagsCalls = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          // The first read saw gpt-oss and answers late; the second sees the Qwen that replaced it.
+          const [delay, family, digest] = tagsCalls === 1 ? [150, "gptoss", "sha256:oss"] : [0, "qwen3", "sha256:qwen"];
+          setTimeout(() => res.end(JSON.stringify({ models: [{ name: "raced-model:latest", digest, details: { family } }] })), delay);
+          return;
+        }
+        // The model the name holds now.
+        if (req.url === "/api/show") { res.end(JSON.stringify({ details: { family: "qwen3" } })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const older = refreshOllamaModelFamily(endpoint, "raced-model");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await refreshOllamaModelFamily(endpoint, "raced-model");
+      await older;
+      await createOllamaLlm({ endpoint, defaultModel: "raced-model" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("matches a model under its full name, its short name and its default tag", async () => {
+    assert.equal(ollamaModelName("registry.ollama.ai/library/Team-Model:latest"), "team-model:latest");
+    assert.equal(ollamaModelName("team-model"), "team-model:latest");
+    assert.equal(ollamaModelName("hf.co/org/model:Q4"), "hf.co/org/model:q4");
+    assert.equal(ollamaModelName("https://registry.ollama.ai/library/office-report:latest"), "office-report:latest");
+    assert.equal(ollamaModelName("registry.ollama.ai/team/office-report"), "team/office-report:latest");
+    assert.equal(ollamaModelName("office-report:latest:local"), "office-report:latest");
+    assert.equal(ollamaModelName("office-report:LOCAL"), "office-report:local");
+    assert.equal(ollamaModelName("office-report:cloud"), "office-report:cloud");
+    const fake = await fakeByThink(() => ({ body: answered }));
+    try {
+      recordOllamaModelFamily(fake.endpoint, "full-name-model:latest", { details: { family: "gptoss" } });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "registry.ollama.ai/library/full-name-model:latest" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "full-name-model" }).complete({ prompt: "p" });
+      assert.deepEqual(fake.thinks, ["low", "low"]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+
+  it("ignores a provider check's model list read that started before the adapter's", async () => {
+    const family = "qwen3";
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "office-report:latest", digest: `sha256:${family}`, details: { family } }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      // The provider check starts while the name is gpt-oss; Qwen replaces it before the adapter reads.
+      const checkRead = beginOllamaModelRead();
+      await createOllamaLlm({ endpoint, defaultModel: "office-report" }).complete({ prompt: "p" });
+      // The provider check's older snapshot ends last.
+      recordOllamaModelFamily(endpoint, "office-report:latest", { digest: "sha256:gptoss", details: { family: "gptoss" } }, checkRead);
+      await createOllamaLlm({ endpoint, defaultModel: "office-report", refreshModelFamily: false }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the model list by default, so an adapter built without options follows a renamed gpt-oss", async () => {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "renamed-default:latest", digest: "sha256:a", details: { family: "gptoss" } }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "https://registry.ollama.ai/library/renamed-default:latest" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("sends the retry after a context overflow with the think value of the model installed now", async () => {
+    let family = "gptoss";
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "retried-model:latest", digest: `sha256:${family}`, details: { family } }] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          // Qwen replaces the name while the context limit is looked up.
+          family = "qwen3";
+          res.end(JSON.stringify({ model_info: { "qwen3.context_length": 131072 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { think?: unknown; options?: { num_ctx?: number } };
+        thinks.push(body.think);
+        if (body.options?.num_ctx === undefined) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "retried-model" }).complete({ prompt: "big" })).text, "ok");
+      assert.deepEqual(thinks, ["low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("falls back to no level on the context retry when the model installed now rejects one", async () => {
+    let replaced = false;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          // Before the replacement Ollama reports gpt-oss; the replacement has no family.
+          res.end(JSON.stringify({ models: [{ name: "gpt-oss-team:latest", digest: replaced ? "sha256:new" : "sha256:oss", ...(replaced ? {} : { details: { family: "gptoss" } }) }] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          replaced = true;
+          res.end(JSON.stringify({ model_info: { "x.context_length": 131072 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { think?: unknown; options?: { num_ctx?: number } };
+        thinks.push(body.think);
+        if (body.options?.num_ctx === undefined) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+          return;
+        }
+        if (body.think !== false) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-team" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-team" }).complete({ prompt: "big" })).text, "ok");
+      assert.deepEqual(thinks, ["low", "low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("does not pass what was learned before any version was known to the first version seen", async () => {
+    let listed = false;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          if (!listed) { res.statusCode = 503; res.end("busy"); return; }
+          res.end(JSON.stringify({ models: [{ name: "unlisted-model:latest", digest: "sha256:replacement" }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: thinks.length === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "unlisted-model" });
+      await llm.complete({ prompt: "p" });
+      listed = true;
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("drops what was learned for a version when the model is listed again without one", async () => {
+    let listing: Record<string, unknown> = { name: "versioned-model:latest", digest: "sha256:first" };
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [listing] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: thinks.length === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "versioned-model" });
+      await llm.complete({ prompt: "p" });
+      // A replacement listed without a family or a version.
+      listing = { name: "versioned-model:latest" };
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("forgets what was learned about a model the model list shows was removed", async () => {
+    let listed = true;
+    let calls = 0;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: listed ? [{ name: "plain-alias:latest" }] : [] }));
+          return;
+        }
+        calls += 1;
+        if (!listed) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: "model 'plain-alias' not found" }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "plain-alias" });
+      await llm.complete({ prompt: "p" });
+      // Removed: the model list no longer has it, and the request fails.
+      listed = false;
+      await assert.rejects(llm.complete({ prompt: "p" }), /is not pulled/);
+      // Another model is installed under the name, again without metadata.
+      listed = true;
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("does not learn from a reply of a model that was removed while it answered", async () => {
+    let listed = true;
+    let calls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: listed ? [{ name: "inflight-alias:latest" }] : [] }));
+          return;
+        }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
+        calls += 1;
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        if (calls === 1) {
+          // Another request's read sees the alias removed before this reply streams.
+          listed = false;
+          await refreshOllamaModelFamily(endpoint, "inflight-alias");
+          listed = true;
+        }
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "inflight-alias" });
+      await llm.complete({ prompt: "p" });
+      // A replacement under the name, again without metadata.
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("does not learn from a reply of a model the provider check saw removed while it answered", async () => {
+    let calls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "scanned-alias:latest" }] }));
+          return;
+        }
+        calls += 1;
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        // A Settings check reads a model list without the alias before this reply streams.
+        if (calls === 1) recordOllamaModelList(endpoint, [{ name: "other-model:latest" }], beginOllamaModelRead());
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "scanned-alias" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sends the level fallback to the model installed now when it was replaced by gpt-oss", async () => {
+    let family: string | undefined;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "gpt-oss-swap:latest", digest: `sha256:${family ?? "none"}`, ...(family ? { details: { family } } : {}) }] }));
+          return;
+        }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        thinks.push(think);
+        if (thinks.length === 1) {
+          // A family-less model rejects the level, and gpt-oss replaces it before the fallback.
+          family = "gptoss";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-swap" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-swap" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("ignores a whole model list read older than one already applied for the endpoint", async () => {
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          // The adapter's read sees the old gpt-oss copy and answers late.
+          setTimeout(() => res.end(JSON.stringify({ models: [{ name: "team-alias:latest", digest: "sha256:oss", details: { family: "gptoss" } }] })), 150);
+          return;
+        }
+        // Removed: Ollama no longer knows the name.
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const pending = createOllamaLlm({ endpoint, defaultModel: "team-alias" }).complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      // A newer Settings check finds the alias removed; a non-gpt-oss model replaces it.
+      recordOllamaModelList(endpoint, [], beginOllamaModelRead());
+      await pending;
+      assert.deepEqual(thinks, [false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("sends the level retry with the family Ollama reports for the model now", async () => {
+    let family: string | undefined;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "gpt-oss-plain:latest", ...(family ? { details: { family } } : {}) }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        if (thinks.length === 1) {
+          // The level is rejected; the list then reports gpt-oss, still without a version.
+          family = "gptoss";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-plain" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-plain" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("reads the family of a model asked for with Ollama's :local suffix, and sends the name as given", async () => {
+    const sent: Array<{ model?: unknown; think?: unknown }> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "office-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "gpt-oss-office:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        sent.push(JSON.parse(raw) as { model?: unknown; think?: unknown });
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-report:latest:local" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-office:latest:local" }).complete({ prompt: "p" });
+      assert.deepEqual(sent.map((body) => [body.model, body.think]), [["office-report:latest:local", "low"], ["gpt-oss-office:latest:local", false]]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("reads a lone :local as the endpoint's Ollama does: a tag before 0.18, the default tag from 0.18", async () => {
+    const serve = async (version: string) => {
+      const sent: Array<[unknown, unknown]> = [];
+      const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+        let raw = "";
+        req.on("data", (part) => (raw += part));
+        req.on("end", () => {
+          if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+          if (req.url === "/api/tags") {
+            // A gpt-oss copy tagged local and a Qwen under the default tag.
+            res.end(JSON.stringify({ models: [
+              { name: "tagged-report:local", digest: "sha256:oss", details: { family: "gptoss" } },
+              { name: "tagged-report:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
+            ] }));
+            return;
+          }
+          const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+          sent.push([body.model, body.think]);
+          res.end(answered);
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      try {
+        await createOllamaLlm({ endpoint, defaultModel: "tagged-report:latest" }).complete({ prompt: "p" });
+        await createOllamaLlm({ endpoint, defaultModel: "tagged-report:local" }).complete({ prompt: "p" });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      return sent;
+    };
+    // Ollama 0.12 runs the model tagged local.
+    assert.deepEqual(await serve("0.12.11"), [["tagged-report:latest", false], ["tagged-report:local", "low"]]);
+    // Ollama 0.40 drops ":local" and runs the default tag, the Qwen.
+    assert.deepEqual(await serve("0.40.16"), [["tagged-report:latest", false], ["tagged-report:local", false]]);
+  });
+
+  it("keeps what was learned for a lone :local under the installed model, across a provider check", async () => {
+    let calls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version: "0.40.16" })); return; }
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "stable-report:latest", digest: "sha256:same" }] })); return; }
+        calls += 1;
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(stream(
+          { model: "m", message: { content: "", thinking: calls === 1 ? "Thinking." : "" }, done: false },
+          { model: "m", message: { content: "ok" }, done: true, done_reason: "stop", eval_count: 1 },
+        ));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "stable-report:local" });
+      await llm.complete({ prompt: "p" });
+      // A provider check reads the same, unchanged list.
+      recordOllamaModelList(endpoint, [{ name: "stable-report:latest", digest: "sha256:same" }], beginOllamaModelRead());
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("follows a server upgraded across 0.18 while the app runs, also on the level fallback", async () => {
+    let version = "0.17.7";
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "upgraded-report:local", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "upgraded-report:latest", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (sent.length === 2) {
+          // The server is upgraded as this request arrives: ":local" now runs the Qwen, which rejects a level.
+          version = "0.18.0";
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"upgraded-report:local" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "upgraded-report:local" });
+      await llm.complete({ prompt: "p" });
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      // Every later request reads the version again.
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(sent, ["low", "low", false, false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+
+  it("reads the model list again when the sizing lookup saw another revision, so a model replaced in between gets its own value", async () => {
+    let shown = false;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // The name held a Llama until the sizing lookup; a gpt-oss copy replaced it then.
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [shown
+            ? { name: "resized-report:latest", digest: "sha256:oss", modified_at: "2026-11-20T10:00:00.123456789Z", details: { family: "gptoss" } }
+            : { name: "resized-report:latest", digest: "sha256:llama", modified_at: "2026-11-01T10:00:00.123456789Z", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shown = true;
+          res.end(JSON.stringify({ modified_at: "2026-11-20T10:00:00.123456789Z", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "resized-report:latest" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(sent, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("tells revisions apart to the nanosecond", async () => {
+    let shown = false;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // The name held a Llama until the sizing lookup; a gpt-oss copy replaced it then.
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [shown
+            ? { name: "nanosecond-report:latest", digest: "sha256:oss", modified_at: "2026-11-20T10:00:00.123456999Z", details: { family: "gptoss" } }
+            : { name: "nanosecond-report:latest", digest: "sha256:llama", modified_at: "2026-11-20T10:00:00.123456001Z", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shown = true;
+          res.end(JSON.stringify({ modified_at: "2026-11-20T10:00:00.123456999Z", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "nanosecond-report:latest" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(sent, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes the request again for a model pinned smaller that replaced the one the list read", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          const entry = replaced
+            ? { name: "pinned-swap:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "pinned-swap:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" };
+          // Replaced right after this read: the sizing lookup sees the new model.
+          replaced = true;
+          res.end(JSON.stringify({ models: [entry] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          // The model the name holds now: the old one unpinned, the new one pinned to 4,096.
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "pinned-swap:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 0, "nothing reaches /api/chat");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes the request again before a think fallback resend to a model that replaced the one it was sized for", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-swap:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-swap:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        // The level is rejected, and the name now holds a model pinned to 4,096.
+        replaced = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"gpt-oss-swap:latest" does not support thinking' }));
+        void raw;
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "gpt-oss-swap:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the retry lookup again when the model list then names another revision", async () => {
+    let replaced = false;
+    let shows = 0;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "retry-swap:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "retry-swap:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = replaced && shows > 2
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+          // Replaced right after the retry lookup answered for the old model.
+          if (shows === 2) replaced = true;
+          res.end(JSON.stringify(answer));
+          return;
+        }
+        chats += 1;
+        void raw;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "retry-swap:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the retry is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the retry lookup again when an upgraded server now resolves a lone :local to another model", async () => {
+    let version = "0.17.7";
+    let shows = 0;
+    let chats = 0;
+    const unpinned = { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const pinned = { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "alias-report:local", digest: "sha256:tagged" },
+            { name: "alias-report:latest", digest: "sha256:default" },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          res.end(JSON.stringify(version === "0.18.0" ? pinned : unpinned));
+          // Upgraded right after the retry lookup answered for the tagged model.
+          if (shows === 2) version = "0.18.0";
+          return;
+        }
+        chats += 1;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "alias-report:local" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the retry is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("gives the fallback's sizing lookup its own time after a slow list read", async () => {
+    let replaced = false;
+    let tags = 0;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tags += 1;
+          const answer = JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-slow:latest", digest: "sha256:new" }
+            : { name: "gpt-oss-slow:latest", digest: "sha256:old" }] });
+          // The list read in the fallback outlasts the first request's timeout.
+          if (tags > 1) setTimeout(() => res.end(answer), 150);
+          else res.end(answer);
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify(replaced
+            ? { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        replaced = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"gpt-oss-slow:latest" does not support thinking' }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "gpt-oss-slow:latest", timeoutMs: 100 }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("chooses the fallback's think value after its sizing lookup, from a list read that applied during it", async () => {
+    let replaced = false;
+    let shows = 0;
+    const sent: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "concurrent-swap:latest", digest: "sha256:qwen", details: { family: "qwen3" } }
+            : { name: "concurrent-swap:latest", digest: "sha256:oss", details: { family: "gptoss" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = JSON.stringify({ model_info: { "general.architecture": "llama", "llama.context_length": 131072 } });
+          if (shows === 2) {
+            // While the fallback sizes the request, a provider check records a gpt-oss copy.
+            recordOllamaModelList(endpoint, [{ name: "concurrent-swap:latest", digest: "sha256:oss2", details: { family: "gptoss" } }], beginOllamaModelRead());
+            setTimeout(() => res.end(answer), 30);
+          } else res.end(answer);
+          return;
+        }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (sent.length === 1) {
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"concurrent-swap:latest" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "concurrent-swap:latest" }).complete({ prompt: "word ".repeat(18000) })).text, "ok");
+      assert.deepEqual(sent, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("checks a context overflow after a think fallback against the model the resend was sized for", async () => {
+    let replaced = false;
+    const sent: Array<number | undefined> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-limit:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-limit:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          // A gpt-oss alias pinned to 16,384, replaced by an unpinned model that supports 65,536.
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", modelfile: "FROM llama", model_info: { "general.architecture": "llama", "llama.context_length": 65536 } }
+            : { modified_at: "2026-11-01T10:00:00Z", parameters: "num_ctx                        16384", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { options?: { num_ctx?: number } };
+        sent.push(body.options?.num_ctx);
+        if (sent.length === 1) {
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-limit:latest" does not support thinking' }));
+          return;
+        }
+        if (sent.length === 2) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: `request (20000 tokens) exceeds the available context size (${body.options?.num_ctx ?? 4096} tokens), try increasing it` }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const result = await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-limit:latest" }).complete({ prompt: "word ".repeat(9000), maxTokens: 500, enforceContextWindow: true });
+      assert.equal(result.text, "ok");
+      // The retry asks the replacement for room above the old pin.
+      assert.ok((sent.at(-1) ?? 0) > 16384, String(sent));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("names the replacement's limit, not the kept size, when a fallback resend is refused without counts", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-kept:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-kept:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", modelfile: "FROM gpt-oss", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        // The first request warms a larger kept size.
+        if (chats === 1) { res.end(answered); return; }
+        if (chats === 2) {
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-kept:latest" does not support thinking' }));
+          return;
+        }
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "the prompt is longer than the context length currently available" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "gpt-oss-kept:latest" });
+      await llm.complete({ prompt: "word ".repeat(18000), enforceContextWindow: true });
+      await assert.rejects(
+        llm.complete({ prompt: "word ".repeat(3000), maxTokens: 500, enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sends no level to an Ollama whose think field takes only true or false", async () => {
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.statusCode = 404; res.end(); return; }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (typeof think === "string") {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "json: cannot unmarshal string into Go struct field ChatRequest.think of type bool" }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-team:latest" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(sent, ["low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes the first send again when an upgrade seen meanwhile resolves a lone :local to another model", async () => {
+    let version = "0.17.7";
+    let shows = 0;
+    const sentCtx: Array<number | undefined> = [];
+    const unpinned = { modelfile: "FROM llama", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const pinned = { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "audit:local", digest: "sha256:tagged" }, { name: "audit:latest", digest: "sha256:default" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          // The first request's sizing answers slowly, for the model tagged local.
+          if (shows === 1) { setTimeout(() => res.end(JSON.stringify(unpinned)), 150); return; }
+          res.end(JSON.stringify(version === "0.18.0" ? pinned : unpinned));
+          return;
+        }
+        sentCtx.push((JSON.parse(raw) as { options?: { num_ctx?: number } }).options?.num_ctx);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "audit:local" });
+      const first = llm.complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }).then(() => undefined, (error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Upgraded meanwhile; another request reads the new version.
+      version = "0.18.0";
+      await llm.complete({ prompt: "p" });
+      const error = await first;
+      assert.ok(error instanceof ContextTooSmallError && error.failure.limitTokens === 4096, String(error));
+      assert.ok(sentCtx.every((size) => size === undefined), String(sentCtx));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("does not refuse the first send by the old :local target's pin when an upgrade seen meanwhile resolves it to a larger one", async () => {
+    let version = "0.17.7";
+    let shows = 0;
+    const sentCtx: Array<number | undefined> = [];
+    const unpinned = { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const pinned = { parameters: "num_ctx                        32768", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "audit:local", digest: "sha256:tagged" }, { name: "audit:latest", digest: "sha256:default" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          // The first request's sizing answers slowly, for the model tagged local.
+          if (shows === 1) { setTimeout(() => res.end(JSON.stringify(unpinned)), 150); return; }
+          res.end(JSON.stringify(version === "0.18.0" ? pinned : unpinned));
+          return;
+        }
+        sentCtx.push((JSON.parse(raw) as { options?: { num_ctx?: number } }).options?.num_ctx);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "audit:local" });
+      const first = llm.complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }).then(() => undefined, (error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Upgraded meanwhile; another request reads the new version.
+      version = "0.18.0";
+      await llm.complete({ prompt: "p" });
+      // The default tag's 32,768 pin holds the request; the tagged model's 4,096 does not refuse it.
+      assert.equal(await first, undefined);
+      assert.equal(sentCtx.length, 2);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps the context retry's room when its think fallback goes to a model that replaced the one it was sized for", async () => {
+    let replaced = false;
+    const sent: Array<[unknown, number | undefined]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-chat:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-chat:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify({ modified_at: replaced ? "2026-11-20T10:00:00Z" : "2026-11-01T10:00:00Z", modelfile: "FROM m", model_info: { "general.architecture": "llama", "llama.context_length": 32768 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { think?: unknown; options?: { num_ctx?: number } };
+        sent.push([body.think, body.options?.num_ctx]);
+        if (body.options?.num_ctx === undefined) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "request (9000 tokens) exceeds the available context size (4096 tokens), try increasing it" }));
+          return;
+        }
+        if (!replaced) {
+          // The retry reaches a replacement that takes no level.
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-chat:latest" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-chat:latest" }).complete({ prompt: "p" })).text, "ok");
+      const last = sent.at(-1)!;
+      assert.ok((last[1] ?? 0) > 4096, JSON.stringify(sent));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the version once more when the first read fails, so an upgrade since the last read decides", async () => {
+    let version = "0.17.7";
+    let failNext = false;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") {
+          if (failNext) { failNext = false; res.statusCode = 500; res.end(); return; }
+          res.end(JSON.stringify({ version }));
+          return;
+        }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "probe-report:local", digest: "sha256:qwen", details: { family: "qwen3" } },
+            { name: "probe-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+          ] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "probe-report:local" });
+      await llm.complete({ prompt: "p" });
+      version = "0.18.0";
+      failNext = true;
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the family of a server alias the model list does not name from /api/show", async () => {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // Ollama lists the model an alias points to, not the alias.
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/show") {
+          const { model } = JSON.parse(raw) as { model?: string };
+          if (model === "office-report:latest") { res.end(JSON.stringify({ details: { family: "gptoss" }, model_info: { "general.architecture": "gptoss" } })); return; }
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: "model not found" }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "office-report:latest" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps an alias's family from /api/show when another request's list read leaves the alias out", async () => {
+    let shows = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = JSON.stringify({ details: { family: "gptoss" }, modelfile: "FROM gpt-oss:20b", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } });
+          // The audit's sizing lookup is slow; another request reads the list meanwhile.
+          if (shows === 2) {
+            void refreshOllamaModelFamily(endpoint, "gpt-oss:20b");
+            setTimeout(() => res.end(answer), 100);
+          } else res.end(answer);
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-audit:latest" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes a fallback resend again when a server alias now points to another model", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          // An alias Ollama does not list: first to gpt-oss, then to a model pinned to 4,096.
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", details: { family: "llama" }, parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", details: { family: "gptoss" }, modelfile: "FROM gpt-oss:20b", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        replaced = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"team-alias:latest" does not support thinking' }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "team-alias:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps an alias's family through a failed /api/show, and forgets it only when Ollama says it is gone", async () => {
+    let show: "ok" | "busy" | "gone" = "ok";
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/show") {
+          if (show === "busy") { res.statusCode = 503; res.end(); return; }
+          if (show === "gone") { res.statusCode = 404; res.end(JSON.stringify({ error: "model not found" })); return; }
+          res.end(JSON.stringify({ details: { family: "gptoss" } }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "steady-alias:latest" });
+      await llm.complete({ prompt: "p" });
+      show = "busy";
+      await llm.complete({ prompt: "p" });
+      show = "gone";
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low", "low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("looks an alias up even when another request's newer list read applied first", async () => {
+    let target = "qwen3";
+    let tagsCalls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          const answer = JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] });
+          // This request's list read is slow; a newer one for another model applies first.
+          if (tagsCalls === 2) {
+            await refreshOllamaModelFamily(endpoint, "gpt-oss:20b");
+            res.end(answer);
+            return;
+          }
+          res.end(answer);
+          return;
+        }
+        if (req.url === "/api/show") { res.end(JSON.stringify({ details: { family: target } })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "switch-alias:latest" });
+      await llm.complete({ prompt: "p" });
+      // The alias now points to gpt-oss.
+      target = "gptoss";
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("looks the model up when its list read was overtaken by a newer one", async () => {
+    let tagsCalls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          if (tagsCalls === 1) {
+            // Answered before the replacement, arriving after a newer read.
+            setTimeout(() => res.end(JSON.stringify({ models: [{ name: "team-model:latest", digest: "sha256:llama", details: { family: "llama" } }] })), 100);
+            return;
+          }
+          // The newer read: the name is mid-replacement.
+          res.end(JSON.stringify({ models: [] }));
+          return;
+        }
+        if (req.url === "/api/show") { res.end(JSON.stringify({ details: { family: "gptoss" }, modified_at: "2026-11-20T10:00:00Z" })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const pending = createOllamaLlm({ endpoint, defaultModel: "team-model:latest" }).complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await refreshOllamaModelFamily(endpoint, "other:latest");
+      await pending;
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("gives a server alias Ollama 0.17 resolves in Chat, which /api/show does not know, its target's value", async () => {
+    const thinks: Array<[unknown, unknown]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "qwen3:8b", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: `model '${(JSON.parse(raw) as { model?: string }).model}' not found` }));
+          return;
+        }
+        if (req.url === "/api/experimental/aliases") {
+          res.end(JSON.stringify({ aliases: [
+            { alias: "tenant-auditor", target: "team-oss" },
+            { alias: "team-oss", target: "gpt-oss:20b" },
+            { alias: "draft-", target: "qwen3:8b", prefix_matching: true },
+            { alias: "draft-oss-", target: "gpt-oss:20b", prefix_matching: true },
+          ] }));
+          return;
+        }
+        const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+        thinks.push([body.model, body.think]);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const auditor = createOllamaLlm({ endpoint, defaultModel: "tenant-auditor" });
+      await auditor.complete({ prompt: "p" });
+      await auditor.complete({ prompt: "p" });
+      // The longest prefix alias decides.
+      await createOllamaLlm({ endpoint, defaultModel: "draft-oss-report" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint, defaultModel: "draft-notes" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [
+        ["tenant-auditor", "low"],
+        ["tenant-auditor", "low"],
+        ["draft-oss-report", "low"],
+        ["draft-notes", false],
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("follows exact aliases from a prefix alias, as Ollama 0.17 does, and stops at a cycle", async () => {
+    const thinks: Array<[unknown, unknown]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") {
+          res.end(JSON.stringify({ aliases: [
+            { alias: "draft-", target: "report", prefix_matching: true },
+            { alias: "report", target: "gpt-oss:20b" },
+            { alias: "loop-a", target: "loop-b" },
+            { alias: "loop-b", target: "loop-a" },
+          ] }));
+          return;
+        }
+        const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+        thinks.push([body.model, body.think]);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "draft-fast" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint, defaultModel: "loop-a" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [["draft-fast", "low"], ["loop-a", false]]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("resolves an alias's target by the newest applied list read, not an older one that ends later", async () => {
+    let tagsCalls = 0;
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          if (tagsCalls === 1) {
+            // Read before a gpt-oss copy replaced the Qwen under the target's name; it arrives last.
+            setTimeout(() => res.end(JSON.stringify({ models: [{ name: "team:latest", digest: "sha256:qwen", details: { family: "qwen3" } }] })), 120);
+            return;
+          }
+          res.end(JSON.stringify({ models: [{ name: "team:latest", digest: "sha256:oss", details: { family: "gptoss" } }] }));
+          return;
+        }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.end(JSON.stringify({ aliases: [{ alias: "office-alias", target: "team:latest" }] })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "office-alias" });
+      const older = llm.complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await llm.complete({ prompt: "p" });
+      await older;
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads an alias's target as recorded after the alias lookup, when a newer list read lands during it", async () => {
+    let replaced = false;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "team:latest", digest: "sha256:oss", details: { family: "gptoss" } }
+            : { name: "team:latest", digest: "sha256:llama", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") {
+          // A gpt-oss copy replaces the target and a provider check records it before this answer.
+          replaced = true;
+          await refreshOllamaModelFamily(endpoint, "team:latest");
+          res.end(JSON.stringify({ aliases: [{ alias: "office-alias", target: "team:latest" }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-alias" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads an Ollama 0.17 alias's target right before the send, after a replacement recorded while it was sized", async () => {
+    let replaced = false;
+    let shows = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "team:latest", digest: "sha256:oss", details: { family: "gptoss" } }
+            : { name: "team:latest", digest: "sha256:llama", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/experimental/aliases") { res.end(JSON.stringify({ aliases: [{ alias: "office-alias", target: "team:latest" }] })); return; }
+        if (req.url === "/api/show") {
+          const { model } = JSON.parse(raw) as { model?: string };
+          if (model !== "team:latest") { res.statusCode = 404; res.end(); return; }
+          shows += 1;
+          if (shows === 1) {
+            // A gpt-oss copy replaces the target while the request is sized; a provider check records it.
+            replaced = true;
+            await refreshOllamaModelFamily(endpoint, "team:latest");
+          }
+          res.end(JSON.stringify({ modelfile: "FROM m", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-alias" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes a think fallback resend for an Ollama 0.17 alias by its new target", async () => {
+    let retargeted = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "qwen3:2b", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/experimental/aliases") {
+          res.end(JSON.stringify({ aliases: [{ alias: "audit-alias", target: retargeted ? "qwen3:2b" : "gpt-oss:20b" }] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          const { model } = JSON.parse(raw) as { model?: string };
+          if (model === "gpt-oss:20b") { res.end(JSON.stringify({ modelfile: "FROM gpt-oss", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } })); return; }
+          if (model === "qwen3:2b") { res.end(JSON.stringify({ parameters: "num_ctx                        2048", model_info: { "general.architecture": "qwen3", "qwen3.context_length": 32768 } })); return; }
+          // Ollama 0.17's /api/show does not know the alias.
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        chats += 1;
+        retargeted = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"audit-alias" does not support thinking' }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "audit-alias" }).complete({ prompt: "Summarize.", maxTokens: 3000, enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 2048,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes a lone :local by the upgraded server's reading, not an alias recorded on Ollama 0.17", async () => {
+    let version = "0.17.7";
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "small:latest", digest: "sha256:small" },
+            { name: "team:latest", digest: "sha256:team" },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/experimental/aliases") {
+          if (version !== "0.17.7") { res.statusCode = 404; res.end(); return; }
+          res.end(JSON.stringify({ aliases: [{ alias: "team:local", target: "small:latest" }] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          const { model } = JSON.parse(raw) as { model?: string };
+          const pinned = (size: number) => ({ parameters: `num_ctx                        ${size}`, model_info: { "general.architecture": "llama", "llama.context_length": 131072 } });
+          if (model === "small:latest") { res.end(JSON.stringify(pinned(2048))); return; }
+          if (model === "team:latest" || (model === "team:local" && version !== "0.17.7")) { res.end(JSON.stringify(pinned(32768))); return; }
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        sent.push((JSON.parse(raw) as { model?: unknown }).model);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "team:local" });
+      await llm.complete({ prompt: "Summarize.", maxTokens: 500, enforceContextWindow: true });
+      // Upgraded: ":local" now reads as the default tag, pinned to 32,768.
+      version = "0.18.0";
+      await llm.complete({ prompt: "word ".repeat(9000), maxTokens: 500, enforceContextWindow: true });
+      assert.deepEqual(sent, ["team:local", "team:local"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("follows an alias to a model named unknown", async () => {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "unknown:latest", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.end(JSON.stringify({ aliases: [{ alias: "mystery", target: "unknown" }] })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "mystery" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
+    let version: string | undefined = "0.17.7";
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") {
+          if (version === undefined) { res.statusCode = 500; res.end(); return; }
+          res.end(JSON.stringify({ version }));
+          return;
+        }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "down-report:local", digest: "sha256:qwen", details: { family: "qwen3" } },
+            { name: "down-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+          ] }));
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "down-report:local" });
+      await llm.complete({ prompt: "p" });
+      // Upgraded; the version endpoint is down for this request.
+      version = undefined;
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(sent, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("starts the chat request's timeout after the model list read", async () => {
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") { setTimeout(() => res.end(JSON.stringify({ models: [] })), 100); return; }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "slow-list:latest", timeoutMs: 40 }).complete({ prompt: "p" })).text, "ok");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("fails on reasoning with only a cut-off tag start as content, at the token limit or the end of the body", async () => {
+    for (const final of [true, false]) {
+      const fake = await fakeChat([
+        thinking("We need to produce a report."),
+        { model: "gpt-oss:20b", message: { content: "<thi" }, done: final, ...(final ? { done_reason: "length", eval_count: 1100 } : {}) },
+      ]);
+      try {
+        await assert.rejects(
+          createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "gpt-oss:20b" }).complete({ prompt: "p" }),
+          (error) => isReasoningWithoutAnswerError(error),
+          String(final),
+        );
+      } finally {
+        await fake.close();
+      }
+    }
+  });
+
+  it("sends the think value known right before the send, after a list read that applied while it was sized", async () => {
+    let installed = { digest: "sha256:llama", family: "llama" };
+    let shows = 0;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "swap-report:latest", digest: installed.digest, details: { family: installed.family } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = JSON.stringify({ model_info: { "general.architecture": "llama", "llama.context_length": 131072 } });
+          // The first request's sizing lookup is slow.
+          if (shows === 1) setTimeout(() => res.end(answer), 150);
+          else res.end(answer);
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "swap-report:latest" });
+      // Long enough that the request is sized before it is sent.
+      const first = llm.complete({ prompt: "word ".repeat(18000) });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The name now holds a gpt-oss copy, which a second request reads.
+      installed = { digest: "sha256:oss", family: "gptoss" };
+      await llm.complete({ prompt: "p" });
+      await first;
+      assert.deepEqual(sent, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sends no level on the last resend when the model list never lists the model", async () => {
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // A name the list omits and Ollama does not know: each read finds it missing.
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (think !== false) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-ghost:latest" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-ghost:latest" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(sent, ["low", "low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("lets a newer version read decide over an older one that finishes later", async () => {
+    let versionReads = 0;
+    const sent: Array<[unknown, unknown]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") {
+          versionReads += 1;
+          // The first read was answered before the upgrade but arrives last.
+          if (versionReads === 1) setTimeout(() => res.end(JSON.stringify({ version: "0.17.7" })), 150);
+          else res.end(JSON.stringify({ version: "0.18.0" }));
+          return;
+        }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "race-report:local", digest: "sha256:llama", details: { family: "llama" } },
+            { name: "race-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+          ] }));
+          return;
+        }
+        const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+        sent.push([body.model, body.think]);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "race-report:local" });
+      const older = llm.complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await llm.complete({ prompt: "p" });
+      await older;
+      // Both run the gpt-oss model under the default tag, as Ollama 0.18 does.
+      assert.deepEqual(sent, [["race-report:local", "low"], ["race-report:local", "low"]]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps a rejection for the model that gave it when an upgrade switches models mid-request, and rolls back cleanly", async () => {
+    let version = "0.17.7";
+    let chats = 0;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          // gpt-oss tagged local; a Qwen under the default tag that reports no family.
+          res.end(JSON.stringify({ models: [
+            { name: "gpt-oss-team:local", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "gpt-oss-team:latest", digest: "sha256:qwen" },
+          ] }));
+          return;
+        }
+        chats += 1;
+        if (chats === 2) version = "0.18.0";
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        // From 0.18 ":local" runs the Qwen, which rejects any level.
+        if (version === "0.18.0" && think !== false) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-team:local" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "gpt-oss-team:local" });
+      await llm.complete({ prompt: "p" });
+      // Upgraded as this request arrives: the Qwen gets the name's guess, then no level.
+      assert.equal((await llm.complete({ prompt: "p" })).text, "ok");
+      // Rolled back: the gpt-oss copy runs again and still gets the lowest level.
+      version = "0.17.7";
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(sent, ["low", "low", "low", false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
 });
 
 describe("Ollama context for an unpinned model", () => {

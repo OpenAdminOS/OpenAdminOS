@@ -13,6 +13,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import { assertWritePlanLimits, contextTooSmallFromError, graphAccessDenialFromError, WritePlanLimitError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
+import { isReasoningWithoutAnswerError } from "./llm-ollama.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
@@ -42,6 +43,29 @@ export interface SandboxBroker {
    * aside). The caller still checks that the script ended on it.
    */
   getContextFailure(): ContextTooSmallFailure | undefined;
+  /**
+   * The typed model failure (a reply with reasoning and no answer) behind a
+   * script failure, from the error the script's own process recorded it ended
+   * with: a failure of the broker request id that error (or its cause chain)
+   * carries whose message, or the "<method>: <message>" the bundled scripts
+   * throw, the error carrying the id has; none without an id. Returned only
+   * when every such failure is a reply with reasoning and no answer.
+   */
+  llmFailureFor(endedWith: ScriptExitRecord): Error | undefined;
+  /**
+   * The broker failures the error the script ended with is, matched the same
+   * way: none when the script ended on an error of its own.
+   */
+  failuresEndedWith(endedWith: ScriptExitRecord): Error[];
+}
+
+/** The error a script ended with, as its process recorded it. */
+export interface ScriptExitRecord {
+  message: string;
+  /** The broker request whose failure the error, or one in its cause chain, carries. */
+  brokerRequestId?: string;
+  /** The message of the error that carries `brokerRequestId`, which may be a cause of the one the script ended with. */
+  brokerErrorMessage?: string;
 }
 
 export interface SandboxBrokerInput {
@@ -72,6 +96,9 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
   // The error that answered the last brokered request, log calls aside.
   let lastFailure: unknown;
+  // Every failure a brokered request answered with, kept per request id. A
+  // script may reuse an id, so a later failure never replaces an earlier one.
+  const failures = new Map<string, Array<{ method: string; error: Error }>>();
 
   return {
     async handle(request) {
@@ -107,6 +134,12 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         }
       } catch (error) {
         if (request?.method !== "log") lastFailure = error;
+        if (request?.method !== "log" && error instanceof Error) {
+          const entry = { method: String(request?.method ?? ""), error };
+          const list = failures.get(id);
+          if (list) list.push(entry);
+          else failures.set(id, [entry]);
+        }
         return failure(id, error);
       }
     },
@@ -116,6 +149,25 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
         : undefined,
+    llmFailureFor(endedWith) {
+      const candidates = this.failuresEndedWith(endedWith);
+      // Attribute the cause only when every candidate agrees on it.
+      if (candidates.length === 0 || !candidates.every((error) => isReasoningWithoutAnswerError(error))) return undefined;
+      return candidates[candidates.length - 1];
+    },
+    failuresEndedWith(endedWith) {
+      const matches = (message: string) => ({ method, error }: { method: string; error: Error }) =>
+        message === error.message || message === `${method}: ${error.message}`;
+      // Without a request id the error is the script's own, even with the
+      // same text as a failure it handled before.
+      if (endedWith.brokerRequestId === undefined) return [];
+      // Only a failure under the id whose message the error carrying the id
+      // has, which may be a cause the script wrapped. An answer the broker
+      // never handled, such as a refused request file, reuses no failure.
+      return (failures.get(endedWith.brokerRequestId) ?? [])
+        .filter(matches(endedWith.brokerErrorMessage ?? endedWith.message))
+        .map(({ error }) => error);
+    },
   };
 }
 

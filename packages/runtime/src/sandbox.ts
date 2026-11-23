@@ -552,6 +552,8 @@ function sanitizeSandboxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "LOCALAPPDATA",
     "ELECTRON_RUN_AS_NODE",
     "OPENADMINOS_BROKER_DIR",
+    // Where the script's process records the error it ended with.
+    "OPENADMINOS_EXIT_RECORD",
   ];
   const clean: NodeJS.ProcessEnv = {};
   for (const key of allowedKeys) {

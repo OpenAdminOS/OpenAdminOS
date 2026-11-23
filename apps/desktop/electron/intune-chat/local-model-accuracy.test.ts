@@ -645,6 +645,15 @@ describe("The fallback after a failed compact loop", () => {
         // Prose, then a request cut short.
         ["send", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
         ["stream", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
+        // A long promise before a fenced request: the prose announces the lookup.
+        ["send", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so that the answer rests on the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        // The same with a purpose clause after the promise, and a negation before it.
+        ["stream", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so I can answer from the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        ["send", `I can't answer that from memory, so I will check the cached Intune device data now and come back with the exact numbers for the devices that need attention in this organization today. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
+        // Long prose with a stray quote, then a request cut short: the brace count starts at the first brace.
+        ["send", `I won't say "maybe here: the answer depends on the cached Intune device data, and the snapshot has to be read before any number can be stated for the devices in this organization today.\n{"tool":"count_cached","params":{"resource":"managedDevices"}`],
+        // A lead-in, then an unclosed fence with a long request cut short.
+        ["stream", `I need to check:\n\`\`\`json\n{"tool":"query_cache","params":{"resource":"managedDevices","select":[${Array.from({ length: 20 }, (_, i) => `"field${i}"`).join(",")}],"where":{"complianceState":"noncompliant"`],
         // A complete request, then an unrelated JSON example.
         ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
         ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
@@ -681,6 +690,45 @@ describe("The fallback after a failed compact loop", () => {
         assert.equal(message.status, "failed", send);
         assert.equal(message.engineNotice, undefined, send);
       }
+    });
+  });
+
+  it("reads a whole final answer that also names a tool as the answer, and keeps a prose answer that quotes a tool call", async () => {
+    await withHarness(async ({ store, reply }) => {
+      const howTo = "To count noncompliant devices yourself, ask Chat to run the cached count with a filter on the compliance state. "
+        + "The request the model sends looks like the example below, and the host answers it from the Intune device cache without calling Graph:\n"
+        + '```json\n{"tool":"count_cached","params":{"resource":"managedDevices","where":{"complianceState":"noncompliant"}}}\n```';
+      for (const [fallbackReply, expected] of [
+        ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
+        ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"} Done.', "Six managed devices are not compliant."],
+        ['Here is the answer: {"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
+        [howTo, howTo],
+        // A result, then an offer that depends on the admin, and a quoted call: still an answer.
+        [`${howTo}\n\nIf you want, I will check the compliance policy next.`, `${howTo}\n\nIf you want, I will check the compliance policy next.`],
+        [`${howTo}\n\nI will check the compliance policy next, if you want.`, `${howTo}\n\nI will check the compliance policy next, if you want.`],
+        // A brace inside a JSON string value does not make the quoted call cut short.
+        [howTo.replace('"noncompliant"', '"WIN-{01"'), howTo.replace('"noncompliant"', '"WIN-{01"')],
+      ] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : fallbackReply));
+        const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+        assert.equal(message.status, "completed", fallbackReply.slice(0, 40));
+        assert.equal(message.content, expected, fallbackReply.slice(0, 40));
+      }
+    });
+  });
+
+  it("does not show a tool request live while the streamed fallback is still arriving, and says plainly why it failed", async () => {
+    await withHarness(async ({ store, reply }) => {
+      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+      reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : '{"tool":"count_cached","params":{"resource":"managedDevices"}}'));
+      const live: string[] = [];
+      const message = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, (event) => {
+        if (event.type === "delta") live.push(event.content);
+      })).assistantMessage;
+      assert.ok(!live.some((text) => text.includes('"tool"')), "the raw request never reached the screen");
+      assert.equal(message.status, "failed");
+      assert.equal(message.content, "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.");
     });
   });
 
@@ -917,6 +965,21 @@ describe("computed answers on partial and never-synced data", () => {
     });
   });
 
+  it("never shows an unreadable sync time as a date", async () => {
+    await withHarness(async ({ cache }) => {
+      const at = new Date().toISOString();
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices, { id: "md-garbled", deviceName: "WIN-GARBLED", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: "not-a-date" }] });
+      const cacheStatus = cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const listed = computeStructuredResult({ store: cache, tenantId: tenant.id, query: structuredQueryForQuestion({ question: "Which devices are not compliant?", generatedAt: at })!, cacheStatus, generatedAt: at })!.facts.join("\n");
+      assert.match(listed, /- WIN-GARBLED \(Windows, noncompliant, no readable sync time\)/);
+      assert.doesNotMatch(listed, /last sync not-a-da/);
+      const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: deviceComplianceReasonQuery("why is WIN-GARBLED not compliant?", cache, tenant.id)!, cacheStatus, generatedAt: at })!.facts.join("\n");
+      assert.match(detail, /The cached last sync time for this device is not readable\./);
+      assert.doesNotMatch(detail, /not-a-da|Intune reports no sync/);
+    });
+  });
+
   it("says no sync reported for a device Intune lists as never synced, in any time zone", async () => {
     await withHarness(async ({ cache }) => {
       const at = new Date().toISOString();
@@ -1133,6 +1196,18 @@ describe("Model fit after a local model failure (PR #213 with #215)", () => {
       assert.equal(answered.modelFit?.reason, "context-too-small");
       assert.equal(answered.modelFit?.neededTokens, 40652);
       assert.ok(answered.modelFit?.offerId);
+    }));
+  });
+
+  it("fails with the reasoning cause and offers no context fit when the error text reads like a context limit", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      reply(() => {
+        throw Object.assign(new Error('Ollama returned only reasoning from "exceed_context_size_error:latest" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+      });
+      const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(answered.status, "failed");
+      assert.match(answered.error ?? "", /returned only reasoning/);
+      assert.equal(answered.modelFit, undefined);
     }));
   });
 

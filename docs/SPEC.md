@@ -393,6 +393,97 @@ LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
 
+Reasoning models on Ollama (added 2026-11-21, PR #222). Every request sends
+`think: false`, except to gpt-oss, which ignores `false` and always reasons, so
+it gets `think: "low"`. The model family that provider detection reads from
+`/api/tags` on every check (`gptoss` or `gpt-oss`) decides, so a copy under
+another name, or a name replaced and restored, gets the right value before its
+first request; the chat path adds no `/api/show` call for a model the list
+names. Before each request, the
+app reads the model's entry from `/api/tags` (which loads no model; a name
+it does not list, such as a server alias, is read with `/api/show`, which
+reports the family of the model it points to; on Ollama 0.17, where
+`/api/show` does not know server aliases but Chat resolves them, a 404 there
+is followed by `GET /api/experimental/aliases` (an exact alias, else the
+longest prefix alias on the short name, then exact aliases from there, a
+cycle resolving to nothing); only which model the alias points to is kept,
+and the alias then resolves to that installed model like a lone `:local`
+does, so its family, version and limits are the target's when each send and
+lookup is made, while Chat still gets the alias; a list read without such a
+name keeps what `/api/show` showed, which only a "not found" from it clears; a
+list read overtaken by a newer one never skips that lookup,
+and without a digest a new `modified_at` counts as another version), so a model
+replaced under the name since the provider check, or between two requests of
+one answer, gets its own family and version; names are compared as Ollama
+resolves them (a `:local` after a tag is dropped; a lone `x:local` is
+`x:latest` on Ollama 0.18 and later, which drop the suffix, and the model
+tagged `local` before that, read from `/api/version` only for such a name
+(a failed read is tried once more; when both fail, the name is read as
+current Ollama does until a read succeeds),
+before each send and retry, so an upgraded server is followed; a version
+read that started before the newest one applied for the endpoint does not
+decide, and a newer one applied while the list was read does;
+what is known is kept under the installed model the name resolves to), a read that started before another is ignored, and the retry
+after a context overflow reads the family again. Every successful model list read,
+from the provider check or the adapter, is ignored when an older one than the
+last applied for the endpoint, and forgets what was learned about a model
+it no longer lists, also for a reply still in flight, and the fallback after a
+rejected level reads the list again. A family Ollama reported decides. For a model without
+one, Ollama's answers decide, per endpoint and model and only for the version
+(digest) the request was sent to and learned against: a rejected level (`think value ... is not
+supported`, `... does not support thinking`, or an older Ollama whose `think`
+is a Boolean only) is sent again with
+`false`, and reasoning streamed after `false` switches later requests to "low".
+The model is resolved again before that resend; when it now resolves to
+another model, that model's own value is sent instead and a rejection of it is
+handled the same way, at most two resends per request.
+Without either, the name decides. Reasoning a model writes inline in its
+content, in `<think>` blocks before any answer text (also split across
+chunks, nested, or never closed), is taken out of the answer as it streams;
+once the answer has started, a tag is its text (code that names one); a tag start the token limit cut off
+after reasoning is not an answer. The model list is read before context
+sizing; when the sizing lookup saw another revision (`modified_at`) than the
+list (compared to the nanosecond), the list is read and the request sized
+again, once. A think level resend to another model than the one the request
+was sized for sizes it again first, with its own timeout, and is refused when
+that model cannot take it; its think value is chosen after that lookup, and
+a context overflow on that resend is checked, and reported, against what the
+new lookup saw and the size that resend sent; a resend during the context
+retry keeps the retry's room, held to the new model's limits. The
+retry after a context overflow reads its lookup again when the list then
+names another revision or the name resolves to another installed model. A name that resolves to another
+installed model by the first send (an upgrade seen meanwhile) is sized again
+before the lookup refuses or sizes anything, so that model's own pin holds.
+The think value, version and family a send uses are taken right before it,
+and the chat request's timeout starts only then; the last
+resend after a rejected level always sends `false`, without remembering it
+when the model could not be confirmed. A reply with reasoning and no answer
+is never returned as the answer: it fails with
+`OllamaReasoningWithoutAnswerError`, naming the token limit when
+`done_reason` is `length`, before any completed chunk. A run records it as
+`failureCause: "reasoning-without-answer"`, also through a failed plan check
+before apply or a sandboxed script's exit (when the error the script ended with
+carries it; the script's Node process records that error through a hook the
+app loads with `--import`, in the launched process's main thread only and
+unless the script handles it itself (an error that escapes its
+`uncaughtException` or monitor listener, or capture callback, is recorded
+instead; the original only once the monitor listeners ran), with the broker
+request id it or its cause carries, which the bundled scripts set, and the
+message of the error carrying it; only a failure under that id with that
+message counts, also when the script wrapped it or reused the id, so an
+answer the broker never handled (a refused request file) is none; an error
+without an id is the script's own, even with the same text as a failure it
+handled, so the output is never parsed for it, and every matching failure must
+be this cause; that recorded failure also decides before the output is read
+for a context size refusal), and the failure panel shows only the
+"Model reasoned without answering" card; such a run gets no model fit offer
+from text that reads like a context limit, and Chat's compact loop fails the
+message with the cause instead of falling back to cached data. Chat shows a failed message with the
+cause, also when the model writing an MCP query reasoned without answering
+(other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
+cause, other summary failures keep the deterministic summary. The provider Test
+allows 64 tokens so a model that reasons first can still reply.
+
 LM Studio support uses its local OpenAI-compatible server at
 `http://127.0.0.1:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
 development override. Like Ollama, LM Studio is local only when the configured
@@ -4511,7 +4602,8 @@ the format. Decisions:
   Intune, managed devices, a compliance state or a sync window (a later
   clause about compliance does not qualify it); devices with no reported sync
   time are said, not silently left out of a sync window; a device Intune
-  reports as never synced (0001-01-01) reads "no sync reported"; dates are
+  reports as never synced (0001-01-01) reads "no sync reported", and a sync
+  time that does not parse is never shown as a date; dates are
   shown on this device's calendar; when the cache is partial, an unfiltered
   count leads with the total Graph reported (or says "at least" the cached
   count) and filtered counts and splits say they cover the cached part only;
@@ -4607,12 +4699,21 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  a "tool" naming a Chat tool anywhere in the reply (before or after prose,
-  next to a JSON example, cut short) makes it a request; a whole-reply object
-  is read as the loop reads it (final with an answer or content text is the
-  answer); a final answer object after prose is the answer; any other JSON
-  example inside a prose answer stays prose; when the reply is empty, only
-  promises work or is a request, the message fails with
+  a final answer object is the answer when it is the whole reply or the
+  object the loop reads (the last fenced block or balanced object, with
+  prose before or after it), also when it names a tool too; otherwise a
+  "tool" naming a Chat tool makes the reply a request when the request was
+  cut short (an unclosed fence, or a brace left open outside JSON strings),
+  when a sentence outside the JSON announces a lookup in the words a
+  progress message uses ("I will check ...", "Let me look ..."; an offer
+  that depends on the admin does not count), or when that prose is a short
+  lead-in; a longer prose answer that quotes a tool call as an example stays
+  an answer, so a model that writes a long preamble before a real request,
+  and announces the lookup in other words ("We will check ...", "For this
+  organization I will check ..."), gets that reply shown; any other JSON example inside a prose
+  answer stays prose; the fallback call is not shown live, only when
+  complete, and nothing of it when it is stopped; when the reply is empty, a progress message or a request, the
+  message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the

@@ -45,8 +45,16 @@ function lmStudioContextAdvice(error: string): string {
     : "LM Studio sets a model's context length when the model is loaded, and this request did not fit. In LM Studio, raise Context Length in the model's load settings and reload the model, then re-run.";
 }
 
+/**
+ * The runtime's two messages for an Ollama reply with reasoning and no answer,
+ * read from the app's own text so a quoted server body cannot match.
+ */
+const isReasoningWithoutAnswer = (e: string) =>
+  /^Ollama stopped "[^"]+" at the token limit while it was still reasoning, so there is no answer\./.test(ownText(e)) ||
+  /^Ollama returned only reasoning from "[^"]+" and no answer\./.test(ownText(e));
+
 /** Errors with one cause and one recovery: only their own playbook is shown. */
-const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
+const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup, isReasoningWithoutAnswer];
 
 /**
  * A Microsoft sign-in error as MSAL reports it: the message starts with an
@@ -55,6 +63,7 @@ const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
  * into a provider's error is not a tenant sign-in.
  */
 const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
+
 
 const SUGGESTIONS: Suggestion[] = [
   {
@@ -76,6 +85,11 @@ const SUGGESTIONS: Suggestion[] = [
     match: isLmStudioContextTooSmall,
     title: "LM Studio context too small",
     body: lmStudioContextAdvice,
+  },
+  {
+    match: isReasoningWithoutAnswer,
+    title: "Model reasoned without answering",
+    body: "The model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
   },
   {
     match: (e) =>
@@ -150,11 +164,18 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   if (run.status !== "failed" || !run.error) return null;
   // A typed reason is exact, so it comes first and replaces the guesses.
   const typed = run.failureReason?.code === "context-too-small" ? run.failureReason : undefined;
-  // A failed lookup of the Ollama model's context limit and an LM Studio
-  // context error each have one cause and one recovery; an HTTP status or a
+  // A failed lookup of the Ollama model's context limit, an LM Studio
+  // context error and an Ollama reply with only reasoning each have one
+  // cause and one recovery; an HTTP status or a
   // number in their text (for example 403) is not a Graph denial.
   const own = ownText(run.error);
-  const exclusive = typed ? undefined : EXCLUSIVE.find((match) => match(own));
+  // A cause the runtime classified from its typed error decides, whatever
+  // wrapper the app put in front of the message.
+  const exclusive = typed
+    ? undefined
+    : run.failureCause === "reasoning-without-answer"
+      ? isReasoningWithoutAnswer
+      : EXCLUSIVE.find((match) => match(own));
   const matched = typed
     ? [contextTooSmallSuggestion(typed)]
     : exclusive

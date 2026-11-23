@@ -52,7 +52,7 @@ export {
 } from "./prompt-fit.js";
 export { parseOllamaLoadedContext, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
 
-import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+import { createOllamaLlm, noopLlm, reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 import { createClaudeCodeLlm, probeClaudeCodeLlm } from "./llm-claude-code.js";
 import { createLmStudioLlm, probeLmStudioLlm } from "./llm-lm-studio.js";
@@ -79,10 +79,16 @@ import {
 
 export {
   classifyOllamaEndpoint,
+  beginOllamaModelRead,
   createOllamaLlm,
+  isReasoningWithoutAnswerError,
   noopLlm,
+  reasoningWithoutAnswerInChain,
   ollamaEndpointOverride,
   ollamaHostEndpoint,
+  recordOllamaModelFamily,
+  recordOllamaModelList,
+  refreshOllamaModelFamily,
   resolveOllamaEndpoint,
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
@@ -992,6 +998,7 @@ async function failPhase(
     ...(accessDenial ? { accessDenial } : {}),
     ...(failureReason ? { failureReason } : {}),
     graphDenialChecked: true,
+    ...(reasoningWithoutAnswerInChain(error) ? { failureCause: "reasoning-without-answer" as const } : {}),
     logs: [
       ...working.logs,
       buildLog(working.id, "error", `Agent failed: ${message}`, finishedAt),
