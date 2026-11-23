@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+import { adventEnabled, rulesApproved } from "~/lib/advent/config";
+
 import { BLOG_POSTS, blogPostPath } from "./blog/posts";
 import { SITE_URL } from "./seo";
 
@@ -25,6 +27,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: new URL(path, SITE_URL).toString(),
       lastModified: new Date(lastModified),
     })),
+    ...(adventEnabled() ? [
+      { url: new URL("/advent", SITE_URL).toString(), lastModified: new Date("2026-11-23") },
+      ...(rulesApproved() ? [{ url: new URL("/advent/rules", SITE_URL).toString(), lastModified: new Date("2026-11-23") }] : []),
+    ] : []),
     ...BLOG_POSTS.map((post) => ({
       url: new URL(blogPostPath(post), SITE_URL).toString(),
       lastModified: new Date(post.updatedAt),

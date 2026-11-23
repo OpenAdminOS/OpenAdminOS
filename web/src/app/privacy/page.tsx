@@ -1,4 +1,6 @@
 import Link from "next/link";
+
+import { adventEnabled } from "~/lib/advent/config";
 import { type Metadata } from "next";
 
 import { MarketingShell } from "../MarketingShell";
@@ -30,6 +32,8 @@ export const metadata: Metadata = pageMetadata({
 });
 
 export default function PrivacyPage() {
+  const showAdvent = adventEnabled();
+  const lastUpdated = showAdvent ? "2026-11-23" : LAST_UPDATED;
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -40,7 +44,7 @@ export default function PrivacyPage() {
         path: "/privacy",
         name: TITLE,
         description: DESCRIPTION,
-        dateModified: LAST_UPDATED,
+        dateModified: lastUpdated,
       }),
       breadcrumbSchema([
         { name: "Home", path: "/" },
@@ -57,7 +61,7 @@ export default function PrivacyPage() {
           Privacy policy
         </h1>
         <p className="mt-2 text-sm text-brand-muted">
-          Last updated: {LAST_UPDATED}
+          Last updated: {lastUpdated}
         </p>
 
         <div className="mt-10 space-y-10 text-[15px] leading-7 text-brand-muted">
@@ -275,6 +279,8 @@ export default function PrivacyPage() {
             </ul>
           </section>
 
+          {showAdvent && <AdventPrivacy />}
+
           <section>
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Your rights
@@ -314,5 +320,41 @@ export default function PrivacyPage() {
         </div>
       </article>
     </MarketingShell>
+  );
+}
+
+// TODO(ugur): Have legal counsel review the Advent privacy notice before enabling the campaign.
+function AdventPrivacy() {
+  return (
+    <section id="advent" className="scroll-mt-24">
+      <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Advent of Admin</h2>
+      <p className="mt-3">
+        To run the campaign and its prize draws, we collect your email address, handle,
+        age and rules confirmations, consent records, door completions, referral code and
+        referral relationship, and any feedback you choose to submit. The legal basis is
+        Art. 6(1)(b) GDPR. If you make your badge page public, it shows your handle and
+        completion total. Your email stays private. We use a necessary session cookie
+        for up to 30 days after you sign in.
+      </p>
+      <p className="mt-3">
+        We send OpenAdminOS release emails only if you opt in (Art. 6(1)(a) GDPR).
+        You can withdraw consent at any time in My Advent. To prevent abuse, a keyed
+        hash of your IP address is used for sign-in rate limiting in Upstash Redis
+        for at most one hour (Art. 6(1)(f) GDPR).
+      </p>
+      <p className="mt-3">
+        Supabase stores the campaign records in an EU region. Resend sends sign-in links
+        and Vercel hosts the site. Plausible measures general marketing usage as described
+        above. The campaign pages do not send Plausible events.
+      </p>
+      <p className="mt-3">
+        Participants’ records are deleted 90 days after the grand draw, except winners’
+        records needed to fulfil prizes. Release email consent records are kept while
+        you remain opted in and your account exists. Draw audit records retain participant
+        IDs and entry counts for verification. Those IDs can no longer be linked to your
+        campaign account once it is deleted. You can delete your account immediately
+        from <Link href="/advent/me" className="text-link">My Advent</Link>.
+      </p>
+    </section>
   );
 }

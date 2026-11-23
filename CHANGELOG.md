@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add the off-by-default Advent of Admin website campaign with 24 guided desktop activities, participation tracking, badges, and prize draw administration.
+
 - Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review (mockup 36).
 - Windows uninstall now removes the account's local data folder, including an IT `policy.json` placed there (IT deploys it again after a reinstall); the machine-wide policy stays.
 - Reset OpenAdminOS in Settings > Data: after the typed phrase `RESET OPENADMINOS` the app closes every organization to new work, turns off background work and restarts into first run with its data folder (except the IT `policy.json`), the macOS Keychain item in the login keychain, the scheduler and the updater caches removed; a new Uninstall and reset docs page covers manual removal per OS and revoking consent in Entra.

@@ -14,6 +14,7 @@ import {
   ROADMAP_URL,
 } from "./seo";
 import { card, eyebrow } from "./ui";
+import { adventEnabled } from "~/lib/advent/config";
 
 const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
   { href: "/trust-model", label: "Trust model" },
@@ -192,6 +193,9 @@ export function MarketingShell({
                     </Link>
                   </li>
                 ))}
+                {group.title === "Product" && adventEnabled() && (
+                  <li><Link href="/advent" className="text-brand-muted transition-colors hover:text-brand-ink">Advent of Admin</Link></li>
+                )}
               </ul>
             </nav>
           ))}
