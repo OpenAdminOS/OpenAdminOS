@@ -67,21 +67,22 @@ if (isMainThread && target) {
         : { message }));
     } catch {}
   };
-  process.on("uncaughtExceptionMonitor", (error) => {
-    if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
-    record(error);
-  });
-  // An uncaughtException listener that throws ends the process with that
-  // error and no further monitor event, so the error that escapes it is the one the script ended with.
+  // Node tells monitor listeners, then uncaughtException listeners, through
+  // process.emit. An error that escapes either ends the process with that
+  // error instead, so it is the one recorded. The original is recorded once
+  // the monitors ran, unless the script handles it itself.
   const emit = process.emit;
   process.emit = function (event, ...args) {
-    if (event !== "uncaughtException") return emit.call(this, event, ...args);
+    if (event !== "uncaughtExceptionMonitor" && event !== "uncaughtException") return emit.call(this, event, ...args);
+    let result;
     try {
-      return emit.call(this, event, ...args);
+      result = emit.call(this, event, ...args);
     } catch (escaped) {
       record(escaped);
       throw escaped;
     }
+    if (event === "uncaughtExceptionMonitor" && process.listenerCount("uncaughtException") === 0 && !process.hasUncaughtExceptionCaptureCallback()) record(args[0]);
+    return result;
   };
   // The same for a capture callback that throws.
   const setCapture = process.setUncaughtExceptionCaptureCallback;
