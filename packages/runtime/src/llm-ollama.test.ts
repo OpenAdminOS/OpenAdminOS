@@ -1226,6 +1226,27 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("keeps a think block that holds another one closed until its own end", async () => {
+    const filter = createInlineThinkFilter();
+    assert.equal(filter.push("<think>outer <think>inner</think> still reasoning</think>answer"), "answer");
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<think>outer <think>inner</th" }, done: false },
+      { model: "qwen3:8b", message: { content: "ink> still reasoning</think>" }, done: true, done_reason: "length", eval_count: 1100 },
+    ]);
+    try {
+      const seen: string[] = [];
+      await assert.rejects(
+        (async () => {
+          for await (const chunk of createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).stream({ prompt: "p" })) seen.push(chunk.accumulated);
+        })(),
+        (error) => isReasoningWithoutAnswerError(error),
+      );
+      assert.deepEqual(seen, []);
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("holds back only a possible think tag and keeps other text", () => {
     const filter = createInlineThinkFilter();
     assert.equal(filter.push("a <b> <"), "a <b> ");
@@ -2180,6 +2201,40 @@ describe("Ollama reasoning models", () => {
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     try {
       await createOllamaLlm({ endpoint, defaultModel: "resized-report:latest" }).complete({ prompt: "word ".repeat(18000) });
+      assert.deepEqual(sent, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("tells revisions apart to the nanosecond", async () => {
+    let shown = false;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // The name held a Llama until the sizing lookup; a gpt-oss copy replaced it then.
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [shown
+            ? { name: "nanosecond-report:latest", digest: "sha256:oss", modified_at: "2026-11-20T10:00:00.123456999Z", details: { family: "gptoss" } }
+            : { name: "nanosecond-report:latest", digest: "sha256:llama", modified_at: "2026-11-20T10:00:00.123456001Z", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shown = true;
+          res.end(JSON.stringify({ modified_at: "2026-11-20T10:00:00.123456999Z", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "nanosecond-report:latest" }).complete({ prompt: "word ".repeat(18000) });
       assert.deepEqual(sent, ["low"]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -706,11 +706,21 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
   };
 }
 
-/** Whether two `modified_at` values name the same revision, also when written with another precision. */
+/**
+ * Whether two `modified_at` values name the same revision: the same instant
+ * to the full fraction Ollama writes (nanoseconds), also when one is written
+ * with trailing zeroes or another offset.
+ */
 function sameRevision(a: string, b: string): boolean {
   if (a === b) return true;
-  const [x, y] = [Date.parse(a), Date.parse(b)];
-  return Number.isFinite(x) && x === y;
+  const parse = (value: string) => {
+    const match = /^(.*T\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)$/i.exec(value);
+    if (!match) return undefined;
+    const seconds = Date.parse(`${match[1]}${match[3]}`);
+    return Number.isFinite(seconds) ? { seconds, fraction: (match[2] ?? "").replace(/0+$/, "") } : undefined;
+  };
+  const [x, y] = [parse(a), parse(b)];
+  return x !== undefined && y !== undefined && x.seconds === y.seconds && x.fraction === y.fraction;
 }
 
 const THINK_OPEN = "<think>";
@@ -723,7 +733,8 @@ const THINK_TAGS = { [THINK_OPEN]: /<think>/i, [THINK_CLOSE]: /<\/think>/i } as 
  * until it is known, and a block never closed is reasoning to the end.
  */
 export function createInlineThinkFilter(): { push(text: string): string; flush(): string; readonly reasoned: boolean } {
-  let inThink = false;
+  // How many think blocks are open: a block may hold another one.
+  let depth = 0;
   let pending = "";
   let reasoned = false;
   // The longest end of `text` that could start `tag`. Compared character by
@@ -743,27 +754,30 @@ export function createInlineThinkFilter(): { push(text: string): string; flush()
       pending = "";
       let visible = "";
       while (rest.length > 0) {
-        const tag = inThink ? THINK_CLOSE : THINK_OPEN;
-        // Found in the text itself, so offsets are the text's own.
-        const at = rest.search(THINK_TAGS[tag]);
-        if (at >= 0) {
-          if (!inThink) {
-            visible += rest.slice(0, at);
+        const open = rest.search(THINK_TAGS[THINK_OPEN]);
+        const close = depth > 0 ? rest.search(THINK_TAGS[THINK_CLOSE]) : -1;
+        // The first tag decides: an opening one inside a block nests.
+        const next = [open, close].filter((at) => at >= 0).sort((x, y) => x - y)[0];
+        if (next !== undefined) {
+          if (depth === 0) {
+            visible += rest.slice(0, next);
             reasoned = true;
           }
-          rest = rest.slice(at + tag.length);
-          inThink = !inThink;
+          const opening = next === open;
+          rest = rest.slice(next + (opening ? THINK_OPEN.length : THINK_CLOSE.length));
+          depth += opening ? 1 : -1;
           continue;
         }
-        const held = partialTag(rest, tag);
+        // Hold back what could start either tag.
+        const held = Math.max(partialTag(rest, THINK_OPEN), depth > 0 ? partialTag(rest, THINK_CLOSE) : 0);
         pending = rest.slice(rest.length - held);
-        if (!inThink) visible += rest.slice(0, rest.length - held);
+        if (depth === 0) visible += rest.slice(0, rest.length - held);
         rest = "";
       }
       return visible;
     },
     flush() {
-      const rest = inThink ? "" : pending;
+      const rest = depth > 0 ? "" : pending;
       pending = "";
       return rest;
     },
