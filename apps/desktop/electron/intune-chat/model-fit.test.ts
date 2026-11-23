@@ -648,7 +648,16 @@ describe("Model fit in Chat", () => {
     const during = new AbortController();
     const stoppingGuard = guardModelFitLlm(inner, { before: async () => { during.abort(); }, dispatched: () => { dispatched += 1; } });
     await assert.rejects(stoppingGuard.complete({ prompt: "stopped during check", signal: during.signal }));
-    await assert.rejects((async () => { for await (const _chunk of stoppingGuard.stream({ prompt: "s", signal: during.signal })) { /* drain */ } })());
+    const duringStream = new AbortController();
+    const stoppingStream = guardModelFitLlm(inner, {
+      before: async () => { duringStream.abort(); },
+      dispatched: () => { dispatched += 1; },
+    });
+    await assert.rejects((async () => {
+      for await (const _chunk of stoppingStream.stream({ prompt: "stopped during stream check", signal: duringStream.signal })) { /* drain */ }
+    })(), { name: "AbortError" });
+    assert.ok(duringStream.signal.aborted);
+    assert.ok(!calls.includes("stream"));
     assert.equal(dispatched, 1);
     allowed = false;
     await assert.rejects(guarded.complete({ prompt: "b" }), /not on this device/);
