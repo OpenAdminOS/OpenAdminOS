@@ -89,7 +89,7 @@ const SUGGESTIONS: Suggestion[] = [
   {
     match: isReasoningWithoutAnswer,
     title: "Model reasoned without answering",
-    body: "The local model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
+    body: "The model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
   },
   {
     match: (e) =>
