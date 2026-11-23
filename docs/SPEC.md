@@ -2993,6 +2993,10 @@ Mockup: `docs/mockups/34-local-reset.html`.
   scheduler and the menu bar login item (installed builds), stops the gateway
   and MCP servers and drains every organization's work with a bounded wait
   (the SQLite databases stay open until the process exits), and relaunches.
+- **Local index model download.** Reset cancels the app's Ollama model check
+  or download when the reset marker is committed. If the reset is cancelled,
+  a later automatic install can start a fresh download. On exit the app stops
+  the download once any updater handling of the quit request has finished.
 - **No sign-out before the restart** (decided in review round 22; the brief
   listed it as a phase 1 step). Signing out rewrites the token caches in
   place, and that rewrite cannot be bound to the folder the reset was

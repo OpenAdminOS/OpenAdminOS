@@ -40,13 +40,15 @@ export async function embeddingModelState(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = loopbackTransport.fetch,
+  signal?: AbortSignal,
 ): Promise<{ ollamaReachable?: boolean; installed: boolean; error?: string }> {
   // Refuses a non-loopback endpoint before any connection.
   loopbackLabel(endpoint, "/api/tags");
   const recovery = "Check Ollama's local endpoint, then refresh the documentation index status.";
   let answered = false;
   try {
-    const { response, url } = await fetchLoopback(endpoint, "/api/tags", { signal: AbortSignal.timeout(3000) }, fetchImpl);
+    const timeout = AbortSignal.timeout(3000);
+    const { response, url } = await fetchLoopback(endpoint, "/api/tags", { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }, fetchImpl);
     answered = true;
     if (isRefusedRedirect(response, url)) {
       return { ollamaReachable: true, installed: false, error: `${redirectRefusedDetail("Ollama", url)} ${recovery}` };
@@ -64,6 +66,7 @@ export async function embeddingModelState(
     );
     return { ollamaReachable: true, installed };
   } catch (error) {
+    signal?.throwIfAborted();
     // A reset means something answered and then closed the connection: not a stopped Ollama.
     if (!answered && connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
     const reason = error instanceof SyntaxError

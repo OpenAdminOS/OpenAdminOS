@@ -7851,7 +7851,7 @@ if (!gotLock) {
   });
 }
 
-app.on("before-quit", () => store?.stopEmbeddingModelDownload());
+app.on("will-quit", () => store?.stopEmbeddingModelDownload());
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
