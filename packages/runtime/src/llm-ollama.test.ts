@@ -2500,6 +2500,55 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("checks a context overflow after a think fallback against the model the resend was sized for", async () => {
+    let replaced = false;
+    const sent: Array<number | undefined> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-limit:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-limit:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          // A gpt-oss alias pinned to 16,384, replaced by an unpinned model that supports 65,536.
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", modelfile: "FROM llama", model_info: { "general.architecture": "llama", "llama.context_length": 65536 } }
+            : { modified_at: "2026-11-01T10:00:00Z", parameters: "num_ctx                        16384", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        const body = JSON.parse(raw) as { options?: { num_ctx?: number } };
+        sent.push(body.options?.num_ctx);
+        if (sent.length === 1) {
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-limit:latest" does not support thinking' }));
+          return;
+        }
+        if (sent.length === 2) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: `request (20000 tokens) exceeds the available context size (${body.options?.num_ctx ?? 4096} tokens), try increasing it` }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const result = await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-limit:latest" }).complete({ prompt: "word ".repeat(9000), maxTokens: 500, enforceContextWindow: true });
+      assert.equal(result.text, "ok");
+      // The retry asks the replacement for room above the old pin.
+      assert.ok((sent.at(-1) ?? 0) > 16384, String(sent));
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("starts the chat request's timeout after the model list read", async () => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       req.resume();

@@ -362,6 +362,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
         timeoutMs: lookupTimeoutMs, signal,
       });
+      // What the request's sizing lookup saw: the first one, or the one for
+      // a model that replaced it before a resend. Retries and limits use it.
+      let sized: Awaited<ReturnType<typeof ollamaRequestNumCtx>>;
+      const applySizing = () => {
+        // The revision this request was sized for; a kept size binds to it.
+        requestRevision = sized?.revision;
+        // Without a known pin status the maximum is not the limit (a pin
+        // below it may apply), so none is assumed.
+        lookupLimit = sized?.pinnedNumCtx !== undefined
+          ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
+          : sized?.pinKnown ? sized.modelMaxContext : undefined;
+      };
       /**
        * Sends once, and once more without a level when Ollama rejects the
        * level this model was sent (a model named like gpt-oss that is not one).
@@ -386,6 +398,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             const resized = await sizeRequest(opts.signal ?? new AbortController().signal);
             if (opts.signal?.aborted) throw stoppedByUser();
             if (resized?.tooLarge) throw new ContextTooSmallError(resized.tooLarge);
+            sized = resized;
+            applySizing();
             numCtx = resized?.numCtx;
           }
           // Chosen after every lookup, from what is known right before the resend.
@@ -420,7 +434,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         let numCtx = cachedCtx;
         // A model without a pinned num_ctx gets room for this request on the
         // first send, so it is never served at a smaller default.
-        let sized = await sizeRequest();
+        sized = await sizeRequest();
         if (opts.signal?.aborted) throw stoppedByUser();
         // The sizing lookup saw another revision than the model list read
         // before it: the model was replaced under the name in between. The
@@ -432,13 +446,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           sized = await sizeRequest();
           if (opts.signal?.aborted) throw stoppedByUser();
         }
-        // The revision this request was sized for; a kept size binds to it.
-        requestRevision = sized?.revision;
-        // Without a known pin status the maximum is not the limit (a pin
-        // below it may apply), so none is assumed.
-        lookupLimit = sized?.pinnedNumCtx !== undefined
-          ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
-          : sized?.pinKnown ? sized.modelMaxContext : undefined;
+        applySizing();
         if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
         if (sized?.dropKept) {
           if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
@@ -461,7 +469,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.
-        const firstSent = numCtx;
+        let firstSent = numCtx;
         captureThink();
         let detail: string;
         let sentCtx: number | undefined;
@@ -469,8 +477,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         if (sentCtx !== numCtx) {
           // Sized again for a model that replaced the one the request was built for.
           numCtx = sentCtx;
+          firstSent = sentCtx;
           raisedCtx = sentCtx;
-          retry = sentCtx === undefined ? undefined : { requested: retry?.requested ?? 0, numCtx: sentCtx, sizedUpFront: true };
+          retry = sentCtx === undefined ? undefined : { requested: sized?.neededTokens ?? retry?.requested ?? 0, numCtx: sentCtx, sizedUpFront: true };
+          if (sentCtx !== undefined) retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sentCtx)) ?? 0;
         }
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
