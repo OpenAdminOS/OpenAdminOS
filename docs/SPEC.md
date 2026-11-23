@@ -3918,3 +3918,194 @@ Decided with the user after a docs question ("What does the Microsoft Learn say 
   - *Chat titles.* The first answer of a new chat may return `title` in its final JSON: plain text on one line, at most 60 characters, no links, no write intent, no tenant values (checked like `next`). It names the chat in the sidebar and header unless the chat was renamed meanwhile; otherwise, and on the deterministic path, the chat keeps the trimmed question. The title is asked for only on that first answer and costs no extra model call.
   - *Hosted disclosure.* The status strip pill is unchanged. The sentence under the composer ("Prompts and tenant data go to ... while this model is selected. MCP queries are written from your current question only, ...") shows in full on the first message of a conversation and whenever the provider, model or MCP hosts differ from what the conversation last sent with (kept per viewer in local storage, falling back to the provider and model of the latest answer). Otherwise a shield icon in the composer carries the same sentence as its tooltip and accessible description and opens it in full on click. Hard constraint 1 is unchanged: the strip always says where data goes.
   - *Other.* Scroll to latest sits in its own row above the composer, outside the scrolling conversation. Each numbered step in an answer has a copy button (plain text, without citation numbers), shown on hover and keyboard focus.
+
+### Local model accuracy in Chat (2026-11-19)
+
+Tester findings on 2026-11-18 with the local OpenAdmin 8B model: device counts
+read from sample rows (3 noncompliant instead of 6), no per OS split, unmanaged
+Entra devices listed as Intune devices, follow-ups planned from scratch, and auto
+mode spending up to about 22 model calls before a fallback whose notice blamed
+the format. Decisions:
+
+- Code does the counting. `count_cached {resource, where?, filters?, groupBy?,
+  list?}` counts every cached row in SQL under the filters, with one breakdown
+  per groupBy field, and returns the matching rows when at most 50 match. The
+  loop prompt sends every count and breakdown to it.
+- Device questions in a closed list of sentence shapes are computed in code:
+  a count of Intune devices (optionally of one OS, of one compliance state, or
+  synced or not synced in the last N days, this week, this month or today)
+  with optional clauses for a per OS or per compliance state split, one
+  subset to list ("and which are not compliant", "and how many are Windows")
+  or "list them"; a list of devices by compliance state or by sync window; the
+  follow-ups "only Windows", "only the compliant ones", "which of those are
+  Windows", "which of those are not compliant", "which of those synced this
+  month" and "what about macOS"; and "why is <device> not compliant". Each
+  shape is read as a whole sentence. Any other question, including one with a
+  word, number, "or", negation or clause outside its shape, goes to the
+  planner as before. An open reading of the words was tried first and kept
+  computing answers to other questions (a dropped "not", "or" read as "and",
+  "Windows 11" read as Windows, independent clauses read as a subset), so the
+  list is closed and grows only by adding a tested shape. Only "devices" (or
+  "Macs") names the inventory, since "computers" would also count phones;
+  "iOS" is Intune's iOS/iPadOS platform, and "iPadOS", "iPad" and "iPhone"
+  questions go to the planner, because whether an iPad reports
+  operatingSystem "iOS" or "iPadOS" is not documented and could not be checked
+  on a tenant (2026-11-20, the Lokka tenant has no iPad); a sync window must
+  be one day to ten years, times compare as times, and "today", "this week"
+  and "this month" start in this device's time zone; a later sentence with
+  its own subject is its own question and goes to the planner; "list their
+  names" together with a subset asks for two lists and goes to the planner;
+  "what about macOS" asks the stored question again with macOS swapped in or
+  added in the same shape, with a relative sync window ("today", "in the last
+  7 days") read again at the time of the switch from the question that set
+  it, also after a further switch or narrowing (its split, subset, count or list), replacing the OS
+  in the set and the subset alike, and a split that was over a follow-up's
+  subset is not rebuilt; a split asked after the subset clause could mean
+  either and goes to the planner; a turn with attached workspace context goes
+  to the planner, and no direct answer from the cache stands in for it, since
+  code reads none of its instructions; once a model wrote an answer in a
+  chat, its memory may hold a standing instruction ("for the rest of this
+  chat, exclude WIN-"), so the chat's later questions go to the model, and the
+  older direct cache answers (compliance, encryption, app platform counts) are
+  left to the model too, in both send paths; a write request refused in chat
+  carries no model name, since code wrote it; a plain
+  or tenant-wide "how many devices" can mean Intune or Entra devices and goes
+  to the planner, so a count is computed only when its counted clause names
+  Intune, managed devices, a compliance state or a sync window (a later
+  clause about compliance does not qualify it); devices with no reported sync
+  time are said, not silently left out of a sync window; a device Intune
+  reports as never synced (0001-01-01) reads "no sync reported"; dates are
+  shown on this device's calendar; when the cache is partial, an unfiltered
+  count leads with the total Graph reported (or says "at least" the cached
+  count) and filtered counts and splits say they cover the cached part only;
+  a device lookup is
+  resolved again by name in the snapshot that answers; Entra device questions
+  always go to the planner. The deterministic
+  answer pack carries the result as an authoritative `computedResult` (exact
+  counts, the full filtered list, plain fact lines) and no sample rows for
+  that resource, only for a tenant or mixed question whose resource the tenant
+  grants. "Not compliant" is Intune's `noncompliant` state, as the direct
+  evidence answers count it; grace period is its own state. A failed latest
+  refresh is said in the computed answer. `count_cached` on a resource that
+  was never refreshed returns no count.
+- Intune is the device inventory. Device, OS, sync and compliance wording plans
+  `managedDevices` only; `entraDevices` joins for Entra, directory, join,
+  registration, stale-device cleanup, duplicate and deleted-record wording.
+- Row samples use structured filters for the OS and compliance state a question
+  names, and question words are no longer ANDed as text matches. A "why"
+  question gets no field filter, since its state and any OS word are the
+  premise or part of a device name ("why is Windows-Lab not compliant"), so
+  the named device stays in the samples; every other question keeps both, and
+  any cached device the question names by its whole name goes first in the
+  samples, with or without filters ("is Windows-Lab compliant" about a Mac,
+  "why is 上海总部 not compliant"), so no later cap drops it; it is marked
+  `namedInQuestion`, so it is not read as a row that matched the filters.
+- Follow-ups: the structured result of the last answer is stored per
+  conversation (`chat_result_context`: resource, filters, label, total and up
+  to 500 matched row ids; deleted with the conversation) and a follow-up such
+  as "only Windows" or "which of those synced this month" narrows those rows
+  by id: a device added by a later refresh is not part of the previous answer,
+  a device whose values changed stays in it, is listed with its current
+  values and is counted as no longer matching, one that left the cache is said
+  to be gone, and every requested narrowing, also a repeated one, applies to
+  the current values. In a two-clause question each filter belongs to its
+  clause: the first clause is the counted set, the second the listed subset. A different value on a field already filtered after a switch lead
+  ("what about macOS" after Windows) asks the same question of a fresh set.
+  "Which of those are compliant now?" names the previous rows, so it is read
+  on them by id with their current values even though the previous answer
+  filtered on compliance; "only the compliant ones" does not and goes to the
+  planner, and so does a later "what about macOS?", which would need both
+  compliance values, also after a further narrowing such as "only Windows".
+  What ran shows the filters of a follow-up, not the row ids. A device
+  lookup stores no follow-up context, and a stopped turn clears the context. When the previous answer matched more
+  than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
+  follow-up planning reads write intent from the current question only. Short
+  follow-ups are planned with the previous question as context. The context is
+  stored only when the visible answer came from the computed result (code, or
+  a model writing from the pack), never from a loop answer that read the data
+  its own way.
+- Questions the data cannot answer: "why is <device> not compliant" names the
+  device's cached state (the device is found by its exact cached name,
+  ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not;
+  the whole name is tried first, so "Device Lab" is never answered as "Lab";
+  the name as asked is resolved again in the snapshot that answers, and when
+  a refresh made it mean another device, or none, the planner answers; the
+  name keeps its own spacing and punctuation, so "Front  Desk" is not "Front
+  Desk" and "Alice’s iPhone" is not "Alice's iPhone"; letters of any script
+  count and case is folded with Unicode rules, so "Élodie’s iPhone" matches
+  as typed in any case),
+  says the failing rule is not in the cached data, and
+  gives the last sync as the lead, with nothing invented. Only a failing state
+  (noncompliant, conflict, error) and grace period get that guidance. A
+  compliant device gets its premise corrected ("is compliant in this snapshot,
+  so no compliance rule is failing for it here") and no failed-rule or lead
+  wording; a grace period device is worded as an unmet setting; any other
+  state says the snapshot does not establish a failure. The last sync is
+  named as a lead only when it is at least 7 days old. A failed latest
+  refresh is said first. A name two cached
+  records share goes to the planner, so code never picks one. The device name
+  is resolved against the cache at question time; a device first seen by this
+  turn's refresh is answered by the planner path.
+- A local model never writes the answer to a question code has computed (a
+  count, breakdown, filtered list, follow-up or device lookup): code renders
+  the facts with no model call, in auto and deterministic mode, and What ran
+  shows the cache read. Checking a small model's prose against the facts kept
+  missing contradictions ("4 are not compliant" next to the right list, an
+  invented reason next to the right sync date), so the prose is not written.
+  Always investigative mode keeps the model's loop, and a hosted model writes
+  from the authoritative pack as before.
+- Auto mode, local model, Chat: a compact loop budget (four iterations, one
+  repair for malformed, empty, unfinished or evidence-free replies, no repair
+  turn for a missing question kind, at most four model calls before the
+  fallback; the short query-writing call of an MCP tool counts like any other
+  model call, so the tool loop never makes more than four calls (the
+  fallback's own cached-data answer is one more call after it); a lookup that
+  would leave no call for the answer is not run and the model is told to
+  answer from what it has; a repair that asks for a missing source, or for the
+  full article behind search excerpts, runs only when its request, its query
+  writer and the answer still fit, otherwise the answer is kept and says the
+  source was not consulted or that it rests on the excerpts; a late local
+  docs index with no call left is not searched and the answer is kept as
+  written; a tool requested on the fourth call is not run, since no call is
+  left to use its result. Counting the writer without these rules pushed
+  ordinary Microsoft Learn answers into the fallback). After a failed compact
+  loop the cached-data fallback is one model call with no promise retries;
+  a "tool" naming a Chat tool anywhere in the reply (before or after prose,
+  next to a JSON example, cut short) makes it a request; a whole-reply object
+  is read as the loop reads it (final with an answer or content text is the
+  answer); a final answer object after prose is the answer; any other JSON
+  example inside a prose answer stays prose; when the reply is empty, only
+  promises work or is a request, the message fails with
+  "The local model did not finish an answer ..." instead of showing it. The
+  "Answered from cached data instead" notice is set only once that answer
+  exists, so a provider that refuses every call leaves no such notice on the
+  failed message. A local model the failure memory took off the tool loop
+  gets the same one-call, checked fallback; a model too small for tool use
+  never ran the loop and keeps the normal fallback with its promise retries. Stop pressed while the providers
+  are still being read ends
+  in the designed cancelled answer, not an abort error. A second
+  progress-only reply falls back as `unfinished` instead of being kept, unless
+  a lookup in the turn failed: then, as for an empty answer, the turn says no
+  verified count is available instead of falling back. Only a read of a
+  refreshed cache clears a failed lookup; a retry that finds the resource not
+  cached keeps it pending. A rejected `count_cached` call blocks a zero answer as a
+  rejected `query_cache` does. A context overflow falls back instead of failing
+  the message and returns the provider's error as `failureDetail`.
+  Always investigative mode and hosted providers keep the established budget,
+  prompts and notices.
+- The loop returns `failureReason`: `malformed`, `thinking-only` (a reply with
+  no text), `context-too-small`, `iteration-cap`, `no-evidence`,
+  `empty-answer`, `unfinished` or `provider-unavailable`. Local fallbacks say
+  what happened in plain words, for example "The local model did not finish
+  its plan. Answered from cached data instead." The per-model failure memory
+  (two failures, in memory until restart) now says what the model did on each
+  failed turn since its last success ("did not fit its context window twice")
+  instead of blaming the format. A local model's context overflow counts
+  towards the two failures, since it says the model does not fit Chat; a
+  hosted one does not, since it says more about the question. A local model
+  that cannot be reached (connection refused, server not running) ends the
+  loop as `provider-unavailable` with the error as `failureDetail`, is not
+  counted against the model, and the fallback then shows the provider's
+  designed error. `count_cached`
+  and `query_cache` refuse an `in` list of more than 20 values instead of
+  cutting it, so a count is never stated as exact over a cut list.
