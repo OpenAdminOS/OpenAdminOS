@@ -2282,6 +2282,91 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("sizes the request again before a think fallback resend to a model that replaced the one it was sized for", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-swap:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "gpt-oss-swap:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        // The level is rejected, and the name now holds a model pinned to 4,096.
+        replaced = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"gpt-oss-swap:latest" does not support thinking' }));
+        void raw;
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "gpt-oss-swap:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reads the retry lookup again when the model list then names another revision", async () => {
+    let replaced = false;
+    let shows = 0;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "retry-swap:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "retry-swap:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = replaced && shows > 2
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+          // Replaced right after the retry lookup answered for the old model.
+          if (shows === 2) replaced = true;
+          res.end(JSON.stringify(answer));
+          return;
+        }
+        chats += 1;
+        void raw;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "retry-swap:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the retry is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("starts the chat request's timeout after the model list read", async () => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       req.resume();

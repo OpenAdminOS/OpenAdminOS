@@ -352,11 +352,20 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
         return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : cachedCtx !== undefined ? { size: cachedCtx, kept: true } : undefined, text));
       };
+      // The context lookup for this request, by the name as given.
+      const sizeRequest = () => ollamaRequestNumCtx({
+        endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
+        ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+        ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
+        ...(opts.enforceContextWindow ? { enforce: true } : {}),
+        ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
+        timeoutMs: lookupTimeoutMs, signal: controller.signal,
+      });
       /**
        * Sends once, and once more without a level when Ollama rejects the
        * level this model was sent (a model named like gpt-oss that is not one).
        */
-      const sendWithThinkFallback = async (numCtx: number | undefined): Promise<[Response, string]> => {
+      const sendWithThinkFallback = async (numCtx: number | undefined): Promise<[Response, string, number | undefined]> => {
         let sent = await send(numCtx);
         let text = await errorDetail(sent);
         // At most two resends: a model replaced or upgraded since the request
@@ -381,6 +390,15 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             // Another model, or one Ollama now reports a family for.
             body.think = family !== undefined ? ollamaThinkSetting(model, family) : ollamaThinkFor(endpoint, installedModel);
           }
+          if (installedModel !== previous.model || generation !== previous.generation) {
+            // Another model now: the context this request was sized for was
+            // another model's, so it is sized again, and refused when the
+            // new one cannot take it.
+            const resized = await sizeRequest();
+            if (opts.signal?.aborted) throw stoppedByUser();
+            if (resized?.tooLarge) throw new ContextTooSmallError(resized.tooLarge);
+            numCtx = resized?.numCtx;
+          }
           sentDigest = ollamaModelDigests.get(key);
           sentGeneration = generation;
           sentFamily = family;
@@ -388,20 +406,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           sent = await send(numCtx);
           text = await errorDetail(sent);
         }
-        return [sent, text];
+        return [sent, text, numCtx];
       };
       try {
         let numCtx = cachedCtx;
         // A model without a pinned num_ctx gets room for this request on the
         // first send, so it is never served at a smaller default.
-        const sizeRequest = () => ollamaRequestNumCtx({
-          endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
-          ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
-          ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
-          ...(opts.enforceContextWindow ? { enforce: true } : {}),
-          ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
-          timeoutMs: lookupTimeoutMs, signal: controller.signal,
-        });
         let sized = await sizeRequest();
         if (opts.signal?.aborted) throw stoppedByUser();
         // The sizing lookup saw another revision than the model list read
@@ -446,7 +456,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         const firstSent = numCtx;
         captureThink();
         let detail: string;
-        [response, detail] = await sendWithThinkFallback(numCtx);
+        let sentCtx: number | undefined;
+        [response, detail, sentCtx] = await sendWithThinkFallback(numCtx);
+        if (sentCtx !== numCtx) {
+          // Sized again for a model that replaced the one the request was built for.
+          numCtx = sentCtx;
+          raisedCtx = sentCtx;
+          retry = sentCtx === undefined ? undefined : { requested: retry?.requested ?? 0, numCtx: sentCtx, sizedUpFront: true };
+        }
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Less room than this send asked for means Ollama can no longer give
@@ -477,40 +494,49 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          let retryShow: OllamaShowContext | undefined;
-          try {
-            retryShow = await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
-          } catch (error) {
-            if (opts.signal?.aborted) throw stoppedByUser();
-            // An agent run does not raise without the lookup, and Ollama's
-            // own count is the typed reason; Chat keeps the lookup's error.
-            if (!opts.enforceContextWindow) throw error;
-            throw new ContextTooSmallError({
-              code: "context-too-small",
-              promptTokens: overflow.requested,
-              answerTokens: answerBudget,
-              neededTokens: overflow.requested + answerBudget,
-              limitTokens: overflow.available,
-              model,
-              sentToProvider: true,
-            });
-          }
+          const readRetryShow = async (): Promise<OllamaShowContext | undefined> => {
+            try {
+              return await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+            } catch (error) {
+              if (opts.signal?.aborted) throw stoppedByUser();
+              // An agent run does not raise without the lookup, and Ollama's
+              // own count is the typed reason; Chat keeps the lookup's error.
+              if (!opts.enforceContextWindow) throw error;
+              throw new ContextTooSmallError({
+                code: "context-too-small",
+                promptTokens: overflow.requested,
+                answerTokens: answerBudget,
+                neededTokens: overflow.requested + answerBudget,
+                limitTokens: overflow.available,
+                model,
+                sentToProvider: true,
+              });
+            }
+          };
+          let retryShow = await readRetryShow();
           if (opts.signal?.aborted) throw stoppedByUser();
+          // The model may have been replaced under its name during the lookup:
+          // the retry gets the think value of the model installed now. When
+          // the list then names another revision than the lookup saw, the
+          // lookup is read again, once, so the context and pin are that model's.
+          await settleInstalledModel();
+          const listedForRetry = ollamaModelRevisions.get(familyKey(endpoint, installedModel));
+          if (retryShow?.revision !== undefined && listedForRetry !== undefined && !sameRevision(retryShow.revision, listedForRetry)) {
+            retryShow = await readRetryShow();
+            if (opts.signal?.aborted) throw stoppedByUser();
+          }
           // A retry lookup for the same revision that omits something keeps
           // what the first lookup saw.
-          const sameRevision = retryShow?.revision === undefined || retryShow.revision === sized?.revision;
-          modelMax = retryShow?.modelMaxContext ?? (sameRevision ? sized?.modelMaxContext : undefined);
+          const retrySameRevision = retryShow?.revision === undefined || retryShow.revision === sized?.revision;
+          modelMax = retryShow?.modelMaxContext ?? (retrySameRevision ? sized?.modelMaxContext : undefined);
           if (retryShow?.revision !== undefined) requestRevision = retryShow.revision;
-          // The model may have been replaced under its name during the lookup:
-          // the retry gets the think value of the model installed now.
-          await settleInstalledModel();
           captureThink();
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           // An agent run holds a pinned model to its pin, on the retry too.
           // Ollama counted more than the estimate, so the request did not fit.
           // A retry lookup without a pin for the same revision keeps the pin the
           // first lookup saw.
-          const pin = retryShow?.pinnedNumCtx ?? (sameRevision ? sized?.pinnedNumCtx : undefined);
+          const pin = retryShow?.pinnedNumCtx ?? (retrySameRevision ? sized?.pinnedNumCtx : undefined);
           // That the model is unpinned carries over from the first lookup only
           // for a revision both lookups name.
           const pinKnown = pin !== undefined || retryShow?.pinKnown === true ||
@@ -556,7 +582,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           retry = { requested: overflow.requested, numCtx };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
-          [response, detail] = await sendWithThinkFallback(numCtx);
+          [response, detail, numCtx] = await sendWithThinkFallback(numCtx);
           if (response.ok) raisedCtx = numCtx;
         }
         if (!response.ok) {
