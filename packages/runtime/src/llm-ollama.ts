@@ -1028,12 +1028,16 @@ function recordFamily(key: string, show: unknown): void {
   const data = typeof show === "object" && show !== null
     ? show as { digest?: unknown; modified_at?: unknown; details?: { family?: unknown }; model_info?: Record<string, unknown> }
     : {};
-  if (typeof data.modified_at === "string" && data.modified_at.length > 0) ollamaModelRevisions.set(key, data.modified_at);
+  const previousRevision = ollamaModelRevisions.get(key);
+  const revision = typeof data.modified_at === "string" && data.modified_at.length > 0 ? data.modified_at : undefined;
+  if (revision !== undefined) ollamaModelRevisions.set(key, revision);
   else ollamaModelRevisions.delete(key);
   // Another version under this name: what Ollama's answers showed about the
-  // one before no longer applies.
+  // one before no longer applies. Without a digest (a server alias read with
+  // /api/show), a changed revision is another version.
   const digest = typeof data.digest === "string" ? data.digest : undefined;
-  if (ollamaModelDigests.get(key) !== digest) {
+  const revisionChanged = digest === undefined && previousRevision !== undefined && revision !== undefined && !sameRevision(previousRevision, revision);
+  if (ollamaModelDigests.get(key) !== digest || revisionChanged) {
     ollamaThinkLearned.delete(key);
     nextGeneration(key);
   }

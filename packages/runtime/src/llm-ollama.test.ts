@@ -2878,6 +2878,40 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("sizes a fallback resend again when a server alias now points to another model", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          // An alias Ollama does not list: first to gpt-oss, then to a model pinned to 4,096.
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", details: { family: "llama" }, parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", details: { family: "gptoss" }, modelfile: "FROM gpt-oss:20b", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        replaced = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"team-alias:latest" does not support thinking' }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "team-alias:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
     let version: string | undefined = "0.17.7";
     const sent: unknown[] = [];
