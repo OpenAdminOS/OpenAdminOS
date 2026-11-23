@@ -112,8 +112,8 @@ function isRemoteOllamaTag(entry: NonNullable<OllamaTagsResponse["models"]>[numb
  * remote-backed, or the list cannot be read: an on-device retry that cannot
  * be confirmed is not sent.
  */
-export async function ollamaModelIsOnDevice(model: string): Promise<boolean> {
-  const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
+export async function ollamaModelIsOnDevice(model: string, address = resolveOllamaEndpoint()): Promise<boolean> {
+  const endpoint = address.replace(/\/$/, "");
   if (!classifyOllamaEndpoint(endpoint).isLocal || isOllamaCloudModel(model)) return false;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);

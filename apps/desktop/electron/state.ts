@@ -1,4 +1,4 @@
-import { providerForModel } from "@openadminos/agent-sdk";
+import { isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -36,6 +36,8 @@ import {
   applyManagedPolicy,
   applyManagedPolicyToProviders,
   managedPolicyForRenderer,
+  managedOllamaCloudMessage,
+  policyRestrictsOllamaCloud,
   markManagedRegistrations,
   policyRegistrationKey,
   registrationKey,
@@ -9267,14 +9269,22 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw new ProviderEndpointChangedError();
       }
     }
+    const restrictOllamaCloud = providerId === "ollama" && policyRestrictsOllamaCloud(this.managedPolicy);
+    const ollama = restrictOllamaCloud ? (await this.detectProviders()).find((entry) => entry.id === "ollama") : undefined;
+    if (ollama?.isLocal && model && model !== lockedModel && isRemoteBackedModel(ollama, model)) {
+      throw new ManagedPolicyError(managedOllamaCloudMessage(model));
+    }
     if (this.llmFactory) {
       // Test seam only: it returns before the in-branch endpoint comparison
       // below, so only the check above applies to it. Production adapters
       // must be built in the branches below, not through a factory like this.
       return await this.llmFactory(providerId, model);
     }
-    const providers = await this.listProviders();
+    const providers = ollama ? applyManagedPolicyToProviders([ollama], this.managedPolicy) : await this.listProviders();
     const provider = providers.find((entry) => entry.id === providerId);
+    if (provider?.id === "ollama" && provider.isLocal && restrictOllamaCloud && provider.detail === managedOllamaCloudMessage()) {
+      throw new ManagedPolicyError(provider.detail);
+    }
     const providerReady =
       provider?.status === "connected" ||
       (provider?.id === "azure-openai" && provider.status === "available");
@@ -9289,11 +9299,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       requireBound(endpoint.replace(/\/$/, ""));
       // The adapter reads the model's current family from /api/tags before
       // each request, so a model replaced under its name gets its own think value.
-      const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
-      if (defaultModel) {
-        options.defaultModel = defaultModel;
-      }
-      return createOllamaLlm(options);
+      return createOllamaLlm({
+        endpoint,
+        ...(defaultModel ? { defaultModel } : {}),
+        ...(restrictOllamaCloud && provider.isLocal ? {
+          beforeSend: async (requestedModel) => {
+            if (requestedModel === lockedModel && isRemoteBackedModel(provider, requestedModel)) return;
+            if (!(await ollamaModelIsOnDevice(requestedModel, endpoint))) {
+              throw new ManagedPolicyError(managedOllamaCloudMessage(requestedModel));
+            }
+          },
+        } : {}),
+      });
     }
     if (providerId === "apple-foundation") {
       return createAppleFoundationLlm({ defaultModel });

@@ -164,6 +164,30 @@ describe("managed policy: providers", () => {
     }
   });
 
+  it("blocks cloud aliases under a local-only list unless IT locks that model", async () => {
+    const alias = "cloud-writer:latest";
+    const providers = () => readyProviders().map((provider) => provider.id === "ollama" ? {
+      ...provider, models: [alias, "writer:latest"], defaultModel: alias, remoteModels: [alias],
+    } : provider);
+    const fixture = await makeFixture({ policy: await policyOf(LOCAL_ONLY), providers });
+    try {
+      const ollama = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
+      assert.deepEqual(ollama?.models, ["writer:latest"]);
+      assert.equal(ollama?.defaultModel, "writer:latest");
+      await assert.rejects(buildLlm(fixture.store, "ollama", alias), /policy\.json.*cloud-writer:latest/);
+      assert.deepEqual(fixture.llmCalls, []);
+
+      await fixture.relaunch(await policyOf({ ...LOCAL_ONLY, defaultProvider: "ollama", defaultModel: alias }));
+      const locked = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
+      assert.deepEqual(locked?.models, [alias]);
+      assert.equal(locked?.defaultModel, alias);
+      await buildLlm(fixture.store, "ollama", alias);
+      assert.deepEqual(fixture.llmCalls, [["ollama", alias]]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("sets and locks the provider and model on a fresh install", async () => {
     const fixture = await makeFixture({ policy: await policyOf({ defaultProvider: "lm-studio", defaultModel: "lm-studio-other", skipFirstRunScan: true }) });
     try {

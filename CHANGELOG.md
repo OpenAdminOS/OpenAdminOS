@@ -84,6 +84,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- A managed provider list with no hosted providers blocks Ollama Cloud unless IT explicitly locks a cloud model.
+
 - Ollama Cloud models show where prompts are processed and require the usual hosted Chat confirmation. On-device reruns only offer models that run on this device.
 
 - Chat with a local model keeps a prose answer that quotes a tool call as an example, reads a final answer that also names a tool as the answer, no longer flashes a raw tool request while the cached-data answer streams, and never shows an unreadable device sync time as a date.

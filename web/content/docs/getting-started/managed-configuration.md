@@ -84,7 +84,7 @@ Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `rele
 - **Unlocked provider or model.** Applies until the admin picks another one, then the admin's choice stays. A new unlocked default in a changed policy replaces only the policy's earlier default, never the admin's own choice.
 - **Unlocked app registration.** Added to the saved registrations once. If the admin removes it, it stays removed until the policy names a different registration.
 
-`allowedProviders`, `allowedPublicReferences`, `novaVoiceModes`, `novaMemory` and every `false` in `novaCapabilities` are always enforced, locked or not. The first-run scan checks only allowed providers, and with a `defaultProvider` it never selects another one for you.
+`allowedProviders`, `allowedPublicReferences`, `novaVoiceModes`, `novaMemory` and every `false` in `novaCapabilities` are always enforced, locked or not. When `allowedProviders` lists no hosted provider, OpenAdminOS also hides and blocks Ollama Cloud models on a local Ollama server, including aliases. A cloud model explicitly locked by IT is allowed. The first-run scan checks only allowed providers, and with a `defaultProvider` it never selects another one for you.
 
 ### Nova
 

@@ -13,6 +13,8 @@ import { checkPromptFit, DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
 export interface OllamaProviderOptions {
   endpoint?: string;
   defaultModel?: string;
+  /** Verify that the actual model is allowed before each prompt send. */
+  beforeSend?: (model: string) => Promise<void>;
   timeoutMs?: number;
   /** How long reading the model's context limit may take (tests). */
   lookupTimeoutMs?: number;
@@ -225,6 +227,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const send = async (numCtx: number | undefined): Promise<Response> => {
         lastSentCtx = numCtx;
         const payload = numCtx === undefined ? body : { ...body, options: { ...optionsPayload, num_ctx: numCtx } };
+        if (options.beforeSend) {
+          await options.beforeSend(model);
+          const aborted = abortError();
+          if (aborted) throw aborted;
+        }
         let response: Response;
         try {
           response = await fetch(url, {

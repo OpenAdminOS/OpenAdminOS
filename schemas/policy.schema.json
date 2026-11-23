@@ -16,7 +16,7 @@
     },
     "allowedProviders": {
       "type": "array",
-      "description": "The AI providers this device may use. Any other provider is not offered or selectable, and the app refuses it for Chat, agents and provider tests.",
+      "description": "The AI providers this device may use. Any other provider is not offered or selectable, and the app refuses it for Chat, agents and provider tests. When the list includes no hosted provider, Ollama Cloud models on a local Ollama server are blocked unless IT explicitly locks the cloud model.",
       "items": { "$ref": "#/$defs/providerId" },
       "uniqueItems": true
     },
