@@ -56,6 +56,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- If you use Ollama on this device, OpenAdminOS checks with Ollama before each send and stops if it cannot confirm the model is on this device.
 - The Splashtop Docs and Splashtop Agentic Packr Docs references name OpenAdminOS as their publisher, and the install footer of a built-in reference names the host it reads; the earlier names ending in MCP still work in Chat.
 - Nightly release notes list only what that nightly adds: its pull requests and commits, and the changelog entries added since the previous release, not the whole unreleased changelog.
 - Claude Code and Codex requests no longer stop at 180 seconds in total: they end after a silence limit (90 seconds for Claude Code, 180 for Codex, also before the first output) or a 15 minute cap, each with its own error. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` raise the silence limit; the existing `_TIMEOUT_MS` variables set the cap. A value above 2147483647 ms, the longest a Node timer waits, is ignored. Time a slow consumer of the stream spends on a chunk does not count as silence.
