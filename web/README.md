@@ -85,12 +85,20 @@ approval, and missing launch configuration.
 The admin page can export CSVs for manual prize contact and run each draw once
 after its eligibility window closes. The audit snapshot lists participant IDs
 and weights, the SHA-256 digest and the 32-byte seed needed to replay the draw.
-The purge control becomes available 90 days after the grand draw. Schedule an
-admin to run it when due. Purging also removes non-winning admin accounts, so
-export any records you need before running it.
+When a winner account is deleted before prizes are fulfilled, the admin can
+draw a replacement for that slot from the original snapshot. Earlier winners
+are excluded, and the replacement has its own linked audit record. Winners CSVs
+show deleted accounts explicitly and track the current winner for each slot.
 
-Run `npm run test` in `web/` on Node.js 22 to check the campaign rules, the draw
-algorithm and token primitives.
+The non-winner purge opens 90 days after the grand draw. Set the prize fulfilment
+date in the admin page and delete winner records once that date arrives in Berlin.
+Either purge can remove an admin account, so export the records before purging.
+
+Run `npm run test` and `npm run test:advent-routes` in `web/` on Node.js 22 for
+unit and mocked Next.js route tests. Run `supabase/advent/check-migration.sh`
+from `web/` to exercise the migration in a disposable PostgreSQL cluster.
+Point `ADVENT_POSTGRES_BIN` at a PostgreSQL bin directory if the binaries are
+outside the usual path. The cluster needs the `citext` extension.
 
 ### Daily door reminders
 

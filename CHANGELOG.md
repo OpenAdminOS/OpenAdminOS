@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add Advent launch readiness checks, confirmed signup, session revocation, and audited winner replacement and retention controls.
+
 - Add the off-by-default Advent of Admin website campaign with 24 guided desktop activities, participation tracking, badges, prize draw administration, and opt-in daily door reminders.
 
 - Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review (mockup 36).

@@ -3,12 +3,13 @@ import { notFound } from "next/navigation";
 
 import { SITE_URL } from "~/app/seo";
 import { doors } from "~/content/advent/doors";
-import { drawOpens, draws, RETENTION_MS } from "~/lib/advent/admin";
+import { DELETED_WINNER, drawOpens, draws, retention, RETENTION_MS, winnerAccounts, winnerSlots } from "~/lib/advent/admin";
+import type { DrawAccount, Retention } from "~/lib/advent/admin";
 import { currentAdmin, doorStats, rpc } from "~/lib/advent/db";
 import type { Draw } from "~/lib/advent/db";
 import { launchReadiness, requiresAnswer } from "~/lib/advent/readiness";
 import { renderReminder } from "~/lib/advent/reminders";
-import { campaignDoorForDate, campaignNow } from "~/lib/advent/time";
+import { berlinDateKey, campaignDoorForDate, campaignNow } from "~/lib/advent/time";
 import { ActionForm } from "../ActionForm";
 import { LocalTime } from "../LocalTime";
 import { AdventTitle, field, heading, Notice, STORAGE_UNAVAILABLE, textLink } from "../shared";
@@ -28,13 +29,14 @@ export default async function AdminPage() {
   const state = await loadAdmin();
   const grand = state.records?.find((record) => record.kind === "grand");
   const purgeAt = grand ? Date.parse(grand.created_at) + RETENTION_MS : null;
+  const prizesFinalized = Boolean(state.retention?.prizes_fulfilled_at && state.retention.prizes_fulfilled_at <= berlinDateKey(now));
   const reminders = new Map(state.reminders?.days.map((day) => [day.day, day]));
 
   return (
     <div className="mx-auto max-w-5xl space-y-9">
       <Link href="/advent/me" className={textLink}>My Advent</Link>
       <AdventTitle title="Campaign admin" label="Advent of Admin" />
-      {!state.stats || !state.records || !state.reminders ? <Notice tone="error">{STORAGE_UNAVAILABLE}</Notice> : (
+      {!state.stats || !state.records || !state.reminders || !state.retention || !state.winners ? <Notice tone="error">{STORAGE_UNAVAILABLE}</Notice> : (
         <>
           <LaunchReadiness status={launchReadiness(doors, state.stats, process.env)} />
           <section id="answers" className="scroll-mt-24 space-y-4" aria-labelledby="answers-title">
@@ -78,12 +80,12 @@ export default async function AdminPage() {
                       <td className="p-2 font-mono">{stat.on_time}</td>
                       <td className="p-2 font-mono">{stat.day === 22 || stat.day === 24 ? <span aria-label="No written check">·</span> : stat.answer_count}</td>
                       <td className="p-2 font-mono">{reminders.get(stat.day)?.sent ?? 0}</td>
-                      <td className="p-2"><DrawControls day={stat.day} now={now} record={state.records.find((item) => item.day === stat.day)} /></td>
+                      <td className="p-2"><DrawControls day={stat.day} now={now} record={state.records.find((item) => item.day === stat.day)} records={state.records} winners={state.winners} prizesFinalized={prizesFinalized} /></td>
                     </tr>
                   ))}
                   <tr className="border-b border-brand-line align-top">
                     <th scope="row" colSpan={5} className="p-2 font-medium">Grand draw</th>
-                    <td className="p-2"><DrawControls day={null} now={now} record={grand} /></td>
+                    <td className="p-2"><DrawControls day={null} now={now} record={grand} records={state.records} winners={state.winners} prizesFinalized={prizesFinalized} /></td>
                   </tr>
                 </tbody>
               </table>
@@ -92,14 +94,7 @@ export default async function AdminPage() {
 
           <ReminderPreview now={now} reminders={state.reminders} />
 
-          <section className="space-y-4 border-t border-brand-line pt-6" aria-labelledby="purge">
-            <h2 id="purge" className={heading}>Participant retention</h2>
-            <p className="text-sm leading-6 text-brand-muted">
-              {purgeAt === null ? "Purge becomes available 90 days after the grand draw."
-                : <>Purge opens <LocalTime timestamp={purgeAt} showYear />.</>} It immediately deletes accounts that won no prize.
-            </p>
-            <ActionForm action="purge" label="Purge non-winner accounts" quiet disabled={purgeAt === null || now < purgeAt} refreshOnSuccess />
-          </section>
+          <ParticipantRetention state={state.retention} now={now} purgeAt={purgeAt} hasGrandDraw={Boolean(grand)} />
         </>
       )}
     </div>
@@ -127,32 +122,72 @@ function LaunchReadiness({ status }: { status: ReturnType<typeof launchReadiness
   );
 }
 
-function DrawControls({ day, now, record }: { day: number | null; now: number; record?: Draw }) {
+function ParticipantRetention({ state, now, purgeAt, hasGrandDraw }: {
+  state: Retention; now: number; purgeAt: number | null; hasGrandDraw: boolean;
+}) {
+  const date = state.prizes_fulfilled_at;
+  const canDeleteWinners = date !== null && date <= berlinDateKey(now) && !state.winners_deleted_at;
+
+  return (
+    <section id="purge" className="scroll-mt-24 space-y-5 border-t border-brand-line pt-6" aria-labelledby="purge-title">
+      <h2 id="purge-title" className={heading}>Participant retention</h2>
+      <div className="space-y-3">
+        <p className="text-sm leading-6 text-brand-muted">
+          {purgeAt === null ? "Purge becomes available 90 days after the grand draw."
+            : <>Purge opens <LocalTime timestamp={purgeAt} showYear />.</>} It immediately deletes accounts that won no prize.
+        </p>
+        <ActionForm action="purge" label="Purge non-winner accounts" quiet disabled={purgeAt === null || now < purgeAt} refreshOnSuccess />
+      </div>
+      <div className="max-w-xl space-y-3 border-t border-brand-line pt-5">
+        <p className="text-sm leading-6 text-brand-muted">
+          Winner records can be deleted from the prize fulfilment date, using Berlin time.
+          {state.winners_deleted_at && <> Deleted <LocalTime timestamp={Date.parse(state.winners_deleted_at)} showYear />.</>}
+        </p>
+        <ActionForm action="fulfil-prizes" label="Save fulfilment date" quiet disabled={!hasGrandDraw || Boolean(state.winners_deleted_at)}>
+          <label className="block text-sm font-medium">
+            Prizes fulfilled on
+            <input type="date" name="prizes_fulfilled_at" defaultValue={date ?? ""} className={`${field} mt-2 block max-w-xs`} required />
+          </label>
+        </ActionForm>
+        <ActionForm action="delete-winners" label="Delete winner records" quiet disabled={!canDeleteWinners} refreshOnSuccess />
+      </div>
+    </section>
+  );
+}
+
+function DrawControls({ day, now, record, records, winners, prizesFinalized }: {
+  day: number | null; now: number; record?: Draw; records: Draw[]; winners: Map<string, DrawAccount>; prizesFinalized: boolean;
+}) {
   const opens = drawOpens(day);
-  const open = now >= opens;
   const target = day === null ? "grand" : String(day);
   const csv = `/api/advent/export?draw=${target}`;
 
-  if (!open) return <span className="text-xs text-brand-muted">Opens <LocalTime timestamp={opens} showYear={day === null} /></span>;
+  if (now < opens) return <span className="text-xs text-brand-muted">Opens <LocalTime timestamp={opens} showYear={day === null} /></span>;
   return (
     <div className="space-y-3">
       {record ? (
-        <details className="max-w-md space-y-2">
-          <summary className="cursor-pointer font-medium">Audit record · {record.winner_participant_ids.length} drawn</summary>
-          <dl className="space-y-2 break-all text-xs text-brand-muted">
-            <div><dt>Record</dt><dd className="font-mono">{record.id}</dd></div>
-            <div><dt>Run by</dt><dd>{record.created_by_email} · <LocalTime timestamp={Date.parse(record.created_at)} showYear /></dd></div>
-            <div><dt>Eligible participants</dt><dd>{record.eligible_count}</dd></div>
-            <div><dt>Eligible list SHA-256</dt><dd className="font-mono">{record.eligible_list_sha256}</dd></div>
-            <div><dt>Random bytes</dt><dd className="font-mono">{record.random_bytes_hex}</dd></div>
-            <div><dt>Winner IDs in prize order</dt><dd className="font-mono">{record.winner_participant_ids.join(", ") || "No eligible participants"}</dd></div>
-          </dl>
-          <details className="text-xs text-brand-muted">
-            <summary className="cursor-pointer">Eligibility snapshot (participant ID, entries)</summary>
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all pt-1 font-mono">{record.eligible_list.map(({ id, entries }) => `${id},${entries}\n`)}</pre>
-          </details>
-        </details>
-      ) : (
+        <>
+          <DrawAudit record={record} label={`Audit record · ${record.winner_participant_ids.length} drawn`} />
+          {winnerSlots(record, records).map(({ slot, id, history }) => {
+            const winner = winners.get(id);
+            return (
+              <section key={slot} className="max-w-md space-y-2 border-l border-brand-line pl-2 text-xs">
+                <p className="font-medium">Prize {slot}{winner ? ` · ${winner.handle}` : ""}</p>
+                {!winner && (
+                  <p className="text-brand-muted">{prizesFinalized ? "Account deleted after the draw." : DELETED_WINNER}</p>
+                )}
+                {!winner && !prizesFinalized && (
+                  <ActionForm action="replace-winner" label={`Replace winner for prize ${slot}`} quiet>
+                    <input type="hidden" name="original" value={record.id} />
+                    <input type="hidden" name="slot" value={slot} />
+                  </ActionForm>
+                )}
+                {history.map((replacement) => <DrawAudit key={replacement.id} record={replacement} label="Replacement draw audit" />)}
+              </section>
+            );
+          })}
+        </>
+      ) : prizesFinalized ? <span className="text-xs text-brand-muted">Prizes fulfilled</span> : (
         <ActionForm action="draw" label={day === null ? "Run grand draw" : `Draw door ${day}`} quiet>
           <input type="hidden" name="draw" value={target} />
         </ActionForm>
@@ -162,6 +197,28 @@ function DrawControls({ day, now, record }: { day: number | null; now: number; r
         {record && <a href={`${csv}&list=winners`} className={textLink}>Winners CSV</a>}
       </div>
     </div>
+  );
+}
+
+function DrawAudit({ record, label }: { record: Draw; label: string }) {
+  return (
+    <details className="max-w-md space-y-2">
+      <summary className="cursor-pointer font-medium">{label}</summary>
+      <dl className="space-y-2 break-all text-xs text-brand-muted">
+        <div><dt>Record</dt><dd className="font-mono">{record.id}</dd></div>
+        {record.original_draw_id && <div><dt>Original draw</dt><dd className="font-mono">{record.original_draw_id}</dd></div>}
+        {record.replaces_draw_id && <div><dt>Replaces winner from</dt><dd className="font-mono">{record.replaces_draw_id}</dd></div>}
+        <div><dt>Run by</dt><dd>{record.created_by_email} · <LocalTime timestamp={Date.parse(record.created_at)} showYear /></dd></div>
+        <div><dt>Eligible participants</dt><dd>{record.eligible_count}</dd></div>
+        <div><dt>Eligible list SHA-256</dt><dd className="font-mono">{record.eligible_list_sha256}</dd></div>
+        <div><dt>Random bytes</dt><dd className="font-mono">{record.random_bytes_hex}</dd></div>
+        <div><dt>Winner IDs in prize order</dt><dd className="font-mono">{record.winner_participant_ids.join(", ") || "No eligible participants"}</dd></div>
+      </dl>
+      <details className="text-xs text-brand-muted">
+        <summary className="cursor-pointer">Eligibility snapshot (participant ID, entries)</summary>
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all pt-1 font-mono">{record.eligible_list.map(({ id, entries }) => `${id},${entries}\n`)}</pre>
+      </details>
+    </details>
   );
 }
 
@@ -199,10 +256,11 @@ function ReminderPreview({ now, reminders }: { now: number; reminders: ReminderS
 
 async function loadAdmin() {
   try {
-    const [stats, records, reminders] = await Promise.all([
-      doorStats(), draws(), rpc<ReminderStats>("advent_reminder_stats"),
+    const [stats, records, reminders, retentionState] = await Promise.all([
+      doorStats(), draws(), rpc<ReminderStats>("advent_reminder_stats"), retention(),
     ]);
-    return { stats, records, reminders };
+    const winners = await winnerAccounts(records);
+    return { stats, records, reminders, retention: retentionState, winners };
   } catch {
     return {};
   }

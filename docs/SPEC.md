@@ -141,16 +141,25 @@ Microsoft certification exam vouchers. A qualifying referral who completes door
 The implementation lives on the marketing website and adds no desktop app
 changes or app telemetry. It uses EU-region Supabase, website-issued magic links
 sent by Resend, and a strictly necessary session cookie as its only cookie.
-Accepted answers are stored only as hashes in the database. The campaign is
+Accepted answers are stored only as keyed HMAC-SHA256 hashes in the database. The campaign is
 disabled by default behind `ADVENT_ENABLED`, and registration also requires
 `ADVENT_RULES_APPROVED`.
 
 Participants can opt in to daily reminders separately from release emails.
-An authenticated scheduled POST checks the current Berlin date after the door
+An authenticated scheduled GET or POST checks the current Berlin date after the door
 opens, skips participants who already completed it, and claims each participant
 once per door before calling Resend. The default is a count-only dry run.
 `ADVENT_REMINDERS_SEND` explicitly enables delivery. Reminder emails use a signed
 unsubscribe link and a sender domain with open and click tracking disabled.
+
+Signup details and consent are confirmed from the email link before creating an
+account. Sign-out revokes all active sessions for the participant. The admin
+readiness panel lists draft and incomplete doors, missing accepted answers,
+rules approval and missing configuration. Scheduled cleanup removes expired
+login links and wrong-answer attempts. Draw snapshots preserve the original
+eligible entries and support audited replacements for a deleted winner.
+Non-winner records are purged after 90 days and winner records after prize
+fulfilment.
 
 ### Marketing website canonical host
 

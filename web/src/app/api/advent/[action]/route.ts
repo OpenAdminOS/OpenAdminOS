@@ -1,7 +1,7 @@
 import { after, type NextRequest, NextResponse } from "next/server";
 
 import { SITE_URL } from "~/app/seo";
-import { drawCsv, drawOpens, recordDraw } from "~/lib/advent/admin";
+import { drawCsv, drawOpens, recordDraw, recordReplacement } from "~/lib/advent/admin";
 import { SESSION_COOKIE, SESSION_SECONDS, signSession } from "~/lib/advent/auth";
 import { reserveWrongAnswer } from "~/lib/advent/answer-rate";
 import { hashAnswer, normalizeAnswer } from "~/lib/advent/answers";
@@ -14,7 +14,7 @@ import type { Participant } from "~/lib/advent/db";
 import { validHandle } from "~/lib/advent/identity";
 import { allowLoginEmail, consumeLogin, issueLoginLink, parseEmail, previewLogin } from "~/lib/advent/login";
 import type { SignupConfirmation, SignupDraft } from "~/lib/advent/login";
-import { CAMPAIGN_CLOSE, campaignNow, doorState, isOnTime, parseDay } from "~/lib/advent/time";
+import { CAMPAIGN_CLOSE, campaignNow, doorState, isOnTime, parseDay, validDateKey } from "~/lib/advent/time";
 import { doors } from "~/content/advent/doors";
 import { requiresAnswer } from "~/lib/advent/readiness";
 
@@ -25,7 +25,7 @@ const PRIVATE = { "Cache-Control": "private, no-store", "Referrer-Policy": "no-r
 const SIGN_IN_MESSAGE = "If that address can sign in, a link will arrive shortly. It expires in 15 minutes.";
 const ANONYMOUS = new Set(["sign-in", "sign-up", "verify", "verify-preview"]);
 const PARTICIPANT = new Set(["complete", "settings", "sign-out", "delete"]);
-const ADMIN = new Set(["set-answers", "draw", "purge"]);
+const ADMIN = new Set(["set-answers", "draw", "replace-winner", "fulfil-prizes", "delete-winners", "purge"]);
 
 function success(message?: string, redirect?: string) {
   return NextResponse.json({ message, redirect }, { headers: PRIVATE });
@@ -100,6 +100,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
         case "delete": return await deleteAccount(account, body);
         case "set-answers": return await setAnswers(body);
         case "draw": return await runDraw(account, body, now);
+        case "replace-winner": return await replaceWinner(account, body, now);
+        case "fulfil-prizes": {
+          const date = value(body, "prizes_fulfilled_at");
+          if (!validDateKey(date)) return fail(400, "Enter a valid prize fulfilment date.");
+          const set = await rpc<boolean>("advent_set_prizes_fulfilled", { p_date: date });
+          return set ? success(undefined, "/advent/admin#purge")
+            : fail(409, "Choose a date on or after the grand draw. You cannot change it after deleting winner records.");
+        }
+        case "delete-winners": {
+          const removed = await rpc<number | null>("advent_purge_winners", { p_now: new Date(now).toISOString() });
+          return removed === null
+            ? fail(409, "Winner records can be deleted after the prize fulfilment date.")
+            : success(`Winner accounts removed: ${removed}.`);
+        }
         case "purge": {
           const removed = await rpc<number | null>("advent_purge", { p_now: new Date(now).toISOString() });
           return removed === null
@@ -307,12 +321,32 @@ async function runDraw(account: Participant, body: Payload, now: number) {
   if (!day && target !== "grand") return fail(400, "Choose a daily draw or the grand draw.");
   if (now < drawOpens(day)) return fail(409, "The eligibility window for this draw is still open.");
   try {
-    await recordDraw(day, now, account.email);
+    const status = await recordDraw(day, now, account.email);
+    if (status === "fulfilled") return fail(409, "Prizes have been marked fulfilled.");
+    if (status !== "ok") return fail(409, "The draw could not be recorded. Reload the admin page and try again.");
   } catch (error) {
     if (error instanceof AdventStorageError && error.code === "23505") return fail(409, "This draw already has an audit record. Reload to see it.");
     throw error;
   }
   return success(undefined, "/advent/admin#draws");
+}
+
+async function replaceWinner(account: Participant, body: Payload, now: number) {
+  const original = value(body, "original");
+  const slot = value(body, "slot");
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(original) || !/^[1-3]$/.test(slot)) {
+    return fail(400, "Choose a prize slot on an existing draw.");
+  }
+
+  const result = await recordReplacement(original, Number(slot), now, account.email);
+  switch (result) {
+    case "ok": return success(undefined, "/advent/admin#draws");
+    case "occupied": return fail(409, "This prize slot still has a winner.");
+    case "empty": return fail(409, "No eligible participants remain for this prize.");
+    case "fulfilled": return fail(409, "Prizes have been marked fulfilled.");
+    case "invalid": return fail(404, "This prize slot could not be found.");
+    default: return fail(409, "The eligible snapshot changed. Reload the admin page and try again.");
+  }
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -323,10 +357,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const list = request.nextUrl.searchParams.get("list");
     const day = parseDay(target);
     if ((!day && target !== "grand") || (list !== "eligible" && list !== "winners")) return missing();
-    if (campaignNow(process.env.ADVENT_NOW) < drawOpens(day)) {
+    const now = campaignNow(process.env.ADVENT_NOW);
+    if (now < drawOpens(day)) {
       return fail(409, "The eligibility window for this draw is still open.");
     }
-    const csv = await drawCsv(day, list);
+    const csv = await drawCsv(day, list, now);
     if (csv === null) return fail(404, "This draw has no winners export yet.");
     return new Response(csv, {
       headers: {

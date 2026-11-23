@@ -60,3 +60,19 @@ export function campaignNow(override?: string, environment = process.env.NODE_EN
   }
   return Date.now();
 }
+
+
+const berlinDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CAMPAIGN_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+});
+
+export function berlinDateKey(now: number) {
+  const parts = berlinDateFormatter.formatToParts(now);
+  return ["year", "month", "day"].map((name) => parts.find((part) => part.type === name)?.value).join("-");
+}
+
+export function validDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
+}

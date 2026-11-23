@@ -19,7 +19,7 @@ export type Completion = { day: number; completed_at: string; on_time: boolean }
 export type DoorStat = { day: number; completed: number; on_time: number; answer_count: number };
 export type Draw = {
   id: string;
-  kind: "daily" | "grand";
+  kind: "daily" | "grand" | "replacement";
   day: number | null;
   created_at: string;
   eligible_count: number;
@@ -28,6 +28,9 @@ export type Draw = {
   random_bytes_hex: string;
   winner_participant_ids: string[];
   created_by_email: string;
+  original_draw_id: string | null;
+  replaces_draw_id: string | null;
+  prize_slot: number | null;
 };
 
 export class AdventStorageError extends Error {

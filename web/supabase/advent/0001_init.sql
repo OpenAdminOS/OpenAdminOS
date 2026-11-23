@@ -2,6 +2,7 @@ begin;
 
 create schema if not exists extensions;
 create extension if not exists citext with schema extensions;
+grant usage on schema extensions to service_role;
 set local search_path = public, extensions;
 
 create table public.advent_participants (
@@ -109,12 +110,30 @@ create table public.advent_draws (
   random_bytes_hex text not null check (random_bytes_hex ~ '^[0-9a-f]{64}$'),
   winner_participant_ids uuid[] not null,
   created_by_email citext not null,
-  check ((kind = 'daily' and day is not null and day between 1 and 24)
-    or (kind = 'grand' and day is null)),
-  check (cardinality(winner_participant_ids) <= case when kind = 'daily' then 1 else 3 end)
+  original_draw_id uuid references public.advent_draws,
+  replaces_draw_id uuid references public.advent_draws,
+  prize_slot int,
+  check (
+    (kind = 'daily' and day is not null and day between 1 and 24
+      and num_nonnulls(original_draw_id, replaces_draw_id, prize_slot) = 0
+      and cardinality(winner_participant_ids) <= 1)
+    or (kind = 'grand' and day is null and num_nonnulls(original_draw_id, replaces_draw_id, prize_slot) = 0
+      and cardinality(winner_participant_ids) <= 3)
+    or (kind = 'replacement' and day is null and num_nonnulls(original_draw_id, replaces_draw_id, prize_slot) = 3
+      and prize_slot between 1 and 3 and cardinality(winner_participant_ids) = 1)
+  )
 );
 create unique index advent_daily_draw_once on public.advent_draws (day) where kind = 'daily';
 create unique index advent_grand_draw_once on public.advent_draws (kind) where kind = 'grand';
+create unique index advent_replace_vacancy_once on public.advent_draws (original_draw_id, prize_slot, replaces_draw_id);
+
+create table public.advent_retention (
+  campaign boolean primary key default true check (campaign),
+  prizes_fulfilled_at date,
+  winners_deleted_at timestamptz,
+  check (winners_deleted_at is null or prizes_fulfilled_at is not null)
+);
+insert into public.advent_retention default values;
 
 create table public.advent_reminder_sends (
   day int not null check (day between 1 and 24),
@@ -140,11 +159,12 @@ alter table public.advent_completions enable row level security;
 alter table public.advent_attempts enable row level security;
 alter table public.advent_feedback enable row level security;
 alter table public.advent_draws enable row level security;
+alter table public.advent_retention enable row level security;
 alter table public.advent_reminder_sends enable row level security;
 
 revoke all on table public.advent_participants, public.advent_login_tokens, public.advent_answers,
   public.advent_completions, public.advent_attempts, public.advent_feedback, public.advent_draws,
-  public.advent_reminder_sends
+  public.advent_reminder_sends, public.advent_retention
   from public, anon, authenticated, service_role;
 grant select, insert, update, delete on table public.advent_participants, public.advent_login_tokens
   to service_role;
@@ -153,6 +173,7 @@ grant select, insert on table public.advent_completions, public.advent_feedback,
   to service_role;
 grant select, insert, delete on table public.advent_attempts to service_role;
 grant select, insert, update on table public.advent_reminder_sends to service_role;
+grant select, update on table public.advent_retention to service_role;
 
 create function public.advent_issue_signup_token(
   p_hash text, p_expires_at timestamptz, p_requested_at timestamptz, p_pending jsonb
@@ -394,11 +415,130 @@ returns jsonb language sql stable security invoker set search_path = public, pg_
   ) as eligible;
 $$;
 
+create function public.advent_replacement_offer(p_original_id uuid, p_slot int, p_now timestamptz)
+returns jsonb language plpgsql stable security invoker set search_path = public, pg_temp as $$
+declare
+  original public.advent_draws;
+  previous_id uuid;
+  replaced_id uuid;
+  winner_id uuid;
+  replacement_winner uuid;
+  snapshot jsonb;
+begin
+  select * into original from public.advent_draws
+    where id = p_original_id and kind in ('daily', 'grand');
+  if not found or p_slot is null or p_slot < 1 or p_slot > cardinality(original.winner_participant_ids) then
+    return jsonb_build_object('status', 'invalid');
+  end if;
+  if exists (select 1 from public.advent_retention
+    where prizes_fulfilled_at <= (p_now at time zone 'Europe/Berlin')::date) then
+    return jsonb_build_object('status', 'fulfilled');
+  end if;
+
+  previous_id := original.id;
+  winner_id := original.winner_participant_ids[p_slot];
+  loop
+    select id, winner_participant_ids[1] into replaced_id, replacement_winner
+      from public.advent_draws
+      where original_draw_id = original.id and prize_slot = p_slot and replaces_draw_id = previous_id;
+    exit when not found;
+    previous_id := replaced_id;
+    winner_id := replacement_winner;
+  end loop;
+  if exists (select 1 from public.advent_participants where id = winner_id) then
+    return jsonb_build_object('status', 'occupied');
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('id', eligible.id, 'entries', eligible.entries)
+    order by eligible.id), '[]'::jsonb) into snapshot
+  from jsonb_to_recordset(original.eligible_list) as eligible(id uuid, entries int)
+  join public.advent_participants as p on p.id = eligible.id
+  where not exists (
+    select 1 from public.advent_draws as draw where eligible.id = any(draw.winner_participant_ids)
+  );
+  if jsonb_array_length(snapshot) = 0 then
+    return jsonb_build_object('status', 'empty');
+  end if;
+  return jsonb_build_object('status', 'ok', 'predecessor', previous_id, 'eligible', snapshot);
+end;
+$$;
+
+create function public.advent_record_draw(p_record jsonb)
+returns text language plpgsql security invoker set search_path = public, extensions, pg_temp as $$
+declare
+  draw_row public.advent_draws := jsonb_populate_record(null::public.advent_draws, p_record);
+  offer jsonb;
+begin
+  -- Serialize all prize and retention writes for this campaign.
+  perform pg_advisory_xact_lock(20261224);
+  if exists (select 1 from public.advent_retention
+    where prizes_fulfilled_at <= (draw_row.created_at at time zone 'Europe/Berlin')::date) then
+    return 'fulfilled';
+  end if;
+  if draw_row.kind = 'replacement' then
+    offer := public.advent_replacement_offer(draw_row.original_draw_id, draw_row.prize_slot, draw_row.created_at);
+    if offer->>'status' <> 'ok' then
+      return offer->>'status';
+    end if;
+    if draw_row.replaces_draw_id is distinct from (offer->>'predecessor')::uuid
+      or draw_row.eligible_list is distinct from offer->'eligible'
+      or not (draw_row.eligible_list @> jsonb_build_array(jsonb_build_object('id', draw_row.winner_participant_ids[1]))) then
+      return 'stale';
+    end if;
+  end if;
+
+  insert into public.advent_draws (
+    kind, day, created_at, eligible_count, eligible_list, eligible_list_sha256, random_bytes_hex,
+    winner_participant_ids, created_by_email, original_draw_id, replaces_draw_id, prize_slot
+  ) values (
+    draw_row.kind, draw_row.day, draw_row.created_at, draw_row.eligible_count,
+    draw_row.eligible_list, draw_row.eligible_list_sha256, draw_row.random_bytes_hex,
+    draw_row.winner_participant_ids, draw_row.created_by_email, draw_row.original_draw_id,
+    draw_row.replaces_draw_id, draw_row.prize_slot
+  );
+  return 'ok';
+end;
+$$;
+
+create function public.advent_set_prizes_fulfilled(p_date date)
+returns boolean language plpgsql security invoker set search_path = public, pg_temp as $$
+begin
+  perform pg_advisory_xact_lock(20261224);
+  update public.advent_retention set prizes_fulfilled_at = p_date where campaign
+    and winners_deleted_at is null and exists (
+      select 1 from public.advent_draws where kind = 'grand'
+        and p_date >= (created_at at time zone 'Europe/Berlin')::date
+    );
+  return found;
+end;
+$$;
+
+create function public.advent_purge_winners(p_now timestamptz)
+returns int language plpgsql security invoker set search_path = public, pg_temp as $$
+declare
+  removed int;
+begin
+  perform pg_advisory_xact_lock(20261224);
+  update public.advent_retention set winners_deleted_at = p_now where campaign
+    and winners_deleted_at is null and prizes_fulfilled_at <= (p_now at time zone 'Europe/Berlin')::date;
+  if not found then
+    return null;
+  end if;
+
+  delete from public.advent_participants as p where exists (
+    select 1 from public.advent_draws as draw where p.id = any(draw.winner_participant_ids)
+  );
+  get diagnostics removed = row_count;
+  return removed;
+end;
+$$;
+
 create function public.advent_purge(p_now timestamptz)
 returns int language plpgsql security invoker set search_path = public, pg_temp as $$
 declare
   removed int;
 begin
+  perform pg_advisory_xact_lock(20261224);
   if not exists (
     select 1 from public.advent_draws where kind = 'grand' and created_at + interval '2160 hours' <= p_now
   ) then
@@ -500,6 +640,8 @@ revoke execute on function public.advent_issue_signup_token(text, timestamptz, t
   public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
   public.advent_draw_candidates(int), public.advent_purge(timestamptz),
+  public.advent_replacement_offer(uuid, int, timestamptz), public.advent_record_draw(jsonb),
+  public.advent_set_prizes_fulfilled(date), public.advent_purge_winners(timestamptz),
   public.advent_reminder_eligible(int), public.advent_reminder_count(int),
   public.advent_reminder_claim(int, int), public.advent_reminder_record(int, jsonb),
   public.advent_reminder_stats()
@@ -513,6 +655,8 @@ grant execute on function public.advent_issue_signup_token(text, timestamptz, ti
   public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
   public.advent_draw_candidates(int), public.advent_purge(timestamptz),
+  public.advent_replacement_offer(uuid, int, timestamptz), public.advent_record_draw(jsonb),
+  public.advent_set_prizes_fulfilled(date), public.advent_purge_winners(timestamptz),
   public.advent_reminder_eligible(int), public.advent_reminder_count(int),
   public.advent_reminder_claim(int, int), public.advent_reminder_record(int, jsonb),
   public.advent_reminder_stats()

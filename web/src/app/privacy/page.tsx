@@ -343,21 +343,25 @@ function AdventPrivacy() {
         a record of each send attempt, including the door, send time and Resend
         message ID when available. Turn off reminders using the unsubscribe link
         in an email or in My Advent. You can also withdraw release email consent
-        in My Advent. To prevent abuse, a keyed
-        hash of your IP address is used for sign-in rate limiting in Upstash Redis
-        for at most one hour (Art. 6(1)(f) GDPR).
+        in My Advent. We keep the last consent wording version and time, and
+        record when you withdraw consent. To prevent abuse (Art. 6(1)(f) GDPR),
+        Upstash Redis uses keyed hashes of the email address and IP address to
+        rate limit sign-in requests, and a keyed IP hash to limit wrong answers.
+        Rate-limit entries cover at most one hour. The campaign database retains
+        wrong-answer attempt records for seven days, with daily cleanup.
       </p>
       <p className="mt-3">
-        Supabase stores the campaign records in an EU region. Resend sends sign-in links
-        and Vercel hosts the site. Plausible measures general marketing usage as described
+        Supabase stores the campaign records in an EU region. Resend sends
+        sign-in links and door reminders. Vercel hosts the site. Plausible measures general marketing usage as described
         above. The campaign pages do not send Plausible events.
       </p>
       <p className="mt-3">
-        Participants’ records are deleted 90 days after the grand draw, except winners’
-        records needed to fulfil prizes. Email consent records are kept while
-        you remain opted in and your account exists. Draw audit records retain participant
-        IDs and entry counts for verification. Those IDs can no longer be linked to your
-        campaign account once it is deleted. You can delete your account immediately
+        We delete non-winner accounts 90 days after the grand draw. We keep winner
+        records until prizes are fulfilled, then delete them. Consent and withdrawal
+        records are kept with your account. Draw audit records retain participant IDs,
+        entry counts and the administering email address for verification. Once a
+        participant account is deleted, its ID in the audit record has no campaign
+        account to link to. You can delete your account immediately
         from <Link href="/advent/me" className="text-link">My Advent</Link>.
       </p>
     </section>
