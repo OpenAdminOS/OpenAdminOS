@@ -110,12 +110,22 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
       // The installed model the name resolves to: what is known about the
       // model is kept under it, while the request sends the name as given.
-      let installedModel = await resolveOllamaModel(endpoint, model, opts.signal);
-      if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
-      if (options.refreshModelFamily !== false) {
-        await refreshOllamaModelFamily(endpoint, installedModel, undefined, opts.signal);
-        if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
-      }
+      // A newer version read that applied while the list was read decides.
+      const settleInstalledModel = async (): Promise<string> => {
+        let installed = await resolveOllamaModel(endpoint, model, opts.signal);
+        for (let pass = 0; pass < 2; pass += 1) {
+          if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
+          if (options.refreshModelFamily !== false) {
+            await refreshOllamaModelFamily(endpoint, installed, undefined, opts.signal);
+            if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
+          }
+          const now = ollamaInstalledModelNow(endpoint, model);
+          if (now === installed) break;
+          installed = now;
+        }
+        return installed;
+      };
+      let installedModel = await settleInstalledModel();
 
       // Each request to /api/chat gets its own controller and timeout, so a
       // retry is not charged for the time the first request and the model
@@ -283,12 +293,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // was built gets its own value first, and if it rejects that too, none.
         for (let resend = 0; resend < 2 && sent.status === 400 && body.think !== false && rejectsThinkLevel(text); resend += 1) {
           const previous = { model: installedModel, generation: sentGeneration, family: sentFamily };
-          installedModel = await resolveOllamaModel(endpoint, model, opts.signal);
-          if (opts.signal?.aborted) throw stoppedByUser();
-          if (options.refreshModelFamily !== false) {
-            await refreshOllamaModelFamily(endpoint, installedModel, undefined, opts.signal);
-            if (opts.signal?.aborted) throw stoppedByUser();
-          }
+          installedModel = await settleInstalledModel();
           const key = familyKey(endpoint, installedModel);
           const generation = ollamaModelGenerations.get(key) ?? 0;
           const family = ollamaModelFamilies.get(key);
@@ -330,12 +335,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (opts.signal?.aborted) throw stoppedByUser();
           // The model may have been replaced under its name during the lookup:
           // the retry gets the think value of the model installed now.
-          installedModel = await resolveOllamaModel(endpoint, model, opts.signal);
-          if (opts.signal?.aborted) throw stoppedByUser();
-          if (options.refreshModelFamily !== false) {
-            await refreshOllamaModelFamily(endpoint, installedModel, undefined, opts.signal);
-            if (opts.signal?.aborted) throw stoppedByUser();
-          }
+          installedModel = await settleInstalledModel();
           body.think = ollamaThinkFor(endpoint, installedModel);
           sentDigest = ollamaModelDigests.get(familyKey(endpoint, installedModel));
           sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
@@ -725,8 +725,38 @@ function versionBelow(version: string, than: string): boolean {
 export async function resolveOllamaModel(endpoint: string, model: string, signal?: AbortSignal): Promise<string> {
   const name = ollamaModelName(model);
   if (!name.endsWith(":local")) return name;
+  const read = ++ollamaVersionReadSeq;
   const version = await ollamaServerVersion(endpoint, signal);
+  const key = ollamaEndpointKey(endpoint);
+  const applied = ollamaServerVersions.get(key);
+  // A read that started before the newest applied one is outdated: the newer one decides.
+  if (version !== undefined && read > (applied?.read ?? 0)) {
+    ollamaServerVersions.set(key, { read, version });
+    return installedModelFor(name, version);
+  }
+  return installedModelFor(name, applied && applied.read > read ? applied.version : version);
+}
+
+/** Version reads in the order they started, and the newest one applied per endpoint. */
+let ollamaVersionReadSeq = 0;
+const ollamaServerVersions = new Map<string, { read: number; version: string }>();
+
+function ollamaEndpointKey(endpoint: string): string {
+  return endpoint.trim().replace(/\/$/, "");
+}
+
+function installedModelFor(name: string, version: string | undefined): string {
+  if (!name.endsWith(":local")) return name;
   return version !== undefined && versionBelow(version, "0.18.0") ? name : `${name.slice(0, -":local".length)}:latest`;
+}
+
+/**
+ * The installed model a name resolves to by the newest Ollama version read
+ * for the endpoint, without a read: a newer read can apply while a request
+ * reads the model list.
+ */
+function ollamaInstalledModelNow(endpoint: string, model: string): string {
+  return installedModelFor(ollamaModelName(model), ollamaServerVersions.get(ollamaEndpointKey(endpoint))?.version);
 }
 
 /**

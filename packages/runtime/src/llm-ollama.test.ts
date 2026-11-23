@@ -2114,6 +2114,47 @@ describe("Ollama reasoning models", () => {
   });
 
 
+  it("lets a newer version read decide over an older one that finishes later", async () => {
+    let versionReads = 0;
+    const sent: Array<[unknown, unknown]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") {
+          versionReads += 1;
+          // The first read was answered before the upgrade but arrives last.
+          if (versionReads === 1) setTimeout(() => res.end(JSON.stringify({ version: "0.17.7" })), 150);
+          else res.end(JSON.stringify({ version: "0.18.0" }));
+          return;
+        }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "race-report:local", digest: "sha256:llama", details: { family: "llama" } },
+            { name: "race-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+          ] }));
+          return;
+        }
+        const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+        sent.push([body.model, body.think]);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "race-report:local" });
+      const older = llm.complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await llm.complete({ prompt: "p" });
+      await older;
+      // Both run the gpt-oss model under the default tag, as Ollama 0.18 does.
+      assert.deepEqual(sent, [["race-report:local", "low"], ["race-report:local", "low"]]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps a rejection for the model that gave it when an upgrade switches models mid-request, and rolls back cleanly", async () => {
     let version = "0.17.7";
     let chats = 0;
