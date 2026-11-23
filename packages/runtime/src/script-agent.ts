@@ -47,15 +47,15 @@ const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
  * launched process's main thread records: the destination is taken out of
  * the environment as the hook loads, so Workers and child processes, which
  * inherit the hook, have none. An error the script handles itself (an
- * uncaughtException listener or a capture callback) is not recorded.
+ * uncaughtException listener or a capture callback) is not recorded; one
+ * that escapes such a listener is.
  */
 const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
 import { isMainThread } from "node:worker_threads";
 const target = process.env.${EXIT_RECORD_ENV};
 delete process.env.${EXIT_RECORD_ENV};
 if (isMainThread && target) {
-  process.on("uncaughtExceptionMonitor", (error) => {
-    if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
+  const record = (error) => {
     try {
       const message = error instanceof Error ? String(error.message) : String(error);
       let carrier;
@@ -66,7 +66,23 @@ if (isMainThread && target) {
         ? { message, brokerRequestId: carrier.brokerRequestId, brokerErrorMessage: String(carrier.message) }
         : { message }));
     } catch {}
+  };
+  process.on("uncaughtExceptionMonitor", (error) => {
+    if (process.listenerCount("uncaughtException") > 0 || process.hasUncaughtExceptionCaptureCallback()) return;
+    record(error);
   });
+  // An uncaughtException listener that throws ends the process with that
+  // error and no further monitor event, so the error that escapes it is the one the script ended with.
+  const emit = process.emit;
+  process.emit = function (event, ...args) {
+    if (event !== "uncaughtException") return emit.call(this, event, ...args);
+    try {
+      return emit.call(this, event, ...args);
+    } catch (escaped) {
+      record(escaped);
+      throw escaped;
+    }
+  };
 }
 `;
 const BROKER_REQUEST_SUFFIX = ".request.json";

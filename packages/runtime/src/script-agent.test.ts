@@ -603,6 +603,10 @@ definition:
       { agent: `process.setUncaughtExceptionCaptureCallback((error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
       // Prints a diagnostic with a caret, logs the failure it caught, and exits.
       { agent: `console.error(${caretNote}); console.error(new Error(${carried})); process.exit(1);`, cause: false },
+      // A fatal error listener that logs and rethrows the failure: the error that escapes it is the one the script ended with.
+      { agent: `process.on("uncaughtException", (error) => { console.error("fatal"); throw error; }); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // A listener that throws an error of its own instead.
+      { agent: `process.on("uncaughtException", () => { throw new Error("cleanup failed"); }); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: false },
       // Handles the failure with its own listener, carries on, and exits later.
       { agent: `process.on("uncaughtException", (error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
       // A Worker started from a file, which loads the hook too, fails with it; the script handles that and exits for another reason.
