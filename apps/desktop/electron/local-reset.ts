@@ -585,16 +585,10 @@ export function localResetLeftoverPaths(platform: NodeJS.Platform, home: string,
     ];
   }
   if (platform === "win32") {
-    // TODO(ugur): should the Windows uninstaller remove local data? The
-    // package.json `nsis.deleteAppDataOnUninstall` stays false. In
-    // electron-builder 26.15 it applies to the assisted installer too
-    // (uninstaller.nsh checks it outside any one-click guard) and never on an
-    // update (the installer runs the old uninstaller with --updated). But it
-    // deletes the whole %APPDATA%\OpenAdminOS folder, including an IT
-    // policy.json, also on a silent /S uninstall by IT, and leaves this
-    // updater cache and the "OpenAdminOS Scheduler" task. Options: keep it
-    // off and point to Reset OpenAdminOS (current), or turn it on with a
-    // customUnInit include that keeps policy.json and removes the task.
+    // The NSIS uninstaller (`nsis.deleteAppDataOnUninstall`) removes the
+    // uninstalling account's %APPDATA%\OpenAdminOS, an IT policy.json there
+    // included, but not this updater cache or the "OpenAdminOS Scheduler"
+    // task; the reset removes both.
     const localAppData = env.LOCALAPPDATA || win32.join(home, "AppData", "Local");
     return [win32.join(localAppData, UPDATER_CACHE_DIR)];
   }
