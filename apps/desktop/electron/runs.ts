@@ -1933,6 +1933,9 @@ export class RunService {
    */
   private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
     if (run.status !== "failed" || run.modelFit || !run.providerId || run.origin !== undefined || run.officeContext) return run;
+    // A reply with reasoning and no answer has its own cause and recovery card,
+    // whatever its error text (a model name) matches.
+    if (run.failureCause === "reasoning-without-answer") return run;
     try {
       // Only when the run turns failed: a later snapshot of a failure already checked keeps what
       // that check found (persistRunSnapshot carries an issue over), so no later state decides it.
