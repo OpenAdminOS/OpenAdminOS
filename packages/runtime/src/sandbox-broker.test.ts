@@ -67,6 +67,21 @@ it("takes the model failure of the request the script ended on, never one its me
   assert.equal(broker.llmFailureFor({ message: `llm.complete: ${timeout.message}` }), undefined);
 });
 
+it("keeps every failure of a reused request id and needs the ended message to pick between them", async () => {
+  const agent = fakeAgent();
+  const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+  const onlyReasoning = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const replies = [timeout, onlyReasoning];
+  let calls = 0;
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw replies[calls++]!; } }) });
+  // The script retries under the same id, then rethrows the first error.
+  for (let i = 0; i < 2; i += 1) await broker.handle({ id: "same", method: "llm.complete", params: { prompt: "Summarize." } });
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${timeout.message}`, brokerRequestId: "same" }), undefined);
+  assert.equal(broker.llmFailureFor({ message: "wrapped by the script", brokerRequestId: "same" }), undefined);
+  // It ends with the reasoning failure itself: that one is the cause.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${onlyReasoning.message}`, brokerRequestId: "same" }), onlyReasoning);
+});
+
 describe("sandbox broker", () => {
   it("allows only manifest-declared Graph GET requests", async () => {
     const graphRequests: GraphRequestInput[] = [];

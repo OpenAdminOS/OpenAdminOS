@@ -82,9 +82,9 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
   let writePlan: WritePlan | undefined;
   // The error that answered the last brokered request, log calls aside.
   let lastFailure: unknown;
-  // Every failure a brokered request answered with, one per distinct message,
-  // so repeated failures never push out another one.
-  const failures = new Map<string, { method: string; error: Error }>();
+  // Every failure a brokered request answered with, kept per request id. A
+  // script may reuse an id, so a later failure never replaces an earlier one.
+  const failures = new Map<string, Array<{ method: string; error: Error }>>();
 
   return {
     async handle(request) {
@@ -121,7 +121,10 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       } catch (error) {
         if (request?.method !== "log") lastFailure = error;
         if (request?.method !== "log" && error instanceof Error) {
-          failures.set(id, { method: String(request?.method ?? ""), error });
+          const entry = { method: String(request?.method ?? ""), error };
+          const list = failures.get(id);
+          if (list) list.push(entry);
+          else failures.set(id, [entry]);
         }
         return failure(id, error);
       }
@@ -132,16 +135,21 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
         ? lastFailure
         : undefined,
     llmFailureFor: (endedWith) => {
-      let match: Error | undefined;
+      const isBrokerFailure = ({ method, error }: { method: string; error: Error }) =>
+        endedWith.message === error.message || endedWith.message === `${method}: ${error.message}`;
+      let candidates: Array<{ method: string; error: Error }>;
       if (endedWith.brokerRequestId !== undefined) {
-        match = failures.get(endedWith.brokerRequestId)?.error;
+        const forId = failures.get(endedWith.brokerRequestId) ?? [];
+        // One failure under the id is the one the script ended with. With a
+        // reused id, only the failures whose message the script ended with.
+        candidates = forId.length === 1 ? forId : forId.filter(isBrokerFailure);
       } else {
         // Without an id, only an error that is the broker failure itself.
-        for (const { method, error } of failures.values()) {
-          if (endedWith.message === error.message || endedWith.message === `${method}: ${error.message}`) match = error;
-        }
+        candidates = [...failures.values()].flat().filter(isBrokerFailure);
       }
-      return match && isReasoningWithoutAnswerError(match) ? match : undefined;
+      // Attribute the cause only when every candidate agrees on it.
+      if (candidates.length === 0 || !candidates.every(({ error }) => isReasoningWithoutAnswerError(error))) return undefined;
+      return candidates[candidates.length - 1]!.error;
     },
   };
 }

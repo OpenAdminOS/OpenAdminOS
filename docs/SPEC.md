@@ -425,9 +425,11 @@ before apply or a sandboxed script's exit (when the error the script ended with
 carries it; the script's Node process records that error through a hook the
 app loads with `--import`, in the launched process's main thread only and
 unless the script handles it itself, with the broker
-request id it or its cause carries, which the bundled scripts set; without an
-id only an error that is exactly the broker failure counts, so the output is
-never parsed for it), and the failure panel shows only the
+request id it or its cause carries, which the bundled scripts set; when a
+script reused that id, only a failure under it whose message the script ended
+with counts; without an id only an error that is exactly the broker failure
+counts, so the output is never parsed for it, and every matching failure must
+be this cause), and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
