@@ -414,8 +414,11 @@ it no longer lists, also for a reply still in flight, and the fallback after a
 rejected level reads the list again. A family Ollama reported decides. For a model without
 one, Ollama's answers decide, per endpoint and model and only for the version
 (digest) the request was sent to and learned against: a rejected level (`think value ... is not
-supported`, or `... does not support thinking`) is sent again once with
+supported`, or `... does not support thinking`) is sent again with
 `false`, and reasoning streamed after `false` switches later requests to "low".
+The model is resolved again before that resend; when it now resolves to
+another model, that model's own value is sent instead and a rejection of it is
+handled the same way, at most two resends per request.
 Without either, the name decides. A reply with reasoning and no answer
 is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
@@ -425,9 +428,9 @@ before apply or a sandboxed script's exit (when the error the script ended with
 carries it; the script's Node process records that error through a hook the
 app loads with `--import`, in the launched process's main thread only and
 unless the script handles it itself, with the broker
-request id it or its cause carries, which the bundled scripts set; when a
-script reused that id, only a failure under it whose message the script ended
-with counts; without an id only an error that is exactly the broker failure
+request id it or its cause carries, which the bundled scripts set, and the
+message of the error carrying it; when a script reused that id, only a failure
+under it with that message counts, also when the script wrapped it; without an id only an error that is exactly the broker failure
 counts, so the output is never parsed for it, and every matching failure must
 be this cause), and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
