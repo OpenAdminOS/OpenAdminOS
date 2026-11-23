@@ -15,6 +15,7 @@ import type {
 
 import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
 import { GEMINI_DEFAULT_MODEL } from "@openadminos/runtime";
+import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -74,6 +75,14 @@ describe("Model fit: classifying a failure", () => {
     const raw = classifyModelFitFailure(new Error(OLLAMA_400), { providerId: "ollama", model: LOCAL_MODEL, isLocal: true });
     assert.equal(raw?.neededTokens, 40652);
     assert.equal(raw?.limitTokens, 16384);
+  });
+
+  it("reads the agent runtime's ContextTooSmallError and a run's stored failureReason (PR #214)", () => {
+    const local = { providerId: "ollama" as const, model: LOCAL_MODEL, isLocal: true };
+    const failure = { code: "context-too-small" as const, promptTokens: 20000, answerTokens: 100, neededTokens: 20100, limitTokens: 16384, model: LOCAL_MODEL };
+    assert.deepEqual(classifyModelFitFailure(new ContextTooSmallError(failure), local), { reason: "context-too-small", neededTokens: 20100, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
+    // A run record keeps the failure as `failureReason`; the run host reads it before the error text.
+    assert.deepEqual(classifyModelFitFailure(failure, local), { reason: "context-too-small", neededTokens: 20100, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
   });
 
   it("prefers the failure record's reason over a wrapper's", () => {
