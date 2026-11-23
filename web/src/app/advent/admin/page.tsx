@@ -162,7 +162,7 @@ function DrawControls({ day, now, record, records, winners, prizesFinalized }: {
   const target = day === null ? "grand" : String(day);
   const csv = `/api/advent/export?draw=${target}`;
 
-  if (now < opens) return <span className="text-xs text-brand-muted">Opens <LocalTime timestamp={opens} showYear={day === null} /></span>;
+  if (now < opens) return <span className="text-xs text-brand-muted">Draw available <LocalTime timestamp={opens} showYear={day === null} /></span>;
   return (
     <div className="space-y-3">
       {record ? (

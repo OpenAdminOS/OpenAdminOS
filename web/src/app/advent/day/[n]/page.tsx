@@ -88,7 +88,11 @@ export default async function DoorPage({ params }: Props) {
                     )}
                   </ActionForm>
                 )}
-            <p className="text-sm text-brand-muted">Daily draw deadline · <LocalTime timestamp={doorWindowEnd(day)} />.</p>
+            <p className="text-sm text-brand-muted">
+              {campaignNow(process.env.ADVENT_NOW) < doorWindowEnd(day)
+                ? <>Daily draw deadline · <LocalTime timestamp={doorWindowEnd(day)} />.</>
+                : "The daily draw for this door has closed. Completing it still counts toward the badge and the grand draw."}
+            </p>
           </>
         )}
       </section>
