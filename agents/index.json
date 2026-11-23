@@ -50,7 +50,7 @@
       ],
       "minAppVersion": "0.7.3-nightly.20261123094040",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
-      "manifestSha256": "d8398967b0cda2e0b652222ec41803ab00c410229ba43d52530cd3e37b857720"
+      "manifestSha256": "7b52194cd96d57cb8648433562b94599043b8d5365c445958afbb508fabd37cb"
     },
     {
       "id": "dormant-app-registrations",

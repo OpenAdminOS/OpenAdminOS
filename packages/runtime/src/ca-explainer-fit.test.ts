@@ -166,7 +166,7 @@ describe("Conditional Access explainer prompt size", () => {
     }
   });
 
-    it("treats a failing context lookup as unknown", async () => {
+  it("treats a failing context lookup as unknown", async () => {
     const { llm, sent } = recordingLlm(undefined);
     llm.contextWindow = async () => {
       throw new Error("lookup failed");

@@ -51,7 +51,7 @@ The model never sees the raw Graph policy objects. Each policy becomes one
 compact record (`policies` above): scope as counts or `All`, built-in role
 names, client app types, platforms, locations, risk levels, grant controls,
 authentication strength and session controls. Age groups list names only.
-About 100 policies fit a 16k context local model with room for the answer.
+A typical set of about 100 policies fits a 16k context local model with room for the answer. A larger or denser set stops before anything is sent, with the token numbers and the ways out.
 When a tenant's policy set is larger than the selected model's context, the
 run stops before sending and says how much context it needs. For Ollama that
 limit is the `num_ctx` pinned in the model's Modelfile (16,384 for OpenAdmin
@@ -62,7 +62,7 @@ limit is the `num_ctx` pinned in the model's Modelfile (16,384 for OpenAdmin
 - The LLM is instructed not to invent policies; it only reads the
   records it is given.
 - This is an *advisor*, not a *simulator*. It will not tell you whether
-  a specific user can sign in tomorrow — for that, use the live "What
+  a specific user can sign in tomorrow. For that, use the live "What
   if" tool in Entra. It will tell you which policies in your set are
   the ones that decision depends on.
 - Report-only and disabled policies are treated as not enforcing

@@ -5,7 +5,7 @@
 # coverage, exclusions and report-only controls leave gaps against common
 # Zero Trust baselines, and what to change. The prompt carries one compact
 # record per policy (compact-conditional-access), not the Graph objects,
-# so a 100 policy tenant still fits a 16k context local model.
+# so a typical tenant of about 100 policies fits a 16k context local model.
 descriptor:
   id: conditional-access-explainer
   name: Conditional Access explainer
@@ -160,8 +160,9 @@ skills:
         agent actions the policy targets), apps.authContexts (count of
         authentication contexts), apps.appFilter (mode and rule of an app
         filter, which narrows the apps); clientAppTypes (absent means all client apps); platforms and
-        locations, each with include and exclude (absent or "all" means not
-        limited;
+        locations, each with include and exclude (absent means not limited;
+        an include of "all" is still narrowed by its exclude, so locations
+        "All" with exclude "AllTrusted" covers untrusted locations only;
         locations are "All", "AllTrusted" or a count of named locations);
         signInRisk, userRisk, servicePrincipalRisk and insiderRisk levels;
         deviceStates (include and exclude, such as excluding Compliant or
@@ -171,7 +172,8 @@ skills:
         domainJoinedDevice, compliantApplication, approvedApplication,
         passwordChange; authStrength with name, type builtIn or custom, and
         satisfies, where "mfa" counts as MFA and "none" or a missing value
-        does not prove it; termsOfUse count); session (session
+        does not prove it; customFactors count, custom controls that do not
+        by themselves prove MFA; termsOfUse count); session (session
         controls). Grant controls decide access; session controls change the
         session after sign-in and apply even without grant controls. A policy
         with neither changes nothing.
@@ -263,7 +265,7 @@ definition:
     - id: manual
       kind: manual
   result:
-    summary: '{{ explain.output.text | default("LLM unavailable — see structured data for the policy list.") }}'
+    summary: '{{ explain.output.text | default("LLM unavailable. See the structured data for the policy list.") }}'
     data:
       total: "{{ load_policies.output | size }}"
       byState: "{{ by_state.output }}"
