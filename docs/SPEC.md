@@ -405,7 +405,9 @@ one answer, gets its own family and version; names are compared as Ollama
 resolves them (a `:local` after a tag is dropped; a lone `x:local` is
 `x:latest` on Ollama 0.18 and later, which drop the suffix, and the model
 tagged `local` before that, read from `/api/version` only for such a name,
-before each send and retry, so an upgraded server is followed;
+before each send and retry, so an upgraded server is followed; a version
+read that started before the newest one applied for the endpoint does not
+decide, and a newer one applied while the list was read does;
 what is known is kept under the installed model the name resolves to), a read that started before another is ignored, and the retry
 after a context overflow reads the family again. Every successful model list read,
 from the provider check or the adapter, is ignored when an older one than the
@@ -419,7 +421,9 @@ supported`, or `... does not support thinking`) is sent again with
 The model is resolved again before that resend; when it now resolves to
 another model, that model's own value is sent instead and a rejection of it is
 handled the same way, at most two resends per request.
-Without either, the name decides. A reply with reasoning and no answer
+Without either, the name decides. Reasoning a model writes inline in its
+content, in `<think>` blocks (also split across chunks, or never closed),
+is taken out of the answer as it streams. A reply with reasoning and no answer
 is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
@@ -429,9 +433,10 @@ carries it; the script's Node process records that error through a hook the
 app loads with `--import`, in the launched process's main thread only and
 unless the script handles it itself, with the broker
 request id it or its cause carries, which the bundled scripts set, and the
-message of the error carrying it; when a script reused that id, only a failure
-under it with that message counts, also when the script wrapped it; without an id only an error that is exactly the broker failure
-counts, so the output is never parsed for it, and every matching failure must
+message of the error carrying it; only a failure under that id with that
+message counts, also when the script wrapped it or reused the id, so an
+answer the broker never handled (a refused request file) is none; without an
+id only an error that is exactly the broker failure counts, so the output is never parsed for it, and every matching failure must
 be this cause), and the failure panel shows only the
 "Model reasoned without answering" card. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
