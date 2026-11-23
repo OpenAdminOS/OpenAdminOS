@@ -3111,6 +3111,9 @@ export class IntuneChatService {
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
     let modelFit: ModelFitIssue | undefined;
+    // The model this turn runs on: the selected one, or the adapter's own default when none is named
+    // (a provider list that reports no models). A model fit issue and its on-device check name it.
+    let fitModel = selectedModel;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
     let documentationSources: IntuneChatDocumentationSource[] = [];
@@ -3200,6 +3203,7 @@ export class IntuneChatService {
         });
       }
       const llm = withTenantDataOutputFilter(gateHostedLlm(built, verifyConsent));
+      fitModel = selectedModel ?? llm.defaultModel;
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
@@ -3456,13 +3460,13 @@ export class IntuneChatService {
                 // reasoning-only reply), or failed the investigation often enough that Chat stops trying
                 // it: the cached-data answer carries the model fit offer. Nothing goes elsewhere unless
                 // the admin chooses it.
-                if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, selectedModel) ?? (agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, selectedModel ?? llm.defaultModel) ? repeatedFailureIssue(provider, selectedModel) : undefined);
+                if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, fitModel) ?? (agentic.reason !== "context-limit" && agenticModelHasFailedRepeatedly(providerId, fitModel) ? repeatedFailureIssue(provider, fitModel) : undefined);
                 await streamDeterministicAnswer(agentic.fallbackNotice, localChat);
               }
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
-            if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice && !options.scope) modelFit = repeatedFailureIssue(provider, selectedModel);
+            if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice && !options.scope) modelFit = repeatedFailureIssue(provider, fitModel);
             // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
             // A too-small model also reports capability-fallback; it never failed the loop, so it keeps the normal fallback.
             const failureRouted = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
@@ -3501,7 +3505,7 @@ export class IntuneChatService {
               ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
               : caught instanceof Error ? caught.message : String(caught);
             // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
-            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, selectedModel);
+            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel);
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
@@ -3512,7 +3516,7 @@ export class IntuneChatService {
     // The model's locality is confirmed when the request failed: a provider list read before an
     // alias turned remote-backed must not let the notice say nothing left this device. It runs
     // before the last stop check, so a Stop during the check still ends the request as stopped.
-    if (modelFit && !(await this.host.verifyOnDeviceModel?.(providerId, selectedModel).catch(() => false))) modelFit = undefined;
+    if (modelFit && !(await this.host.verifyOnDeviceModel?.(providerId, fitModel).catch(() => false))) modelFit = undefined;
     if (isCancelled()) {
       const result = finishCancelled();
       sendProgress({
@@ -3581,7 +3585,7 @@ export class IntuneChatService {
                 workspaceKey: workspaceKeyOf(input.workspaceContext),
                 // A failed one-request retry keeps the active model as the one it stands in for.
                 anchor: turn.switchedFrom ? { providerId: turn.switchedFrom.providerId, model: turn.switchedFrom.model } : { providerId, model: selectedModel },
-                failed: { providerId, model: selectedModel },
+                failed: { providerId, model: fitModel },
                 reason: modelFit.reason,
               }),
             },
