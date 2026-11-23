@@ -281,6 +281,30 @@ describe("Ollama context size", () => {
         await fake.close();
       }
     });
+
+    it(`stops ${method} when the caller aborts inside the resend check`, async () => {
+      const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "m" });
+        const controller = new AbortController();
+        const options = {
+          prompt: "test",
+          signal: controller.signal,
+          beforeOllamaResend: async () => {
+            assert.equal(fake.chats.length, 1);
+            controller.abort();
+          },
+        };
+        await assert.rejects(async () => {
+          if (method === "complete") await llm.complete(options);
+          else for await (const _chunk of llm.stream(options)) { /* drain */ }
+        }, /Ollama request stopped by user/);
+        assert.equal(controller.signal.aborted, true);
+        assert.equal(fake.chats.length, 1);
+      } finally {
+        await fake.close();
+      }
+    });
   }
 
   it("raises num_ctx up to the model's limit, retries once, and keeps it for later requests", async () => {
