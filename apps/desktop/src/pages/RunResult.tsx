@@ -552,7 +552,8 @@ function RunPage({
             />
           ) : null}
 
-          <RunFailureRemediation run={run} />
+          {/* A run the model fit notice covers gets one recovery: the notice, with the numbers and the choices. */}
+          {modelFit ? null : <RunFailureRemediation run={run} />}
           {modelFit ? (
             <ModelFitNotice
               issue={modelFit.issue}

@@ -852,6 +852,15 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5", tenantId: "tenant-1", bindProviderEndpoint: true, expectedProviderDestination: "dest-openai" })));
   });
 
+  it("shows one recovery for a typed context failure: the notice, not also the remediation text", async () => {
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT,
+      failureReason: { code: "context-too-small", promptTokens: 40000, answerTokens: 652, neededTokens: 40652, limitTokens: 16384, model: "llama3.1" } });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    expect(await screen.findByRole("region", { name: "llama3.1 cannot fit this run" })).toBeInTheDocument();
+    expect(screen.queryByText("Prompt larger than the model's context")).toBeNull();
+  });
+
   it("does not start a model fit rerun when the review cannot read where the provider is reached", async () => {
     const user = userEvent.setup();
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
