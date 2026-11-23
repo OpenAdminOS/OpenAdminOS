@@ -59,14 +59,18 @@ interface Harness {
   reply(next: Reply): void;
 }
 
-let originalOllamaUrl: string | undefined;
+const originalProviderUrls = new Map<string, string | undefined>();
 before(() => {
-  originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
-  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+  for (const key of ["OPENAGENTS_OLLAMA_URL", "OPENADMINOS_LM_STUDIO_URL", "OPENADMINOS_LEMONADE_URL"]) {
+    originalProviderUrls.set(key, process.env[key]);
+    process.env[key] = "http://127.0.0.1:9";
+  }
 });
 after(() => {
-  if (originalOllamaUrl === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
-  else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
+  for (const [key, value] of originalProviderUrls) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 async function withHarness(run: (harness: Harness) => Promise<void>, options: { model?: string } = {}): Promise<void> {
