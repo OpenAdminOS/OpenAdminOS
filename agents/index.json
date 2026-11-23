@@ -48,9 +48,9 @@
       "services": [
         "entra"
       ],
-      "minAppVersion": "0.7.3-nightly.99999999999999",
+      "minAppVersion": "0.7.3-nightly.20261123094040",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
-      "manifestSha256": "60c09110f5176e22975c9206185c731972b891e83bc7efde8dd83537d4cc241e"
+      "manifestSha256": "d8398967b0cda2e0b652222ec41803ab00c410229ba43d52530cd3e37b857720"
     },
     {
       "id": "dormant-app-registrations",

@@ -11,12 +11,10 @@ descriptor:
   name: Conditional Access explainer
   description: Reviews Conditional Access policies for coverage, exclusions, report-only controls, overlaps, and common Zero Trust gaps.
   version: 1.2.0
-  # TODO(ugur): set to the first published nightly whose tagged commit
-  # contains the merged #214 runtime, then bump agents/registry-revision.txt
-  # and regenerate the index and docs. Until then no nightly accepts this
-  # manifest (any 0.7.3 nightly is below this stamp), and the 0.7.3 release,
-  # which contains #214, does.
-  minAppVersion: 0.7.3-nightly.99999999999999
+  # The first published nightly that contains the compact-conditional-access
+  # transform and the prompt-size check (PR #214). Later nightlies and the
+  # 0.7.3 release accept this manifest; 0.7.2 and earlier nightlies do not.
+  minAppVersion: 0.7.3-nightly.20261123094040
   author:
     name: OpenAdminOS
     handle: openadminos
