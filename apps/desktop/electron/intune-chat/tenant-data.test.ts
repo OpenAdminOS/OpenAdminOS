@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -74,7 +75,16 @@ test("Chat fences answer packs, workspace evidence and history and filters every
   } finally { await f.close(); }
 });
 
-test("Office persona evidence is fenced and cleaned before conversation storage", async () => {
+test("Office protects reviewed local evidence and stops sending when its Ollama model becomes cloud-backed", async () => {
+  let cloud = false;
+  const server = createServer((_request, response) => {
+    response.end(JSON.stringify({ models: [{ name: "test", ...(cloud ? { remote_model: "writer" } : {}) }] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const previous = process.env.OPENAGENTS_OLLAMA_URL;
+  process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${address.port}`;
   const f = await fixture();
   try {
     const state = await f.store.saveOfficePersona({ name: "Evidence reviewer", responsibility: "Review tenant evidence",
@@ -94,5 +104,15 @@ test("Office persona evidence is fenced and cleaned before conversation storage"
     assert.match(request.prompt, /<tenant_data source="office:context"/);
     assert.doesNotMatch(request.prompt, /<\/tenant_data nonce="fake"/);
     assert.equal(answer.messages?.find(message => message.role === "assistant")?.content, "Reviewed");
-  } finally { await f.close(); }
+
+    const sent = f.prompts.length;
+    cloud = true;
+    await assert.rejects(f.store.askOfficePersona({ id: persona.id, question: "Review again" }), /could not confirm that test still runs on this device/);
+    assert.equal(f.prompts.length, sent);
+  } finally {
+    if (previous === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+    else process.env.OPENAGENTS_OLLAMA_URL = previous;
+    server.close();
+    await f.close();
+  }
 });

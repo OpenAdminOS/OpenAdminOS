@@ -2314,17 +2314,28 @@ export class AppStateStore {
       },
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
-      complete: async (p, question, context, planning) => {
+      complete: async (p, question, context, { model, isLocal, planning }) => {
         // Egress of tenant evidence to the model: refused for a closing
         // tenant, and stopped by its signal when Disconnect begins.
         this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
-        const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
+        const localOllamaEndpoint = p.providerId === "ollama" && isLocal === true
+          ? resolveOllamaEndpoint().replace(/\/$/, "")
+          : undefined;
+        const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId, model,
+          localOllamaEndpoint ? { endpoint: localOllamaEndpoint } : undefined));
+
         if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
         this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
         const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
         // Each model call has one minute; with the promise nudge an answer takes at most three calls.
         const once = eachAttemptWithin(
-          async (prompt, signal) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text,
+          async (prompt, signal) => {
+            if (localOllamaEndpoint && (!model || !(await ollamaModelIsOnDevice(model, localOllamaEndpoint)))) {
+              throw new Error(`OpenAdminOS could not confirm that ${model ?? "the assigned Ollama model"} still runs on this device. Refresh Ollama in Settings, Providers, then review the teammate and try again.`);
+            }
+            signal.throwIfAborted();
+            return (await llm.complete({ model, signal, maxTokens: planning ? 600 : 1800, temperature: 0.1, system, prompt })).text;
+          },
           60000,
           "The assigned provider did not answer within one minute. Check its status and try again.",
           this.tenantLifecycle.signal(p.tenantId),

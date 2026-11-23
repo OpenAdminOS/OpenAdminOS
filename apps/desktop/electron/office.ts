@@ -33,6 +33,11 @@ type Context = {
   providerConfigKey?: string;
   providerConfigKeys?: Record<string, string>;
 };
+function reviewedModel(persona: Pick<OfficePersona, "providerId" | "model">, context: Context) {
+  const endpoint = context.providers.find((provider) => provider.id === persona.providerId);
+  const model = persona.model ?? endpoint?.defaultModel ?? endpoint?.models[0];
+  return { model, isLocal: providerForModel(endpoint, model)?.isLocal };
+}
 export interface OfficeHost {
   /**
    * The host's persistence check for Agent Team data: false for a tenant
@@ -50,7 +55,7 @@ export interface OfficeHost {
     p: OfficePersona,
     question: string,
     context: OfficeTaskContext,
-    planning?: boolean,
+    reviewed: { model?: string | undefined; isLocal?: boolean | undefined; planning?: boolean },
   ): Promise<string>;
 }
 type StoredPersona = OfficePersona & {
@@ -169,12 +174,12 @@ export class OfficeService {
     p: Pick<OfficePersona, "providerId" | "model" | "agentSlugs">,
     c: Context,
   ) {
-    const endpoint = c.providers.find((x) => x.id === p.providerId);
-    const provider = providerForModel(endpoint, p.model ?? endpoint?.defaultModel ?? endpoint?.models[0]);
+    const { isLocal } = reviewedModel(p, c);
+    const providerId = c.providers.find((provider) => provider.id === p.providerId)?.id;
     return createHash("sha256")
       .update(
         JSON.stringify({
-          provider: [provider?.id, provider?.isLocal],
+          provider: [providerId, isLocal],
           config: c.providerConfigKeys?.[p.providerId] ?? c.providerConfigKey,
           policy: [
             (p as OfficePersona).instructions,
@@ -200,13 +205,12 @@ export class OfficeService {
       .digest("hex");
   }
   private reviewed(p: OfficePersona, c: Context) {
-    const endpoint = c.providers.find((x) => x.id === p.providerId);
     const digest = (value: unknown) =>
       createHash("sha256").update(JSON.stringify(value)).digest("hex");
     return {
       provider: digest([
         p.providerId,
-        providerForModel(endpoint, p.model ?? endpoint?.defaultModel ?? endpoint?.models[0])?.isLocal,
+        reviewedModel(p, c).isLocal,
         c.providerConfigKeys?.[p.providerId] ?? c.providerConfigKey,
       ]),
       agents: Object.fromEntries(
@@ -572,7 +576,7 @@ export class OfficeService {
             }),
           )}`,
           context,
-          true,
+          { ...reviewedModel(p, c), planning: true },
         );
         const parsed = JSON.parse(
           answer.replace(/^```(?:json)?\s*|\s*```$/g, ""),
@@ -1086,10 +1090,10 @@ export class OfficeService {
         .reverse()
         .map((m) => ({ role: m.role, content: m.content.slice(0, 1500) }));
       this.answering.add(p.id);
-      return { p, context };
+      return { p, context, reviewed: reviewedModel(p, c) };
     });
     try {
-      const { p, context } = snapshot;
+      const { p, context, reviewed } = snapshot;
       const ids = context.evidence.map((e) => e.runId);
       let answer: string;
       if (!ids.length)
@@ -1099,7 +1103,7 @@ export class OfficeService {
         throw new Error(
           "The assigned provider cannot answer questions. Check provider settings.",
         );
-      else answer = await this.host.complete(p, input.question, context);
+      else answer = await this.host.complete(p, input.question, context, reviewed);
       return await this.serial(async () => {
         const current = this.persona(p.id);
         const c = await this.host.context();
