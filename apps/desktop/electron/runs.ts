@@ -108,6 +108,17 @@ export class OrganizationBoundaryError extends Error {
   override readonly name = "OrganizationBoundaryError";
 }
 
+/**
+ * Reset OpenAdminOS has started, so no run starts. Schedules treat it like
+ * an organization boundary: the run waits, no failure is recorded and the
+ * due slot is kept, so a reset that is then refused leaves no false failure.
+ */
+export class LocalResetInProgressError extends OrganizationBoundaryError {
+  constructor(message = "OpenAdminOS is resetting and restarts in a moment. The run did not start.") {
+    super(message);
+  }
+}
+
 /** Why nothing new starts or applies for an organization that is being disconnected. */
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
@@ -416,10 +427,34 @@ export class RunService {
   }
 
   /**
+   * Confirmed applies whose work has not settled, kept here rather than in
+   * run history: a cancel marks the record cancelled while a sent request
+   * still settles, and a disconnect removes the record before its work stops.
+   */
+  private readonly activeApplies = new Set<string>();
+
+  /** Some run's work has not settled, even when its record already reads cancelled or is gone. */
+  hasActiveDrive(): boolean {
+    return this.drives.size > 0;
+  }
+
+  /** A confirmed apply is still running or settling. */
+  hasActiveApply(): boolean {
+    return this.activeApplies.size > 0;
+  }
+
+  private trackApply(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
+    this.activeApplies.add(runId);
+    // Cleared when the tracked work settles, also when the tenant lease
+    // refuses it and it never starts.
+    this.track(runId, tenantId, start, () => this.activeApplies.delete(runId));
+  }
+
+  /**
    * Drive a run under its tenant's lease. When the tenant starts closing,
    * the lease signal cancels the run and Disconnect waits for the drive.
    */
-  private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
+  private track(runId: string, tenantId: string | undefined, start: () => Promise<void>, onSettled?: () => void): void {
     const leased = tenantId && this.host.tenantLease
       ? this.host.tenantLease(tenantId, async (signal) => {
           const stop = () => this.controllers.get(runId)?.abort(signal.reason);
@@ -428,6 +463,7 @@ export class RunService {
         })
       : start();
     const settled = leased.catch(() => undefined).finally(() => {
+      onSettled?.();
       if (this.drives.get(runId) === settled) this.drives.delete(runId);
     });
     this.drives.set(runId, settled);
@@ -1195,7 +1231,7 @@ export class RunService {
     });
 
     if (transition.kind === "rollback") {
-      this.track(transition.updated.id, transition.updated.tenantId, () => this.driveSystemApply({ run: transition.updated }));
+      this.trackApply(transition.updated.id, transition.updated.tenantId, () => this.driveSystemApply({ run: transition.updated }));
       this.host.recordLearningEventSafely({
         tenantId: transition.updated.tenantId,
         agentSlug: transition.updated.agentSlug,
@@ -1214,7 +1250,7 @@ export class RunService {
       return transition.updated;
     }
 
-    this.track(transition.updated.id, transition.updated.tenantId, () => this.driveApply({
+    this.trackApply(transition.updated.id, transition.updated.tenantId, () => this.driveApply({
       run: transition.updated,
       agent: transition.agent,
       providerId: transition.providerId,

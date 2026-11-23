@@ -4,6 +4,27 @@ import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
+import {
+  LocalResetRequestError,
+  localResetDataFolderLinkMessage,
+  localResetFolderIdentity,
+  sameSessionFolder,
+  type LocalResetFolderIdentity,
+  folderGoesThroughLink,
+  MANAGED_POLICY_FILE,
+  localResetPolicyProblem,
+  parseWhoamiUser,
+  windowsTaskListHas,
+  windowsTaskBelongsToThisAccount,
+  windowsTaskUserId,
+  readLocalResetMarker,
+  requestLocalReset,
+  relaunchTarget,
+  appImageHandoffWaitPids,
+  runPendingLocalReset,
+  writeLocalResetMarker,
+} from "./local-reset.js";
+import type { LocalResetInfo, LocalResetReport } from "@openadminos/agent-sdk";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureLandingShots } from "./landing-capture.js";
@@ -34,13 +55,13 @@ import {
   type LoginItemSettingsOptions,
   type MenuItemConstructorOptions,
 } from "electron";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import { arch as osArch, release as osRelease } from "node:os";
+import { arch as osArch, release as osRelease, tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join, win32 } from "node:path";
+import { dirname, join, resolve, win32 } from "node:path";
 import { AppStateStore, TENANT_CLOSING_REASON } from "./state.js";
 import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
 import { MCP_CATALOG } from "./mcp/catalog.js";
@@ -57,6 +78,7 @@ import {
   getUpdateState,
   setUpdateChannel,
   startAutoUpdater,
+  stopAutoUpdater,
   subscribeToUpdateState,
 } from "./updates.js";
 import { UPDATE_UNAVAILABLE_DETAIL } from "../src/shared/update-channel.js";
@@ -137,6 +159,7 @@ import type {
 import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, servicePartById } from "@openadminos/agent-sdk";
 import { companionUpcomingSchedules, runDueCompanionSchedules } from "./companion-schedules.js";
 import {
+  blockConnectorConfirmations,
   installConnectorConfirmBridge,
   respondConnectorConfirm,
 } from "./connector-confirm-bridge.js";
@@ -318,6 +341,27 @@ const activeNotifications = new Set<Notification>();
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
 // this because the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
+/** The reset that ran at this launch, if any. An incomplete one keeps the app closed. */
+let localResetReport: LocalResetReport | undefined;
+/** The data folder a completed wipe at this launch emptied, for the login item step after ready. */
+let localResetWipedFolder: LocalResetFolderIdentity | undefined;
+let localResetReportDismissed = false;
+/** Set once a reset was requested in this session: the app restarts and takes no second request. */
+let localResetRequested = false;
+/** The temporary profile the reset-incomplete window runs from; removed on every way out. */
+let localResetRecoveryProfile: string | undefined;
+
+function removeLocalResetRecoveryProfile(): void {
+  if (!localResetRecoveryProfile) return;
+  try {
+    rmSync(localResetRecoveryProfile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  } catch (error) {
+    console.warn("[local-reset] the temporary recovery profile could not be removed", error);
+  }
+}
+const LOCAL_RESET_INCOMPLETE_ROUTE = "/reset-incomplete";
+/** How long the stores get to stop before the restart after a reset request. */
+const LOCAL_RESET_SHUTDOWN_MS = 3_000;
 
 function debugStartupLog(message: string, detail?: unknown): void {
   if (!debugStartup) return;
@@ -419,15 +463,28 @@ function writeMacosLaunchAgent(): void {
   }
 }
 
-function removeMacosLaunchAgent(): void {
+function removeMacosLaunchAgent(guard: () => void = () => undefined): void {
   const plistPath = macosSchedulerPlistPath();
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
-  const domain = uid === undefined ? "gui" : `gui/${uid}`;
+  // Only this service by its label: given a path, launchctl unloads every
+  // job definition it finds there, which could be other apps' jobs.
+  guard();
   try {
-    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+    execFileSync("launchctl", ["bootout", uid === undefined ? `gui/${MACOS_SCHEDULER_LABEL}` : `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
   } catch {
     // Already unloaded.
   }
+  let stat: ReturnType<typeof lstatSync> | undefined;
+  try {
+    stat = lstatSync(plistPath);
+  } catch {
+    stat = undefined;
+  }
+  if (!stat) return;
+  if (!stat.isFile()) {
+    throw new Error(`something other than the scheduler file is at ${plistPath}, so it was left in place`);
+  }
+  guard();
   rmSync(plistPath, { force: true });
 }
 
@@ -2319,6 +2376,7 @@ function windowsSchedulerTaskXml(): string | undefined {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
+      timeout: 5_000,
     });
   } catch {
     return undefined;
@@ -2392,6 +2450,7 @@ function removeWindowsSchedulerTask(): void {
     execFileSync("schtasks.exe", ["/Delete", "/F", "/TN", WINDOWS_SCHEDULER_TASK], {
       stdio: "ignore",
       windowsHide: true,
+      timeout: 5_000,
     });
   } catch {
     // Already removed.
@@ -3197,6 +3256,8 @@ function notificationBodyForRun(run: RunRecord): string {
 async function refreshRegistryInBackground(
   trigger: "startup" | "interval" | "focus",
 ): Promise<void> {
+  // No background refresh while a reset is requested: it writes the cache.
+  if (localResetRequested) return;
   lastBackgroundRefreshAt = Date.now();
   try {
     const result = await store.initRegistry();
@@ -5030,7 +5091,7 @@ function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void
 
 let officeWindowMode: ReturnType<typeof officeFullscreen> | undefined;
 
-async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
+async function createWindow({ show = true, route, persistState = true }: { show?: boolean; route?: string; persistState?: boolean } = {}) {
   const persisted = await loadWindowState();
   const initialThemeColors =
     NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
@@ -5103,7 +5164,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
 
   officeWindowMode = officeFullscreen(mainWindow);
 
-  if (!isScreenshotCaptureLaunch) {
+  if (!isScreenshotCaptureLaunch && persistState) {
     attachWindowStatePersistence(mainWindow);
   }
 
@@ -5339,7 +5400,392 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
   }
 }
 
-function registerIpcHandlers() {
+/**
+ * A notice before any window can exist. Electron shows a native box on
+ * macOS and Windows; on Linux it only writes to stderr before ready, so a
+ * desktop dialog tool is tried there.
+ */
+function showNoticeBeforeReady(title: string, text: string): void {
+  dialog.showErrorBox(title, text);
+  if (process.platform !== "linux") return;
+  const tools: Array<[string, string[]]> = [
+    ["zenity", ["--error", `--title=${title}`, `--text=${text}`, "--no-markup"]],
+    ["kdialog", ["--title", title, "--error", text]],
+  ];
+  for (const [tool, args] of tools) {
+    const result = spawnSync(tool, args, { stdio: "ignore", timeout: 600_000 });
+    // The tool ran, so the notice was shown, however it was closed; a dialog
+    // left open past the bound was shown too. Only a missing tool tries the next.
+    if (result.status !== null || result.signal) return;
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") return;
+  }
+}
+
+/** Phase 2 of Reset OpenAdminOS, at the top of the main script. See local-reset.ts. */
+function runLocalResetAtLaunch(): LocalResetReport | undefined {
+  const userDataDir = app.getPath("userData");
+  try {
+    const report = runPendingLocalReset({
+      userDataDir,
+      packaged: app.isPackaged,
+      platform: process.platform,
+      home: app.getPath("home"),
+      env: process.env,
+      // The LaunchAgent label and task name are per user, shared with any
+      // other copy, so only an installed build removes them.
+      removeScheduler: removeSchedulerRegistration,
+    });
+    if (report?.status === "completed") localResetWipedFolder = localResetFolderIdentity(userDataDir);
+    if (report) {
+      console.info("[local-reset] reset ran at launch", {
+        status: report.status,
+        failed: report.failed.map((entry) => entry.item),
+        warnings: report.warnings.map((entry) => entry.item),
+      });
+    }
+    return report;
+  } catch (error) {
+    console.error("[local-reset] reset at launch failed", error);
+    return {
+      status: "incomplete",
+      finishedAt: new Date().toISOString(),
+      dataFolder: userDataDir,
+      failed: [{ item: userDataDir, reason: error instanceof Error ? error.message : String(error) }],
+      warnings: [],
+    };
+  }
+}
+
+/** After a completed reset: the menu bar login item needs a ready app to change. */
+function finishLocalResetAfterReady(report: LocalResetReport): void {
+  // Only an installed build's own request turns off the installed login item.
+  if (process.platform !== "darwin" || !app.isPackaged || pendingLocalResetBuild !== "installed") return;
+  // The request may have warned about it already: this later try replaces
+  // that warning, or clears it when it now succeeds.
+  const others = report.warnings.filter((warning) => warning.item !== "Menu bar login item");
+  try {
+    // Only while the data folder is still the one the wipe emptied, with no
+    // profile data back in it: a profile restored meanwhile keeps its login item.
+    const userDataDir = app.getPath("userData");
+    const now = localResetFolderIdentity(userDataDir);
+    if (!localResetWipedFolder || !now || !sameSessionFolder(localResetWipedFolder, now) || existsSync(join(userDataDir, "state.json"))) {
+      throw new Error("left on, because the data folder is no longer the one the reset emptied");
+    }
+    disableCompanionLoginItemForReset();
+    report.warnings = others;
+  } catch (error) {
+    report.warnings = [...others, { item: "Menu bar login item", reason: error instanceof Error ? error.message : String(error) }];
+  }
+}
+
+/**
+ * Removes the per-user scheduler registration and checks that it is gone:
+ * the removal helpers treat any failure as "already removed", and a reset
+ * must not report a scheduler as off while it still launches the app.
+ */
+function removeSchedulerRegistration(guard: () => void = () => undefined): void {
+  if (process.platform === "darwin") {
+    removeMacosLaunchAgent(guard);
+    const loaded = macosLaunchAgentLoaded();
+    if (existsSync(macosSchedulerPlistPath()) || loaded !== "absent") {
+      throw new Error(
+        loaded === "unknown"
+          ? "launchd did not confirm that the scheduler LaunchAgent is gone. Check it with launchctl, as described in Uninstall and reset"
+          : "the scheduler LaunchAgent is still registered. Remove it with launchctl bootout, as described in Uninstall and reset",
+      );
+    }
+  } else if (process.platform === "win32") {
+    // Presence comes from the full task list (see windowsSchedulerTaskPresence).
+    if (windowsSchedulerTaskPresence() === "absent") return;
+    // The account first, then the task: its definition is read as late as
+    // possible, and again right before the delete, which runs only when it
+    // is unchanged. schtasks cannot delete on a condition, so another
+    // account replacing the task between that last read and the delete is
+    // the one window left (the per-user task name follow-up closes it).
+    const whoami = spawnSync("whoami", ["/user", "/fo", "csv", "/nh"], { encoding: "utf8", windowsHide: true, timeout: 5_000 });
+    const account = whoami.status === 0 ? parseWhoamiUser(whoami.stdout) : undefined;
+    const xml = windowsSchedulerTaskXml();
+    if (!windowsTaskBelongsToThisAccount(xml === undefined ? undefined : windowsTaskBinary(xml), app.getPath("home"), {
+      taskUserId: windowsTaskUserId(xml),
+      account,
+    })) {
+      throw new Error(
+        `the scheduled task ${WINDOWS_SCHEDULER_TASK} could not be confirmed as this account's (its program or the account it runs as is another), so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
+      );
+    }
+    if (windowsSchedulerTaskXml() !== xml) {
+      throw new Error(
+        `the scheduled task ${WINDOWS_SCHEDULER_TASK} changed while it was being checked, so it was left in place. Check Run As User in Task Scheduler and remove it there if it is yours`,
+      );
+    }
+    // The last check before the delete: the query above can take seconds.
+    guard();
+    removeWindowsSchedulerTask();
+    const after = windowsSchedulerTaskPresence();
+    if (after !== "absent") {
+      throw new Error(
+        after === "unknown"
+          ? `Task Scheduler did not confirm that the task ${WINDOWS_SCHEDULER_TASK} is gone. Check it in Task Scheduler`
+          : `the scheduled task ${WINDOWS_SCHEDULER_TASK} is still registered. Remove it in Task Scheduler`,
+      );
+    }
+  }
+}
+
+/**
+ * From the full task list, not a query by name: schtasks reports "not
+ * found" and "Task Scheduler is not available" with the same exit code, in
+ * the user's language, so only a list that worked can say a task is absent.
+ */
+function windowsSchedulerTaskPresence(): "present" | "absent" | "unknown" {
+  const result = spawnSync("schtasks.exe", ["/Query", "/FO", "CSV", "/NH"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    windowsHide: true,
+    timeout: 15_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) return "unknown";
+  return windowsTaskListHas(result.stdout, WINDOWS_SCHEDULER_TASK) ? "present" : "absent";
+}
+
+/** `launchctl print` exits 113 for a service it does not know. */
+const LAUNCHCTL_SERVICE_NOT_FOUND = 113;
+
+function macosLaunchAgentLoaded(): "loaded" | "absent" | "unknown" {
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (uid === undefined) return "unknown";
+  const result = spawnSync("launchctl", ["print", `gui/${uid}/${MACOS_SCHEDULER_LABEL}`], { stdio: "ignore", timeout: 5_000 });
+  if (result.status === 0) return "loaded";
+  if (result.status === LAUNCHCTL_SERVICE_NOT_FOUND) return "absent";
+  return "unknown";
+}
+
+/** Turns the menu bar login item off and throws when macOS still reports it on. */
+function disableCompanionLoginItemForReset(): void {
+  const settings = getCompanionLaunchSettings();
+  if (!settings.supported) {
+    throw new Error(`macOS did not report whether it is on (${settings.detail}). Check System Settings, General, Login Items`);
+  }
+  if (!settings.enabled) return;
+  const after = setCompanionLaunchEnabled(false);
+  if (!after.supported) {
+    throw new Error(`macOS did not confirm that it is off (${after.detail}). Check System Settings, General, Login Items`);
+  }
+  if (after.enabled) {
+    throw new Error("macOS still lists it as on. Turn it off in System Settings, General, Login Items");
+  }
+}
+
+function localResetInfo(): LocalResetInfo {
+  const dataFolder = app.getPath("userData");
+  return {
+    dataFolder,
+    packaged: app.isPackaged,
+    platform: process.platform === "darwin" ? "macos" : process.platform === "win32" ? "windows" : "linux",
+    policyFilePresent: existsSync(join(dataFolder, MANAGED_POLICY_FILE)),
+  };
+}
+
+/** Restart without the background or menu bar launch flags, so the next launch opens the window. */
+function relaunchInteractive(): void {
+  // app.exit skips will-quit, so the recovery profile goes here.
+  removeLocalResetRecoveryProfile();
+  // The relaunched process inherits this environment. The sandbox flag goes
+  // back to how this launch found it, so a setting the reset removes from
+  // state.json does not come back as the next launch's default.
+  if (launchSandboxedCodeDefault) process.env[OPENADMINOS_MXC_FLAG] = "1";
+  else delete process.env[OPENADMINOS_MXC_FLAG];
+  if (process.platform === "darwin" && app.isPackaged && isBackgroundSchedulerLaunch) {
+    relaunchOutsideLaunchAgent();
+    return;
+  }
+  const target = relaunchTarget({
+    platform: process.platform,
+    env: process.env,
+    argv: process.argv,
+    execPath: process.execPath,
+    dropArgs: [BACKGROUND_SCHEDULER_ARG, MENU_BAR_ARG],
+  });
+  if (target.execPath) {
+    relaunchAppImage(target.execPath, target.args, target.extractAndRun === true);
+    return;
+  }
+  app.relaunch(target);
+  app.exit(0);
+}
+
+/**
+ * A process the LaunchAgent started is in that job's process group, and
+ * launchd kills the group when the job ends, so Electron's relaunch helper
+ * would die with it. A detached shell (its own session and group) waits for
+ * this process to exit, at most a minute, then opens the app through
+ * LaunchServices as an interactive launch.
+ */
+function relaunchOutsideLaunchAgent(): void {
+  const bundle = resolve(process.execPath, "..", "..", "..");
+  const script = 'i=0; while kill -0 "$0" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; exec /usr/bin/open "$1"';
+  try {
+    const child = spawn("/bin/sh", ["-c", script, String(process.pid), bundle], { detached: true, stdio: "ignore" });
+    child.unref();
+    // Exit once the shell has started, or once its failure is known; the
+    // marker stays either way, so a failed handoff resets at the next launch.
+    child.once("spawn", () => app.exit(0));
+    child.once("error", (error) => {
+      console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+      app.exit(0);
+    });
+    setTimeout(() => app.exit(0), 2_000);
+    return;
+  } catch (error) {
+    console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+  }
+  app.exit(0);
+}
+
+/**
+ * A Linux AppImage is started again by a detached shell, not Electron's
+ * relaunch helper: that helper runs with no_new_privs, so the new AppImage
+ * could not mount itself through the setuid fusermount. The shell waits for
+ * this process to exit, at most a minute, then starts the AppImage file.
+ */
+function relaunchAppImage(appImage: string, args: string[], extractAndRun: boolean): void {
+  try {
+    accessSync(appImage, fsConstants.X_OK);
+  } catch (error) {
+    console.warn("[local-reset] the AppImage cannot be started again from where it was; it resets at the next launch", error);
+    app.exit(0);
+    return;
+  }
+  // It waits for this process, and in extract-and-run also for the AppImage
+  // runtime that started it, which removes the extracted copy once this
+  // process is gone, so the new runtime does not reuse a folder being
+  // removed. Each gets its own minute at most.
+  const script = 'pids="$1"; shift; for p in $pids; do i=0; while kill -0 "$p" 2>/dev/null && [ "$i" -lt 300 ]; do sleep 0.2; i=$((i+1)); done; done; exec "$@"';
+  const env = { ...process.env, ...(extractAndRun ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}) };
+  try {
+    const pids = appImageHandoffWaitPids(extractAndRun, process.pid, process.ppid).join(" ");
+    const child = spawn("/bin/sh", ["-c", script, "sh", pids, appImage, ...args], { detached: true, stdio: "ignore", env });
+    child.unref();
+    child.once("spawn", () => app.exit(0));
+    child.once("error", (error) => {
+      console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+      app.exit(0);
+    });
+    setTimeout(() => app.exit(0), 2_000);
+    return;
+  } catch (error) {
+    console.warn("[local-reset] could not start the app again after the reset request; it resets at the next launch", error);
+  }
+  app.exit(0);
+}
+
+/** Phase 1 of Reset OpenAdminOS. Resolves once the restart is scheduled. */
+async function resetOpenAdminOS(confirmation: unknown): Promise<void> {
+  if (localResetRequested) {
+    throw new LocalResetRequestError("A reset is already in progress. OpenAdminOS restarts in a moment.");
+  }
+  localResetRequested = true;
+  // The folder this reset is for is fixed now, before any check awaits:
+  // a folder restored or swapped in while the checks run gets no marker.
+  let committedFolder: LocalResetFolderIdentity | undefined = localResetFolderIdentity(app.getPath("userData"));
+  // The scheduler and the login item are per user, not per folder: they are
+  // turned off only while the data folder is still the one being reset, so
+  // a profile restored meanwhile keeps its background start.
+  const committedFolderGuard = () => {
+    const now = localResetFolderIdentity(app.getPath("userData"));
+    if (!committedFolder || !now || !sameSessionFolder(committedFolder, now)) {
+      throw new Error("left on, because the data folder is no longer the one the reset was accepted for");
+    }
+  };
+  try {
+    await requestLocalReset(confirmation, {
+      checkReady: async () => {
+        if (!committedFolder) {
+          throw new LocalResetRequestError("The reset could not start: the data folder could not be read, or it cannot be told apart from another folder on this disk. Nothing was removed.");
+        }
+        if (folderGoesThroughLink(app.getPath("userData"))) {
+          throw new LocalResetRequestError(localResetDataFolderLinkMessage());
+        }
+        const policyProblem = localResetPolicyProblem(app.getPath("userData"));
+        if (policyProblem) throw new LocalResetRequestError(`The reset could not start: ${policyProblem}. Nothing was removed.`);
+        const blocker = await store.beginLocalReset();
+        if (blocker) throw new LocalResetRequestError(blocker);
+        // From here runs, Nova sends and deliveries are refused by the reset
+        // flag, which a refused request lifts again.
+      },
+      writeMarker: async (marker) => {
+        // Checked again right before each write: a data folder that has
+        // become a link since the checks gets no marker, so no other
+        // profile can receive a reset request.
+        const dataFolder = app.getPath("userData");
+        if (folderGoesThroughLink(dataFolder)) {
+          throw new Error("the data folder became a link to another place");
+        }
+        // Both writes (the request and its warnings) go only to the folder
+        // taken before the checks.
+        committedFolder = await writeLocalResetMarker(dataFolder, marker, {
+          expectFolder: committedFolder,
+          onCommitted: () => {
+            try {
+              store.markLocalResetCommitted();
+            } finally {
+              // No update check starts after the commit: electron-updater
+              // writes its staging id into the data folder through file
+              // system functions it captured at load, which the guard cannot see.
+              stopAutoUpdater();
+            }
+          },
+        });
+      },
+      // No sign-out here: it would rewrite the token caches in place, which
+      // cannot be bound to the folder the reset was accepted for. The token
+      // files are removed with the data folder at the next launch, before
+      // anything can read them.
+      stopTenantWork: async () => {
+        // The marker is written, so the reset goes ahead: no connector send
+        // is approved from here on and no organization starts new work. Done
+        // here, after the commit, so a refused request never declines an
+        // approval or stops work.
+        blockConnectorConfirmations("OpenAdminOS is resetting. Nothing was sent.");
+        await store.closeAllTenantWork();
+      },
+      disableScheduler: async () => {
+        // A development build never registered the per-user scheduler; the
+        // installed app's registration is not its to remove. A process that
+        // the LaunchAgent started (its window came from a later launch)
+        // would be stopped by launchd mid-request if it unloaded its own
+        // job: the launch that finishes the reset removes it instead.
+        if (!app.isPackaged) return;
+        if (process.platform === "darwin" && isBackgroundSchedulerLaunch) return;
+        removeSchedulerRegistration(committedFolderGuard);
+      },
+      disableLoginItem: async () => {
+        if (process.platform !== "darwin" || !app.isPackaged) return;
+        committedFolderGuard();
+        disableCompanionLoginItemForReset();
+      },
+      build: app.isPackaged ? "installed" : "development",
+    });
+  } catch (error) {
+    localResetRequested = false;
+    store.cancelLocalReset();
+    blockConnectorConfirmations(undefined);
+    throw error;
+  }
+  console.info("[local-reset] reset requested; restarting");
+  // The reply reaches the window first, so it can say that the app restarts.
+  setTimeout(() => {
+    void store
+      .shutdown(LOCAL_RESET_SHUTDOWN_MS)
+      .catch((error: unknown) => console.warn("[local-reset] stopping background work failed", error))
+      .finally(relaunchInteractive);
+  }, 500);
+}
+
+/** Handlers that need no store: registered in both launch modes, the reset-incomplete window uses them. */
+function registerStorelessIpcHandlers(): void {
+  // No store needed; the reset-incomplete window sets its theme too.
   ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
     const appearance = parseNativeAppearance(
       theme,
@@ -5359,6 +5805,56 @@ function registerIpcHandlers() {
       }
     }
   }));
+  ipcMain.handle("openadminos:get-local-reset-info", handleTrusted(() => localResetInfo()));
+  ipcMain.handle(
+    "openadminos:reset-openadminos",
+    handleTrusted((_event, confirmation: unknown) => {
+      if (localResetReport?.status === "incomplete") {
+        throw new LocalResetRequestError("The earlier reset has not finished. Choose Try again.");
+      }
+      return resetOpenAdminOS(confirmation);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-local-reset-report",
+    handleTrusted(() =>
+      localResetReport && (localResetReport.status === "incomplete" || !localResetReportDismissed)
+        ? localResetReport
+        : null,
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:dismiss-local-reset-report",
+    handleTrusted(() => {
+      if (localResetReport?.status === "completed") localResetReportDismissed = true;
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:retry-local-reset",
+    handleTrusted(() => {
+      if (localResetReport?.status !== "incomplete") return;
+      relaunchInteractive();
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:show-local-reset-data-folder",
+    handleTrusted(async () => {
+      // The real data folder: during recovery the app runs from a temporary profile.
+      const failure = await shell.openPath(localResetReport?.dataFolder ?? app.getPath("userData"));
+      if (failure) throw new Error(`The data folder could not be opened: ${failure}`);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:quit-after-incomplete-reset",
+    handleTrusted(() => {
+      if (localResetReport?.status !== "incomplete") return;
+      removeLocalResetRecoveryProfile();
+      app.exit(0);
+    }),
+  );
+}
+
+function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:get-companion-snapshot",
     handleTrusted(() => getCompanionSnapshot()),
@@ -6862,12 +7358,33 @@ function registerIpcHandlers() {
   );
 }
 
+// A pending Reset OpenAdminOS, read before the lock. A scheduler wake never
+// runs or resumes a reset: on macOS it is the LaunchAgent's own job, which
+// the reset unloads, so it exits and leaves the reset to an interactive
+// launch, and it never touches the scheduler registration meanwhile.
+function pendingLocalResetBuildNow(): "installed" | "development" | "unknown" | undefined {
+  try {
+    const marker = readLocalResetMarker(app.getPath("userData"));
+    return marker ? marker.build ?? "unknown" : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** Read again under the lock below; that reading drives the wipe and the cleanup after it. */
+let pendingLocalResetBuild = pendingLocalResetBuildNow();
+const yieldToPendingLocalReset = Boolean(pendingLocalResetBuild && isBackgroundSchedulerLaunch);
+let localResetYielding = yieldToPendingLocalReset;
+if (yieldToPendingLocalReset) {
+  console.info("[local-reset] a reset is pending; the scheduler wake leaves it to an interactive launch");
+  app.exit(0);
+}
+
 // A scheduler registration written by a development checkout relaunches
 // it every minute. That copy holds the single-instance lock, so this launch
 // would hand off to it and show a blank dev window instead. Point such a
 // registration (or one whose binary is gone) at this copy before taking
 // the lock, and stop the other copy.
-if (app.isPackaged && !isBackgroundSchedulerLaunch) {
+if (app.isPackaged && !isBackgroundSchedulerLaunch && !pendingLocalResetBuild) {
   try {
     if (process.platform === "darwin" && macosLaunchAgentState() === "stale") {
       writeMacosLaunchAgent();
@@ -6884,7 +7401,9 @@ if (app.isPackaged && !isBackgroundSchedulerLaunch) {
   }
 }
 
-const gotLock = app.requestSingleInstanceLock();
+// A yielding scheduler wake does not take the lock either, so the
+// interactive launch that finishes the reset never loses it to that wake.
+const gotLock = yieldToPendingLocalReset ? false : app.requestSingleInstanceLock();
 debugStartupLog("single instance lock", {
   gotLock,
   argv: process.argv,
@@ -6897,8 +7416,63 @@ if (!gotLock) {
   debugStartupLog("quitting because single instance lock was not acquired");
   app.quit();
 } else {
+  // A pending Reset OpenAdminOS empties the data folder now: after the
+  // single-instance lock, before Chromium reads Local State and before any
+  // store, session or safeStorage use.
+  // app.exit does not stop this script, so a yielding wake skips the wipe too.
+  // A marker committed after the first reading, while another process still
+  // held the lock, is caught by reading it again here.
+  if (!localResetYielding) {
+    pendingLocalResetBuild = pendingLocalResetBuildNow();
+    if (pendingLocalResetBuild && isBackgroundSchedulerLaunch) {
+      localResetYielding = true;
+      console.info("[local-reset] a reset is pending; the scheduler wake leaves it to an interactive launch");
+      app.exit(0);
+    }
+  }
+  if (!localResetYielding) localResetReport = runLocalResetAtLaunch();
+  // The recovery window must not write into the folder it could not reset
+  // (it may be a link to a shared folder): Chromium's files and the window
+  // state go to a fresh temporary profile instead. The lock stays where it
+  // was taken.
+  if (localResetReport?.status === "incomplete") {
+    try {
+      localResetRecoveryProfile = mkdtempSync(join(tmpdir(), "openadminos-reset-recovery-"));
+      app.setPath("userData", localResetRecoveryProfile);
+      app.on("will-quit", removeLocalResetRecoveryProfile);
+      // app.exit skips will-quit; the process exit event covers every way out.
+      process.once("exit", removeLocalResetRecoveryProfile);
+    } catch (error) {
+      removeLocalResetRecoveryProfile();
+      // Without its own profile the window would write into the folder the
+      // reset could not empty. No window can show yet, so this one notice is
+      // native, and the launch stops.
+      console.error("[local-reset] the recovery window could not get its own profile", error);
+      const notice = [
+        `The reset of this device has not finished, and OpenAdminOS could not create a temporary folder to show what is left (${error instanceof Error ? error.message : String(error)}). OpenAdminOS does not open until the reset finishes.`,
+        "",
+        "Not finished:",
+        ...localResetReport.failed.map((entry) => `${entry.item}: ${entry.reason}`),
+        "",
+        "Uninstall and reset in the OpenAdminOS docs describes what to do. Then open OpenAdminOS again.",
+      ].join("\n");
+      showNoticeBeforeReady("Reset did not finish", notice);
+      localResetYielding = true;
+      app.exit(1);
+    }
+  }
   app.on("second-instance", (_event, argv) => {
+    if (localResetReport?.status === "incomplete") {
+      if (argv.includes(BACKGROUND_SCHEDULER_ARG)) return;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        showDockForInteractiveSession();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      return;
+    }
     if (argv.includes(BACKGROUND_SCHEDULER_ARG)) {
+      if (localResetRequested) return;
       void store?.fireDueSchedules();
       void store?.fireDueNovaFollowUps();
       void store?.refreshDueGraphCaches();
@@ -6940,6 +7514,25 @@ if (!gotLock) {
         // Non-fatal: dock icon is cosmetic in dev.
       }
     }
+
+    if (localResetYielding) return;
+    registerStorelessIpcHandlers();
+    if (localResetReport?.status === "incomplete") {
+      // The app stays closed until the reset finishes, so old data is never
+      // mixed with new. A background wake only waits for the next launch.
+      if (isBackgroundSchedulerLaunch) {
+        app.exit(0);
+        return;
+      }
+      showDockForInteractiveSession();
+      installSecurityGuards();
+      // Nothing else runs in this mode, so closing the window quits, on macOS too.
+      app.on("window-all-closed", () => app.quit());
+      // No window state is saved: the temporary profile is removed on the way out.
+      void createWindow({ show: true, route: LOCAL_RESET_INCOMPLETE_ROUTE, persistState: false });
+      return;
+    }
+    if (localResetReport?.status === "completed") finishLocalResetAfterReady(localResetReport);
 
     const userDataDir = app.getPath("userData");
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, DEFAULT_TOKEN_CACHE_FILE));
@@ -7085,7 +7678,9 @@ if (!gotLock) {
     // Fetch or update the documentation index in the background. Never
     // blocks startup and never raises a dialog; Settings shows the state.
     void store.autoInstallRetrievalIndex();
-    void store.autoInstallEmbeddingModel();
+    // Not on the launch right after a reset: it would download a model into
+    // the local runtime's own store before the admin chose anything again.
+    if (localResetReport?.status !== "completed") void store.autoInstallEmbeddingModel();
     debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
@@ -7154,7 +7749,8 @@ if (!gotLock) {
     // Avoid accumulating ticks while a provider probe or queue operation is slow.
     let officeTickPending = false;
     const tickOffice = async () => {
-      if (officeTickPending) return;
+      // After a reset request the stores are closing; nothing new starts.
+      if (officeTickPending || localResetRequested) return;
       officeTickPending = true;
       try {
         await store.tickOffice();
@@ -7169,6 +7765,7 @@ if (!gotLock) {
     setInterval(() => { void tickOffice(); }, 2_000);
     const SCHEDULER_TICK_MS = 60_000;
     setInterval(() => {
+      if (localResetRequested) return;
       void store.fireDueSchedules();
       void store.fireDueNovaFollowUps();
       void store.refreshDueGraphCaches();

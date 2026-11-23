@@ -9,6 +9,7 @@ import {
   deriveToolHostsCopy,
   deriveTrustCopy,
   HOSTED_CONFIRM_COPY,
+  LOCAL_RESET_COPY,
   PROVIDER_COMPANIES,
   promptsGoTo,
   sendsThroughTool,
@@ -26,7 +27,10 @@ function stringsIn(value: unknown): string[] {
 
 describe("v0.4 copy catalog", () => {
   it("uses the restrained product voice", () => {
-    const strings = stringsIn({ CHAT_COPY, COMMON_COPY, SETTINGS_ITEMS, SETTINGS_SECTIONS, SETUP_COPY });
+    const resetLists = (["macos", "windows", "linux"] as const).flatMap((platform) =>
+      [true, false].flatMap((packaged) => LOCAL_RESET_COPY.removed({ dataFolder: "/data", packaged, platform, policyFilePresent: true })),
+    );
+    const strings = stringsIn({ CHAT_COPY, COMMON_COPY, SETTINGS_ITEMS, SETTINGS_SECTIONS, SETUP_COPY, LOCAL_RESET_COPY, resetLists });
     expect(strings.length).toBeGreaterThan(30);
     for (const value of strings) {
       expect(value.trim()).not.toBe("");

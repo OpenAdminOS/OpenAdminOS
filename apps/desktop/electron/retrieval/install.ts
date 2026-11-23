@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { DataFolderSealedError, dataFolderSealed } from "../data-folder-seal.js";
 import { normalizeIndexMeta } from "./retrieval.js";
 
 /**
@@ -238,8 +239,16 @@ export function parseChecksums(text: string): Map<string, string> {
 async function promoteStaging(staging: string, target: string): Promise<void> {
   // Replace only after validation so a failed install never leaves a
   // half-written index where a working one used to be.
+  // A reset sealed the data folder: the installed index is not replaced.
+  const sealedCheck = () => {
+    if (dataFolderSealed()) throw new DataFolderSealedError();
+  };
+  sealedCheck();
   await rm(`${target}.previous`, { recursive: true, force: true });
+  sealedCheck();
   if (existsSync(target)) await rename(target, `${target}.previous`);
+  sealedCheck();
   await rename(staging, target);
+  sealedCheck();
   await rm(`${target}.previous`, { recursive: true, force: true });
 }

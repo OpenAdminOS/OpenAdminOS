@@ -212,7 +212,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "OpenAdminOS",
       "uninstallDisplayName": "OpenAdminOS ${version}",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": true
     },
     "appx": {
       "applicationId": "OpenAdminOS",

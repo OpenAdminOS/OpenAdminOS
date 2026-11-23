@@ -21,6 +21,13 @@
           "children": []
         },
         {
+          "title": "Uninstall and reset",
+          "source": "getting-started/uninstall-and-reset.md",
+          "route": "basics/uninstall-and-reset",
+          "path": "basics/uninstall-and-reset",
+          "children": []
+        },
+        {
           "title": "First run",
           "source": "getting-started/first-run.md",
           "route": "basics/first-run",
@@ -465,6 +472,10 @@
     {
       "source": "getting-started/installation",
       "destination": "basics/installation"
+    },
+    {
+      "source": "getting-started/uninstall-and-reset",
+      "destination": "basics/uninstall-and-reset"
     },
     {
       "source": "getting-started/first-run",

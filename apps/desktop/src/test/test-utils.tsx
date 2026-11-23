@@ -497,6 +497,15 @@ export function makeMockBridge(
         driftRetention,
       }),
     ),
+    getLocalResetInfo: vi.fn(async () => ({
+      dataFolder: "/Users/admin/Library/Application Support/OpenAdminOS",
+      packaged: true,
+      platform: "macos" as const,
+      policyFilePresent: false,
+    })),
+    resetOpenAdminOS: vi.fn(async () => undefined),
+    getLocalResetReport: vi.fn(async () => null),
+    dismissLocalResetReport: vi.fn(async () => undefined),
     getRunHistoryRetentionSettings: vi.fn(async () => runHistoryRetention),
     setRunHistoryRetentionSettings: vi.fn(async (input) => {
       runHistoryRetention = {
