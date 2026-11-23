@@ -666,6 +666,34 @@ describe("Model fit in Chat", () => {
     assert.equal(dispatched, 1);
   });
 
+  it("passes the same on-device check to the adapter for an internal resend", async () => {
+    const inner: RunLlmApi = {
+      available: true,
+      async complete(options) {
+        await options.beforeOllamaResend?.();
+        return { text: "ok", model: "m" };
+      },
+      async *stream(options) {
+        await options.beforeOllamaResend?.();
+        yield { delta: "ok", accumulated: "ok", done: true, model: "m" };
+      },
+    };
+    for (const method of ["complete", "stream"] as const) {
+      let checked = 0;
+      const wrapped = guardModelFitLlm(inner, {
+        before: async () => {
+          if (++checked === 2) throw new Error("Model no longer on this device.");
+        },
+        dispatched: () => undefined,
+      });
+      await assert.rejects(async () => {
+        if (method === "complete") await wrapped.complete({ prompt: "test" });
+        else for await (const _chunk of wrapped.stream({ prompt: "test" })) { /* drain */ }
+      }, /Model no longer on this device/);
+      assert.equal(checked, 2);
+    }
+  });
+
   it("refuses a call that names another model than the reviewed one", async () => {
     const calls: Array<string | undefined> = [];
     const inner: RunLlmApi = {

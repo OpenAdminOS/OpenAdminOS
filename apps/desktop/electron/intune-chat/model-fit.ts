@@ -209,13 +209,7 @@ export function resolveChatTurnProvider(input: {
 /**
  * Wraps a model so every call first passes `before` (a fresh on-device
  * check for a retry on a model on this device) and then reports that a
- * request was dispatched. Calls the adapter makes inside one request (such
- * as Ollama's own context retry) go to the same address and model name and
- * are not checked again.
- * TODO(ugur): the Ollama adapter (packages/runtime/src/llm-ollama.ts, owned
- * by another workstream) could take a hook before its internal context
- * retry, so an alias that turns remote-backed within one request is refused
- * there too. This PR does not edit that file.
+ * request was dispatched. Ollama uses the same check before each internal resend.
  */
 export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<void>; dispatched: () => void; model?: string | undefined }): RunLlmApi {
   // A call that names another model than the reviewed one is refused before any check or I/O:
@@ -238,7 +232,7 @@ export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<
       await guard.before();
       options.signal?.throwIfAborted();
       if (llm.available) guard.dispatched();
-      return llm.complete(options);
+      return llm.complete({ ...options, beforeOllamaResend: guard.before });
     },
     stream: async function* (options) {
       sameModel(options);
@@ -246,7 +240,7 @@ export function guardModelFitLlm(llm: RunLlmApi, guard: { before: () => Promise<
       await guard.before();
       options.signal?.throwIfAborted();
       if (llm.available) guard.dispatched();
-      yield* llm.stream(options);
+      yield* llm.stream({ ...options, beforeOllamaResend: guard.before });
     },
   };
 }

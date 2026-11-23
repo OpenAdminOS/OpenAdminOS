@@ -4702,6 +4702,8 @@ export interface LlmOptions {
    * of sending. Chat leaves it unset, so a provider may raise its context.
    */
   enforceContextWindow?: boolean;
+  /** Host check before an Ollama adapter resends a request internally. */
+  beforeOllamaResend?: () => Promise<void>;
 }
 
 export interface LlmTokenUsage {

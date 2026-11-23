@@ -2734,10 +2734,8 @@ model that is no longer listed or is now remote-backed, or when the list
 cannot be read; for LM Studio and Lemonade it classifies the address they
 are reached at, and refuses one outside this device (Lemonade's address can
 be set to another machine, so its local choice is bound to that address too). That check runs again
-before every model call of the request, not only once. The Ollama adapter's
-own context retry inside one call goes to the same address and model name and
-is not checked again; a hook there is a follow-up for the adapter
-(packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
+before every model call of the request and before Ollama resends the prompt
+inside a call. A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
 deployment) when its accept step opens, and the host refuses the send if the destination
 changed since. The check and the binding come from one read of the
