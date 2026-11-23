@@ -2912,6 +2912,79 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("keeps an alias's family through a failed /api/show, and forgets it only when Ollama says it is gone", async () => {
+    let show: "ok" | "busy" | "gone" = "ok";
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          if (show === "busy") { res.statusCode = 503; res.end(); return; }
+          if (show === "gone") { res.statusCode = 404; res.end(JSON.stringify({ error: "model not found" })); return; }
+          res.end(JSON.stringify({ details: { family: "gptoss" } }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "steady-alias:latest" });
+      await llm.complete({ prompt: "p" });
+      show = "busy";
+      await llm.complete({ prompt: "p" });
+      show = "gone";
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low", "low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("looks an alias up even when another request's newer list read applied first", async () => {
+    let target = "qwen3";
+    let tagsCalls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          const answer = JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] });
+          // This request's list read is slow; a newer one for another model applies first.
+          if (tagsCalls === 2) {
+            await refreshOllamaModelFamily(endpoint, "gpt-oss:20b");
+            res.end(answer);
+            return;
+          }
+          res.end(answer);
+          return;
+        }
+        if (req.url === "/api/show") { res.end(JSON.stringify({ details: { family: target } })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "switch-alias:latest" });
+      await llm.complete({ prompt: "p" });
+      // The alias now points to gpt-oss.
+      target = "gptoss";
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
     let version: string | undefined = "0.17.7";
     const sent: unknown[] = [];

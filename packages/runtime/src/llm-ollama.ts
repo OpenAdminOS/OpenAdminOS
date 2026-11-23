@@ -1152,7 +1152,9 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
     if (!Array.isArray(data.models)) return;
     const wanted = ollamaModelName(model);
-    if (!recordOllamaModelList(endpoint, data.models, seq)) return;
+    // A newer list read may have applied first; a name this list does not
+    // have is still looked up below, guarded per name.
+    recordOllamaModelList(endpoint, data.models, seq);
     if (data.models.some((candidate) => entryName(candidate) === wanted)) return;
     // Not listed: a server alias (Ollama lists only the model it points to)
     // is read with /api/show, which also loads no model and reports the
@@ -1165,7 +1167,11 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
       signal: controller.signal,
       redirect: modelServerRedirect(showUrl),
     }).catch(() => undefined);
-    if (shown?.ok && !isRefusedRedirect(shown, showUrl)) {
+    // Only a definite "not found" means the name is gone; a timeout, a
+    // server error or an unreadable answer keeps what is known.
+    if (!shown || isRefusedRedirect(shown, showUrl)) return;
+    if (shown.status !== 404 && !shown.ok) return;
+    if (shown.ok) {
       const details = (await shown.json().catch(() => undefined)) as unknown;
       // The list read just applied (its number) for the name, unless a newer one has.
       const key = familyKey(endpoint, model);
@@ -1173,8 +1179,8 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
         ollamaFamilyReadApplied.set(key, seq);
         recordFamily(key, details);
         ollamaShownOnly.add(key);
-        return;
       }
+      return;
     }
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.

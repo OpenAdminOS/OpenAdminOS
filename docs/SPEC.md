@@ -403,8 +403,8 @@ names. Before each request, the
 app reads the model's entry from `/api/tags` (which loads no model; a name
 it does not list, such as a server alias, is read with `/api/show`, which
 reports the family of the model it points to; a list read without such a
-name keeps what `/api/show` showed, and without a digest a new
-`modified_at` counts as another version), so a model
+name keeps what `/api/show` showed, which only a "not found" from it clears,
+and without a digest a new `modified_at` counts as another version), so a model
 replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
 resolves them (a `:local` after a tag is dropped; a lone `x:local` is
