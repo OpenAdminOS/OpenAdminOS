@@ -1136,7 +1136,7 @@ describe("IntuneChat hosted-provider consent", () => {
 
   it.each([
     { cloud: true, otherDestination: "ollama-endpoint", name: "Send this question to Ollama Cloud?" },
-    { cloud: false, otherDestination: "ollama-cloud", name: "Send this question through Ollama?" },
+    { cloud: false, otherDestination: "ollama-cloud", name: "Send this question to Ollama?" },
   ])("asks again for the selected Ollama destination when $otherDestination was remembered", async ({ cloud, otherDestination, name }) => {
     const user = userEvent.setup();
     const old = "openadminos:intune-chat-hosted-consent:v1:tenant-1:ollama";
