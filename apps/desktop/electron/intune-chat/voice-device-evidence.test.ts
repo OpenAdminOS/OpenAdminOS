@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import type { GraphCacheResourceStatus } from '@openadminos/agent-sdk';
+import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from '@openadminos/agent-sdk';
 import type { IntuneChatToolContext } from './tools.js';
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from './voice-device-evidence.js';
 const status = [{ resource: 'managedDevices', refreshedAt: '2026-09-12T10:00:00Z', rows: 9 }] as GraphCacheResourceStatus[];
@@ -19,7 +19,10 @@ it('recognizes the actual transcript without silently dropping OS or ownership f
 });
 it('lists only explicitly reported false encryption and retains freshness and truncation caveats', async () => {
   const f = fixture(async () => { throw new Error('Unexpected network'); });
-  const text = await voiceDeviceEvidenceAnswer('List devices that are not encrypted', status, f.ctx, generatedAt, () => {});
+  const traces: IntuneChatToolTraceEntry[] = [];
+  const text = await voiceDeviceEvidenceAnswer('List devices that are not encrypted', status, f.ctx, generatedAt, () => {}, entry => traces.push(entry));
+  assert.equal(traces[0]?.cacheSource?.refreshedAt, status[0]?.refreshedAt);
+  assert.equal(traces[0]?.resultSummary, "1 of 1 matching rows");
   assert.equal(f.reads[0].filters[0].value, false);
   assert.match(text!, /1 device reports not encrypted/); assert.match(text!, /unknown/); assert.match(text!, /refreshed .*2026/);
   assert.doesNotMatch(text!, /2026-09-12T10:00/);

@@ -1,3 +1,4 @@
+import type { ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -69,7 +70,7 @@ after(() => {
   else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
 });
 
-async function withHarness(run: (harness: Harness) => Promise<void>, options: { model?: string } = {}): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { model?: string; timestampLocale?: ChatDateTimeLocale } = {}): Promise<void> {
   const model = options.model ?? "openadminos/openadmin-8b";
   const dir = await mkdtemp(join(tmpdir(), "openadminos-local-accuracy-"));
   const statePath = join(dir, "state.json");
@@ -100,7 +101,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
   // The failure memory is per process; each test starts with the model's slate clean.
   recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
   const store = new AppStateStore({
-    filePath: statePath, userDataPath: dir, statsApiUrl: "",
+    filePath: statePath, userDataPath: dir, statsApiUrl: "", chatDateTimeLocale: options.timestampLocale,
     tokenStore: { read: async () => "", write: async () => undefined },
     graphFactory: () => ({
       listManagedDevices: async () => [],
@@ -121,6 +122,13 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+const lastSyncDate = new Date("2026-05-18T09:30:00.000Z");
+const lastSyncText = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  ...(lastSyncDate.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}),
+}).format(lastSyncDate);
 
 const final = (answer: string) => JSON.stringify({ final: true, answer });
 
@@ -232,7 +240,7 @@ describe("local model accuracy on the tester's tenant", () => {
         const message = (await store.sendIntuneChatMessage({ content: "why is MAC-02 not compliant?", refreshIfStale: false })).assistantMessage;
         assert.match(message.content, /MAC-02 \(macOS\) is marked noncompliant/, mode);
         assert.match(message.content, /does not include which compliance policy or setting failed/, mode);
-        assert.match(message.content, /the last sync was on 2026-05-18/, mode);
+        assert.ok(message.content.includes(`the last sync was on ${lastSyncText}`), mode);
         assert.doesNotMatch(message.content, /FileVault/, mode);
         assert.equal(calls.length, 0, `${mode}: no model call`);
         assert.equal(message.engineNotice, undefined, mode);
@@ -463,7 +471,7 @@ describe("local model accuracy on the tester's tenant", () => {
       assert.equal(twoSpaces.deviceId, "md-desk-2");
       const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: twoSpaces, cacheStatus: cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]), generatedAt: at })!.facts.join("\n");
       assert.match(detail, /is marked noncompliant/);
-      assert.match(detail, /the last sync was on 2026-05-18/);
+      assert.ok(detail.includes(`the last sync was on ${lastSyncText}`));
       assert.equal(deviceComplianceReasonQuery("Why is Front Desk not compliant?", cache, tenant.id)?.deviceId, "md-desk-1");
 
       // A curly apostrophe is part of the name: "Alice’s iPhone" is not "Alice's iPhone".
@@ -518,7 +526,7 @@ describe("local model accuracy on the tester's tenant", () => {
       assert.match(message.content, /WIN-GRACE is in its grace period/);
       assert.match(message.content, /which compliance setting this device does not meet/);
       assert.doesNotMatch(message.content, /setting failed|failing rule/);
-      assert.match(message.content, /Lead in the data: the last sync was on 2026-05-18/);
+      assert.ok(message.content.includes(`Lead in the data: the last sync was on ${lastSyncText}`));
     });
   });
 
@@ -958,6 +966,30 @@ describe("computed answers on partial and never-synced data", () => {
       assert.match(count("How many devices are there in Intune?", partial()), /^Intune managed devices: at least 9, the part the cache holds\./);
       assert.match(count("How many noncompliant devices are there?", partial(90)), /^Intune managed devices not compliant in the cached part: 6\./);
     });
+  });
+
+  it("uses the desktop timestamp preferences in typed and voice answers", async () => {
+    const timestampLocale = { locale: "de-DE", timeZone: "Asia/Tokyo" };
+    await withHarness(async ({ store }) => {
+      const formatter = new Intl.DateTimeFormat(timestampLocale.locale, {
+        timeZone: timestampLocale.timeZone, year: "numeric", month: "short",
+        day: "numeric", hour: "2-digit", minute: "2-digit",
+      });
+      await store.setChatInvestigationMode("always-deterministic");
+      const input = { content: Q1, refreshIfStale: false };
+      const results = [
+        await store.sendIntuneChatMessage(input),
+        await store.streamIntuneChatMessage(input, () => {}),
+        await store.streamIntuneChatMessage(
+          { ...input, content: "List devices that are not encrypted" }, () => {}, { voice: true },
+        ),
+      ];
+      for (const { assistantMessage } of results) {
+        const raw = assistantMessage.toolTrace?.[0]?.cacheSource?.refreshedAt;
+        assert.ok(raw, assistantMessage.content);
+        assert.ok(assistantMessage.content.includes(formatter.format(new Date(raw))));
+      }
+    }, { timestampLocale });
   });
 
   it("shows an older refresh in the device's time zone and preserves the exact evidence time", async () => {

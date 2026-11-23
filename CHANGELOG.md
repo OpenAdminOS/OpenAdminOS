@@ -84,7 +84,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-- Chat and Nova show cache refresh times in your local date and time format.
+- Chat, Nova and multi-tenant dossiers use the same local date and time format for cache refreshes. Device last-sync dates omit the time and show the year for dates outside the current year.
 - Chat with a local model keeps a prose answer that quotes a tool call as an example, reads a final answer that also names a tool as the answer, no longer flashes a raw tool request while the cached-data answer streams, and never shows an unreadable device sync time as a date.
 - Chat with a local model counts in code: device counts, per OS splits and not compliant lists come from SQL over every cached Intune device (a new `count_cached` tool and an authoritative computed result in the answer pack), Entra devices are no longer mixed into Intune answers, follow-ups such as "only Windows" narrow the previous result, "why is this device not compliant" says the failing rule is not in the cached data and gives the last sync (and corrects the premise for a compliant device), standing instructions earlier in a chat are no longer bypassed by direct cache answers, a local model's answer to those questions is written by code from the counts, and auto mode falls back within four model calls with a notice that says what happened.
 - Runs: only an error from a Microsoft Graph call is treated as a Graph access denial. An HTTP 403 from Ollama, LM Studio, a vendor API, Splashtop or an MCP server no longer gets "Graph consent required" or "Graph access cause unverified" advice, and such a denial stored by earlier versions is dropped from run history, the run failure panel and the scheduled run status.

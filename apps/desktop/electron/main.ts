@@ -1,5 +1,6 @@
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
+import { supportedChatLocale, type ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
 import { NovaService } from "./nova.js";
 import { NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_REASON } from "../src/shared/nova-session.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
@@ -328,6 +329,15 @@ if (
   // Apply before `whenReady()` so a LaunchAgent scheduler wake does not
   // briefly flash OpenAdminOS in the Dock while the hidden process starts.
   app.setActivationPolicy("accessory");
+}
+
+let chatDateTimeLocale: Required<ChatDateTimeLocale>;
+
+function chatDateTimeArguments(): string[] {
+  return [
+    `--openadminos-chat-locale=${chatDateTimeLocale.locale}`,
+    `--openadminos-chat-time-zone=${chatDateTimeLocale.timeZone}`,
+  ];
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -5189,6 +5199,7 @@ async function createWindow({ show = true, route, persistState = true }: { show?
     autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
       preload: join(currentDir, "preload.cjs"),
+      additionalArguments: chatDateTimeArguments(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -5286,6 +5297,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     visualEffectState: "active",
     webPreferences: {
       preload: join(currentDir, "preload.cjs"),
+      additionalArguments: chatDateTimeArguments(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -6264,6 +6276,7 @@ function registerIpcHandlers() {
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
     { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), providerEndpoint: (providerId) => store.novaProviderEndpoint(providerId), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: (tenantId) => store.novaProfile(tenantId), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
+    chatDateTimeLocale,
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -7541,6 +7554,10 @@ if (!gotLock) {
 
   void app.whenReady().then(async () => {
     debugStartupLog("app ready");
+    chatDateTimeLocale = {
+      locale: supportedChatLocale(app.getLocale()) ?? "en-US",
+      timeZone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
     // In dev the app runs from the unsigned `electron` binary, so macOS
     // shows the default Electron logo in the dock. Override it with the
     // production icon so the dev window looks like the shipped app.
@@ -7641,6 +7658,7 @@ if (!gotLock) {
 
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
+      chatDateTimeLocale,
       // Network failures name the system proxy, which OpenAdminOS's own requests do not use.
       resolveProxy: (url) => session.defaultSession.resolveProxy(url),
       tokenStore,

@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
-import { formatChatDateTime } from "../shared/chat-date-time";
+import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate } from "../shared/chat-date-time";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -3602,7 +3602,7 @@ function ScopeReviewCard({
                     <ReadinessBadge status={tenant.status} />
                   </td>
                   <td className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
-                    {tenant.cacheFreshness ? formatDateTime(tenant.cacheFreshness) : "No cache"}
+                    {tenant.cacheFreshness ? formatRefreshTime(tenant.cacheFreshness) : "No cache"}
                   </td>
                   <td className="px-3 py-2 text-xs leading-5 text-[var(--color-text-muted)]">
                     {tenant.recovery}
@@ -3852,7 +3852,7 @@ function MultiTenantResultArtifact({
       id: "lastRefresh",
       header: "Last refresh",
       sortValue: (tenant) => tenant.lastRefresh ?? "",
-      render: (tenant) => (tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "Unknown"),
+      render: (tenant) => (tenant.lastRefresh ? formatRefreshTime(tenant.lastRefresh) : "Unknown"),
       cellClassName: "text-xs text-[var(--color-text-muted)]",
     },
   ];
@@ -4040,7 +4040,7 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
       id: "lastSync",
       header: "Last sync",
       sortValue: (row) => row.lastSyncDateTime ?? "",
-      render: (row) => (row.lastSyncDateTime ? formatDateTime(row.lastSyncDateTime) : "unknown"),
+      render: (row) => formatDeviceSyncDate(row.lastSyncDateTime ?? "", window.openAdminOS?.chatDateTimeLocale) ?? "unknown",
       cellClassName: "text-[var(--color-text-muted)]",
     },
     {
@@ -4055,7 +4055,7 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
       id: "freshness",
       header: "Freshness",
       sortValue: (row) => row.sourceRefreshedAt ?? "",
-      render: (row) => (row.sourceRefreshedAt ? formatDateTime(row.sourceRefreshedAt) : "unknown"),
+      render: (row) => (row.sourceRefreshedAt ? formatRefreshTime(row.sourceRefreshedAt) : "unknown"),
       cellClassName: "text-[var(--color-text-muted)]",
     },
   ];
@@ -4173,7 +4173,7 @@ function SplitToWorkspacesModal({
               </div>
               <ReadinessBadge status={tenant.status} />
               <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
-                {tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "no cache"}
+                {tenant.lastRefresh ? formatRefreshTime(tenant.lastRefresh) : "no cache"}
               </span>
             </div>
           ))}
@@ -4895,7 +4895,7 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
                 <SourceFact label="Rows" value={String(source.rows)} />
                 <SourceFact
                   label="Freshness"
-                  value={source.refreshedAt ? formatDateTime(source.refreshedAt) : "Not refreshed"}
+                  value={source.refreshedAt ? formatRefreshTime(source.refreshedAt) : "Not refreshed"}
                 />
                 <SourceFact
                   label="Pages"
@@ -4933,6 +4933,15 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
   );
 }
 
+function formatToolResultSummary(entry: IntuneChatToolTraceEntry): string {
+  if (entry.tool !== "query_cache" || entry.cacheSource) return entry.resultSummary;
+  // Older voice traces kept freshness inline in their summary.
+  return entry.resultSummary.replace(
+    /; snapshot (\d{4}-\d{2}-\d{2}T[\d:.]+Z)$/,
+    (_, timestamp: string) => ` · Snapshot refreshed ${formatRefreshTime(timestamp)}`,
+  );
+}
+
 function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
   return (
     <div className="mt-2">
@@ -4962,7 +4971,7 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
                 </Badge>
               </div>
               <div className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
-                {entry.resultSummary}
+                {formatToolResultSummary(entry)}
               </div>
               {entry.mcpSource ? (
                 <div className="mt-1 text-xs leading-5 text-[var(--color-warning)]">
@@ -5268,12 +5277,13 @@ function SuggestedAgentsBlock({
 }
 
 function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  // The epoch is the store's stale-since-write marker, not a real
-  // refresh time; never render it as a 1970 date or a 20k-day age.
-  if (date.getTime() === 0) return "Before the last write (stale)";
-  return formatChatDateTime(date);
+  return formatChatDateTime(new Date(value), window.openAdminOS?.chatDateTimeLocale) ?? value;
+}
+
+function formatRefreshTime(value: string) {
+  // The epoch is the store's stale-since-write marker.
+  if (new Date(value).getTime() === 0) return "Before the last write (stale)";
+  return formatCacheRefreshTime(value, window.openAdminOS?.chatDateTimeLocale) ?? "Unknown";
 }
 
 interface ComposerAgentMatch {
