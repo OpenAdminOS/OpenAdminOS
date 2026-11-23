@@ -8,18 +8,21 @@ export function useModelFitChoices({ issue, ...input }: ChoiceInput) {
   const candidates = issue?.reason === "context-too-small" && issue.neededTokens !== undefined
     ? modelFitLocalCandidates(issue, input.providers, input.managedPolicy)
     : [];
-  // Provider lists can refresh while the notice is open. Keep the lookup keyed to
-  // the offer and its actual candidates so an equivalent list does not restart it.
+  // Ready local server details include their endpoint. Invalidate the lookup
+  // when a server moves, even if it reports the same model names.
+  const providerDetails = new Map(input.providers.map((provider) => [provider.id, provider.detail]));
+  // Equivalent provider lists can refresh while the notice is open.
+  // Keep the key tied to the offer, candidates and their server details.
   const lookup = candidates.length > 0 ? JSON.stringify({
     offer: issue?.offerId,
-    models: candidates.map(({ providerId, model }) => [providerId, model]),
+    models: candidates.map(({ providerId, model }) => [providerId, model, providerDetails.get(providerId)]),
   }) : undefined;
   const [checked, setChecked] = useState<{ lookup: string; windows: ReadonlyMap<string, number> }>();
   useEffect(() => {
     if (!lookup) return;
     const bridge = window.openAdminOS;
     if (!bridge?.getModelFitContextWindow) return;
-    const { models } = JSON.parse(lookup) as { models: Array<[ProviderId, string]> };
+    const { models } = JSON.parse(lookup) as { models: Array<[ProviderId, string, string | null]> };
     let cancelled = false;
     void Promise.all(models.map(async ([providerId, model]) => {
       const window = await bridge.getModelFitContextWindow?.(providerId, model).catch(() => undefined);
