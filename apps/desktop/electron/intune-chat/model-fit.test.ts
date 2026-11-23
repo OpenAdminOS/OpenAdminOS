@@ -181,7 +181,7 @@ describe("Model fit: classifying a failure", () => {
     const thinking = Object.assign(new Error("reasoning only"), { code: "thinking-only" });
     assert.equal(classifyModelFitFailure(thinking, { providerId: "ollama", isLocal: true })?.reason, "thinking-only");
     const llamaCpp = classifyModelFitFailure('HTTP 400 {"error":{"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":8192}}', { providerId: "lemonade", isLocal: true });
-    assert.deepEqual([llamaCpp?.neededTokens, llamaCpp?.limitTokens], [20000, 8192]);
+    assert.deepEqual([llamaCpp?.neededTokens, llamaCpp?.limitTokens], [21024, 8192]);
   });
 
   it("keeps Apple Foundation's prompt count and context size", () => {
@@ -362,6 +362,24 @@ describe("Model fit: the per-request override", () => {
       /runs on another server/,
     );
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL, neededTokens: 40652 }, contextWindows: new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), 65536], [modelFitContextKey("ollama", "big-70b"), 65536]]), providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
+  });
+
+  it("requires room for the answer when llama.cpp reports a prompt-only count", () => {
+    const issue = classifyModelFitFailure('HTTP 400 {"error":{"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":8192}}', {
+      providerId: "lemonade", model: "local-8b", isLocal: true,
+    });
+    assert.ok(issue);
+    const contextWindow = (tokens: number) => new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), tokens]]);
+    assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(20000) }).local, []);
+    assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(21024) }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
+  });
+
+  it("offers a same-size local model with enough context only for a context failure", () => {
+    const provider = { ...ollama, models: [LOCAL_MODEL, "another-8b"] };
+    const issue = { providerId: "ollama", model: LOCAL_MODEL, neededTokens: 32000 } as const;
+    const contextWindows = new Map([[modelFitContextKey("ollama", "another-8b"), 32768]]);
+    assert.deepEqual(modelFitChoices({ issue: { ...issue, reason: "context-too-small" }, providers: [provider], contextWindows }).local.map((choice) => choice.model), ["another-8b"]);
+    assert.deepEqual(modelFitChoices({ issue: { ...issue, reason: "repeated-failure" }, providers: [provider], contextWindows }).local, []);
   });
 
   it("keeps the active model as the anchor after a larger local model also failed", () => {

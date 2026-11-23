@@ -150,7 +150,9 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
   // llama.cpp server, which LM Studio and Lemonade run.
   const availableContext = /exceeds the available context size/i.test(text);
   if (/exceed_context_size_error|\b(?:request|prompt) exceeds the available context size\b/i.test(text) || (availableContext && /"n_ctx"\s*:/.test(text))) {
-    const neededTokens = count(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
+    const promptTokens = count(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
+    // The server reports only the prompt. Leave room for the answer when checking another model.
+    const neededTokens = promptTokens === undefined ? undefined : positive(promptTokens + 1024);
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
@@ -305,7 +307,7 @@ export function modelFitContextKey(providerId: ProviderId, model: string): strin
   return JSON.stringify([providerId, model]);
 }
 
-/** Larger installed models to consider, in the order they should be offered. */
+/** Installed alternatives to consider, in the order they should be offered. */
 export function modelFitLocalCandidates(
   issue: ModelFitIssue,
   providers: readonly ProviderSummary[],
@@ -315,7 +317,8 @@ export function modelFitLocalCandidates(
   const local: Array<ModelFitChoice & { model: string }> = [];
   // An unknown parameter count still permits candidates for a context failure,
   // where their reported context is what establishes whether the request fits.
-  const sizeUnknownContext = currentSize === undefined && issue.reason === "context-too-small";
+  const contextFailure = issue.reason === "context-too-small";
+  const sizeUnknownContext = currentSize === undefined && contextFailure;
   if (currentSize !== undefined || sizeUnknownContext) {
     for (const provider of providers) {
       if (!provider.isLocal || !isProviderReady(provider) || provider.modelsFromPolicy || !managedProviderAllowed(managedPolicy, provider.id)) continue;
@@ -326,13 +329,12 @@ export function modelFitLocalCandidates(
         const locked = managedLockedModel(managedPolicy, provider.id);
         if (locked !== undefined && model !== locked) continue;
         const size = modelSizeBillions(model);
-        if (size !== undefined && (currentSize === undefined || size > currentSize)) {
+        if (size !== undefined && (currentSize === undefined || size > currentSize || (contextFailure && size === currentSize))) {
           local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
         }
       }
     }
-    // The next larger models first; with the failed size unknown, the largest first, since a small
-    // one is the likeliest to have the same small context.
+    // Closest in size first. If the failed size is unknown, check the largest first.
     local.sort((a, b) => (sizeUnknownContext ? -1 : 1) * ((modelSizeBillions(a.model) ?? 0) - (modelSizeBillions(b.model) ?? 0)));
   }
   return local;

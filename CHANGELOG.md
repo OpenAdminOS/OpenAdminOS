@@ -96,7 +96,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Ollama Cloud models show where prompts are processed and require the usual hosted Chat confirmation. On-device reruns only offer models that run on this device.
 - Run for real explains why the dry run provider or model needs attention and how to continue.
-- Chat and failed runs show a local alternative for a context overflow only when its reported context can fit the request, with the token limit on the row.
+- Chat and failed runs show a local alternative for a context overflow only when its reported context can fit the request, with the token limit on the row. The check leaves room for the answer when the server reports only the prompt size and can offer models of the same size with enough context.
 - Chat withdraws expired model fit choices and closes any open send confirmation, with a prompt to send the question again.
 - Run for real keeps the dry run provider and model through setup and links back to the agent page when you need a different provider or model.
 - Chat keeps showing the token counts for each oversized question after repeated context overflows.

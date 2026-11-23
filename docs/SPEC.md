@@ -2713,8 +2713,10 @@ Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
 follows redirects; up to two installed local models with a larger parameter count in
 their name. For a context overflow, local choices must report a context
-window at least as large as the request's known token count. The row shows
-the reported window. The app reads model metadata without loading the model:
+window at least as large as the request's known token count. This includes
+a 1,024-token answer margin when llama.cpp reports only the prompt size.
+A model of the same parameter count can qualify if its context fits.
+The row shows the reported window. The app reads model metadata without loading the model:
 Ollama uses the window from `/api/show` (including a pinned `num_ctx`),
 LM Studio uses the loaded instance's setting, and Lemonade uses the context
 reported for its downloaded model. Split the question (a hint, and the question back in an empty
