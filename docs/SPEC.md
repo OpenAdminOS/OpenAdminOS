@@ -3545,7 +3545,10 @@ Ollama can list local and cloud models from the same on-device server. Cloud
 tags ending in `-cloud` or `:cloud`, and aliases with remote metadata in
 `/api/tags`, are hosted. The status strip, Chat, and run review name Ollama
 Cloud and disclose that prompts are processed on ollama.com. Chat uses the
-same confirmation rules as other hosted models. A mixed Ollama installation
+same confirmation rules as other hosted models. Chat remembers consent for
+Ollama Cloud and an off-device Ollama server separately. The host checks the
+destination on each hosted Chat send, and decisions saved before this
+distinction require confirmation again. A mixed Ollama installation
 defaults to a local model when no model is pinned. An on-device rerun can
 use only a listed model that runs on this device, and setup and review show
 a recovery message when none is available.

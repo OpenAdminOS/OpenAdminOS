@@ -1,4 +1,4 @@
-import { providerForModel } from "@openadminos/agent-sdk";
+import { hostedOllamaDestination, providerForModel } from "@openadminos/agent-sdk";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, announcesLookup, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
@@ -4103,6 +4103,9 @@ export class IntuneChatService {
       throw new Error(
         "Hosted provider confirmation does not match the selected provider. Confirm the chat send again.",
       );
+    }
+    if (!scheduled && consent.ollamaDestination !== hostedOllamaDestination(provider, model)) {
+      throw new Error("The Ollama destination changed or was not confirmed. Review where the question will be sent and confirm again.");
     }
     if (tenant && consent.noTenant === true) {
       throw new Error(

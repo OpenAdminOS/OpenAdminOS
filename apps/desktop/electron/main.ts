@@ -4028,6 +4028,11 @@ function validateHostedProviderConsent(
   const fitOffer = value.modelFitOfferId === undefined
     ? {}
     : { modelFitOfferId: requireBoundedString(value.modelFitOfferId, "hostedProviderConsent.modelFitOfferId", 128) };
+  const ollamaDestination = value.ollamaDestination;
+  if (ollamaDestination !== undefined && (providerId !== "ollama" || (ollamaDestination !== "ollama-cloud" && ollamaDestination !== "ollama-endpoint"))) {
+    throw new Error("hostedProviderConsent.ollamaDestination must name a hosted Ollama destination.");
+  }
+  const ollama = ollamaDestination ? { ollamaDestination } : {};
   const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
   // Bound to no tenant or to one tenant, never both: a no-tenant
   // acknowledgement covers no tenant context and no workspace.
@@ -4038,7 +4043,7 @@ function validateHostedProviderConsent(
     if (value.tenantId !== undefined || workspaceContext) {
       throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
     }
-    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember, ...fitOffer };
+    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember, ...ollama, ...fitOffer };
   }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
@@ -4046,6 +4051,7 @@ function validateHostedProviderConsent(
     ...(model !== undefined ? { model } : {}),
     acknowledgedAt,
     ...remember,
+    ...ollama,
     ...(workspaceContext ? { workspaceContext } : {}),
     ...fitOffer,
   };

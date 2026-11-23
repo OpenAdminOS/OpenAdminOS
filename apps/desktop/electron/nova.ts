@@ -1,4 +1,4 @@
-import { activeModelProvider } from "@openadminos/agent-sdk";
+import { activeModelProvider, hostedOllamaDestination, type HostedOllamaDestination } from "@openadminos/agent-sdk";
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
@@ -89,6 +89,7 @@ export class NovaService {
     providerId: AppState["activeProviderId"];
     model?: string;
     reasoningIsLocal: boolean;
+    ollamaDestination: HostedOllamaDestination | undefined;
     /** Where the reasoning provider was reached at start, for providers that can be pointed elsewhere. */
     endpoint?: string;
     /** The sign-in the organization was connected with at start; a reconnect replaces it. */
@@ -307,7 +308,8 @@ export class NovaService {
       // The session belongs to the organization and provider active when it was asked for.
       const endpoint = await this.providerEndpoint(state.activeProviderId);
       const connection = tenantConnection(state, state.activeTenantId);
-      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}), ...(connection ? { connection } : {}) };
+      const model = selectedNovaModel(state);
+      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model, ollamaDestination: hostedOllamaDestination(provider, model), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}), ...(connection ? { connection } : {}) };
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(identity.tenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
@@ -748,6 +750,7 @@ export class NovaService {
                 hostedProviderConsent: {
                   tenantId: session.tenantId,
                   providerId: session.providerId,
+                  ...(session.ollamaDestination ? { ollamaDestination: session.ollamaDestination } : {}),
                   acknowledgedAt: new Date().toISOString(),
                 },
               }
@@ -1064,7 +1067,7 @@ function tenantConnection(state: AppState, tenantId: string): string | undefined
 
 /** Whether a session's organization, connection or reasoning provider is no longer what it started with. */
 function sessionContextDiffers(
-  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; endpoint?: string; connection?: string },
+  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; ollamaDestination?: HostedOllamaDestination | undefined; endpoint?: string; connection?: string },
   state: AppState,
   writableActiveTenantId: string | undefined,
   endpoint: string | undefined,
@@ -1077,6 +1080,7 @@ function sessionContextDiffers(
     state.activeProviderId !== session.providerId ||
     selectedNovaModel(state) !== session.model ||
     novaReasoningProvider(state)?.isLocal !== session.reasoningIsLocal ||
+    hostedOllamaDestination(novaReasoningProvider(state), session.model) !== session.ollamaDestination ||
     (endpoint ?? undefined) !== (session.endpoint ?? undefined)
   );
 }

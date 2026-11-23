@@ -1,4 +1,4 @@
-import { OLLAMA_CLOUD_NAME, isOnDeviceModel, isRemoteBackedModel, providerForModel, resolveRunModel } from "@openadminos/agent-sdk";
+import { OLLAMA_CLOUD_NAME, hostedOllamaDestination, type HostedOllamaDestination, isOnDeviceModel, isRemoteBackedModel, providerForModel, resolveRunModel } from "@openadminos/agent-sdk";
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
@@ -141,6 +141,7 @@ type HostedChatConsentPrompt = {
   tenantId?: string;
   providerId: ProviderId;
   providerName: string;
+  ollamaDestination?: HostedOllamaDestination;
   model?: string;
   workspaceContext?: WorkspacePromptContextInput;
   workspaceContextSummary?: WorkspacePromptContextSummary;
@@ -793,8 +794,10 @@ function IntuneChatContent() {
       !blockedOnDevice &&
       (requiresHostedChatConsent(provider, activeTenant, activeModel) || Boolean(workspaceContext))
     ) {
+      const ollamaDestination = hostedOllamaDestination(provider, activeModel);
       setHostedConsentPrompt({
         content,
+        ...(ollamaDestination ? { ollamaDestination } : {}),
         ...(conversationIdOverride !== undefined
           ? { conversationId: conversationIdOverride }
           : {}),
@@ -1266,7 +1269,7 @@ function IntuneChatContent() {
     const pending = hostedConsentPrompt;
     if (!pending) return;
     if (rememberHostedConsent) {
-      rememberHostedChatConsent(pending.tenantId, pending.providerId, pending.model);
+      rememberHostedChatConsent(pending.tenantId, pending.providerId, pending.model, pending.ollamaDestination);
     }
     setHostedConsentPrompt(null);
     await executeSend(
@@ -1277,6 +1280,8 @@ function IntuneChatContent() {
         rememberHostedConsent,
         pending.workspaceContextSummary,
         pending.model,
+        undefined,
+        pending.ollamaDestination,
       ),
       pending.conversationId,
       pending.workspaceContext,
@@ -4441,22 +4446,23 @@ function modelFitReturnModel(offer: ModelFitOffer): string {
 }
 
 function requiresHostedChatConsent(
-  provider: { id: ProviderId; isLocal: boolean } | undefined,
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels"> | undefined,
   tenant: { id: string } | undefined,
   model?: string,
 ): provider is { id: ProviderId; isLocal: false } {
   if (!provider || provider.isLocal) return false;
-  return !hasRememberedHostedChatConsent(tenant?.id, provider.id, model);
+  return !hasRememberedHostedChatConsent(tenant?.id, provider.id, model, hostedOllamaDestination(provider, model));
 }
 
 function rememberedHostedProviderConsent(
-  provider: { id: ProviderId; isLocal: boolean } | undefined,
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels"> | undefined,
   tenant: { id: string } | undefined,
   model?: string,
 ): HostedProviderConsentInput | undefined {
   if (!provider || provider.isLocal) return undefined;
-  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model)) return undefined;
-  return createHostedProviderConsent(tenant?.id, provider.id, true, undefined, model);
+  const destination = hostedOllamaDestination(provider, model);
+  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model, destination)) return undefined;
+  return createHostedProviderConsent(tenant?.id, provider.id, true, undefined, model, undefined, destination);
 }
 
 /** `tenantId` undefined binds the confirmation to a send with no tenant. */
@@ -4468,10 +4474,11 @@ export function createHostedProviderConsent(
   model?: string,
   /** The model fit offer this acceptance is for; it covers that one request only. */
   modelFitOfferId?: string,
+  ollamaDestination?: HostedOllamaDestination,
 ): HostedProviderConsentInput {
   const acknowledgedAt = new Date().toISOString();
   // The model the admin saw in the confirmation; the host refuses a send that would use another.
-  const named = { ...(model ? { model } : {}), ...(modelFitOfferId ? { modelFitOfferId } : {}) };
+  const named = { ...(model ? { model } : {}), ...(modelFitOfferId ? { modelFitOfferId } : {}), ...(ollamaDestination ? { ollamaDestination } : {}) };
   if (!tenantId) {
     return { noTenant: true, providerId, ...named, acknowledgedAt, ...(remember ? { remember: true } : {}) };
   }
@@ -4496,30 +4503,30 @@ export function createHostedBatchProviderConsent(
   };
 }
 
-function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId, model?: string): string {
+function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId, model?: string, destination?: HostedOllamaDestination): string {
   // Tenant ids are GUIDs or the sample id, so the no-tenant key never
   // collides with one. The no-tenant decision also names the model, so a
   // model change asks again.
-  return tenantId
-    ? `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`
-    : `openadminos:intune-chat-hosted-consent:v2:no-tenant:${providerId}:${model ?? "default"}`;
+  const scope = tenantId ? `${tenantId}:${providerId}` : `no-tenant:${providerId}:${model ?? "default"}`;
+  return `openadminos:intune-chat-hosted-consent:v3:${scope}${destination ? `:${destination}` : ""}`;
 }
 
 function hasRememberedHostedChatConsent(
   tenantId: string | undefined,
   providerId: ProviderId,
   model?: string,
+  destination?: HostedOllamaDestination,
 ): boolean {
   try {
-    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId, model)) === "true";
+    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId, model, destination)) === "true";
   } catch {
     return false;
   }
 }
 
-function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId, model?: string): void {
+function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId, model?: string, destination?: HostedOllamaDestination): void {
   try {
-    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId, model), "true");
+    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId, model, destination), "true");
   } catch {
     // If localStorage is unavailable, the next hosted send will ask again.
   }

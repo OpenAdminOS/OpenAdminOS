@@ -463,7 +463,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
 
   it("asks again after a model change when the no-tenant decision was remembered for another model (finding 10)", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4", "true");
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-4", "true");
     try {
       const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
@@ -472,13 +472,13 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       expect(await screen.findByRole("dialog", { name: "Send this question through Codex?" })).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
-      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4");
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-4");
     }
   });
 
   it("asks again with the tenant-bound confirmation once a tenant is connected, even after remembering the no-tenant one", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5", "true");
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-5", "true");
     try {
       const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
@@ -488,7 +488,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       expect(within(dialog).getByText(/Selected cached data from .+ is included\./)).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
-      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-5");
     }
   });
 });
@@ -1130,8 +1130,35 @@ describe("IntuneChat hosted-provider consent", () => {
     await user.click(within(dialog).getByRole("button", { name: "Send to Ollama Cloud" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(1));
     expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]?.[0].hostedProviderConsent).toMatchObject({
-      providerId: "ollama", model: "cloud-alias", tenantId: "tenant-1",
+      providerId: "ollama", model: "cloud-alias", tenantId: "tenant-1", ollamaDestination: "ollama-cloud",
     });
+  });
+
+  it.each([
+    { cloud: true, otherDestination: "ollama-endpoint", name: "Send this question to Ollama Cloud?" },
+    { cloud: false, otherDestination: "ollama-cloud", name: "Send this question through Ollama?" },
+  ])("asks again for the selected Ollama destination when $otherDestination was remembered", async ({ cloud, otherDestination, name }) => {
+    const user = userEvent.setup();
+    const old = "openadminos:intune-chat-hosted-consent:v1:tenant-1:ollama";
+    const other = `openadminos:intune-chat-hosted-consent:v3:tenant-1:ollama:${otherDestination}`;
+    window.localStorage.setItem(old, "true");
+    window.localStorage.setItem(other, "true");
+    try {
+      const providers = mockProviders.map((provider) => provider.id === "ollama" ? {
+        ...provider, isLocal: cloud, models: ["alias"], remoteModels: cloud ? ["alias"] : [],
+      } : provider);
+      const bridge = makeMockBridge({}, createMockAppState({
+        providers, activeProviderId: "ollama", activeModelByProviderId: { ollama: "alias" },
+      }));
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+      await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Which Windows devices are stale?");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      expect(await screen.findByRole("dialog", { name })).toBeInTheDocument();
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    } finally {
+      window.localStorage.removeItem(old);
+      window.localStorage.removeItem(other);
+    }
   });
 
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {

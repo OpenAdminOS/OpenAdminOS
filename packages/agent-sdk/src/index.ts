@@ -2726,11 +2726,15 @@ export interface LocalDataSummary {
  * model. The host refuses a no-tenant acknowledgement for any send that
  * includes tenant context.
  */
+export type HostedOllamaDestination = "ollama-cloud" | "ollama-endpoint";
+
 export type HostedProviderChatConsent =
   | {
       tenantId: string;
       noTenant?: undefined;
       providerId: ProviderId;
+      /** Whether Ollama sends through its configured server or uses ollama.com. */
+      ollamaDestination?: HostedOllamaDestination;
       /** The model the admin confirmed. When present, the host refuses a send that would use another model. */
       model?: string;
       acknowledgedAt: string;
@@ -2744,6 +2748,8 @@ export type HostedProviderChatConsent =
       /** The question, the conversation and reference results leave the device; no tenant data does. */
       noTenant: true;
       providerId: ProviderId;
+      /** Whether Ollama sends through its configured server or uses ollama.com. */
+      ollamaDestination?: HostedOllamaDestination;
       /** A no-tenant decision is remembered per provider and model, so the host always checks the model. */
       model?: string;
       acknowledgedAt: string;
@@ -5053,6 +5059,15 @@ export function isOllamaCloudModel(model: string | undefined): boolean {
 
 export function isRemoteBackedModel(provider: Pick<ProviderSummary, "id" | "remoteModels">, model: string | undefined): boolean {
   return Boolean(model && (provider.remoteModels?.includes(model) || (provider.id === "ollama" && isOllamaCloudModel(model))));
+}
+
+export function hostedOllamaDestination(
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels"> | undefined,
+  model?: string,
+): HostedOllamaDestination | undefined {
+  if (provider?.id !== "ollama") return undefined;
+  if (isRemoteBackedModel(provider, model)) return "ollama-cloud";
+  return provider.isLocal ? undefined : "ollama-endpoint";
 }
 
 export function isOnDeviceModel(provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">, model: string | undefined): boolean {

@@ -840,10 +840,19 @@ it("refuses a Chat send to an Ollama Cloud alias until the hosted model is confi
       service.streamIntuneChatMessage({ content: QUESTION }, () => undefined),
       /Hosted provider confirmation is required/,
     );
+    const consent = { noTenant: true as const, providerId: "ollama" as const, model: LOCAL_MODEL, acknowledgedAt: new Date().toISOString() };
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION, hostedProviderConsent: { ...consent, remember: true, ollamaDestination: "ollama-endpoint" } }, () => undefined),
+      /Ollama destination changed or was not confirmed/,
+    );
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION, hostedProviderConsent: consent }, () => undefined),
+      /Ollama destination changed or was not confirmed/,
+    );
     assert.equal(built.length, 0);
     const result = await service.streamIntuneChatMessage({
       content: QUESTION,
-      hostedProviderConsent: { noTenant: true, providerId: "ollama", model: LOCAL_MODEL, acknowledgedAt: new Date().toISOString() },
+      hostedProviderConsent: { ...consent, ollamaDestination: "ollama-cloud" },
     }, () => undefined);
     assert.ok(built.includes("ollama"));
     assert.equal(result.assistantMessage.modelFit, undefined);
