@@ -2644,6 +2644,38 @@ export interface SetGraphCacheRefreshScheduleInput {
   intervalMinutes?: number;
 }
 
+/** What the Reset OpenAdminOS dialog shows before anything is removed. */
+export interface LocalResetInfo {
+  /** The data folder the reset empties. */
+  dataFolder: string;
+  /** Installed builds also remove the Keychain item, caches and the scheduler; development builds do not. */
+  packaged: boolean;
+  platform: "macos" | "windows" | "linux";
+  /** An IT policy file sits in the data folder and stays. */
+  policyFilePresent: boolean;
+}
+
+/** One item a reset could not remove, with the reason in plain words. */
+export interface LocalResetProblem {
+  item: string;
+  reason: string;
+}
+
+/**
+ * The outcome of the wipe at launch. `incomplete` means some of the data
+ * folder is still there: the app does not open until the reset finishes.
+ */
+export interface LocalResetReport {
+  status: "completed" | "incomplete";
+  requestedAt?: string;
+  finishedAt: string;
+  dataFolder: string;
+  /** Data folder entries that are still there. */
+  failed: LocalResetProblem[];
+  /** Items outside the data folder that could not be removed. Reported once and not retried. */
+  warnings: LocalResetProblem[];
+}
+
 export interface LocalDataSummary {
   sqliteBytes: number;
   chatConversationCount: number;
@@ -3665,6 +3697,25 @@ export interface OpenAdminOSApi {
   getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
   clearIntuneChatHistory(): Promise<LocalDataSummary>;
   clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  /** Reset OpenAdminOS: what the dialog shows. */
+  getLocalResetInfo?(): Promise<LocalResetInfo>;
+  /**
+   * Reset OpenAdminOS: checks the typed phrase, closes every organization to
+   * new work, turns off background work and restarts the app, which empties
+   * the data folder, token caches included, before anything else runs. The
+   * sign-ins stay in the token caches until that launch. Rejects, with
+   * nothing removed, when the reset cannot start.
+   */
+  resetOpenAdminOS?(confirmation: string): Promise<void>;
+  /** The outcome of a reset that ran at this launch, until it is dismissed. */
+  getLocalResetReport?(): Promise<LocalResetReport | null>;
+  dismissLocalResetReport?(): Promise<void>;
+  /** Reset did not finish: restart and try the remaining items again. */
+  retryLocalReset?(): Promise<void>;
+  /** Reset did not finish: open the data folder in Finder or Explorer. */
+  showLocalResetDataFolder?(): Promise<void>;
+  /** Reset did not finish: quit without opening the app. */
+  quitAfterIncompleteReset?(): Promise<void>;
   getRunHistoryRetentionSettings(): Promise<RunHistoryRetentionSettings>;
   setRunHistoryRetentionSettings(
     input: SetRunHistoryRetentionSettingsInput,

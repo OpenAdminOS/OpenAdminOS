@@ -16,6 +16,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { isIP } from "node:net";
 import { join } from "node:path";
 
+import { dataFolderSealed } from "./data-folder-seal.js";
+
 import type {
   AgentConnectorRequirement,
   AgentExecution,
@@ -136,6 +138,8 @@ function writeCache(
   index: RegistryIndex,
   sourceUrl: string,
 ): void {
+  // A reset sealed the data folder: the cache is not written there again.
+  if (dataFolderSealed()) return;
   const dir = cacheDir(userDataPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {

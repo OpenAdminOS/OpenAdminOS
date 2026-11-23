@@ -66,8 +66,18 @@ Format:
 
 ## Never load a local model on the maintainer's Mac
 
-**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models, and tokenizer or model metadata work uses recorded counts or mocked `/api/show` and `/api/tags`. Live app checks use a hosted provider (Claude Code or Codex CLI).
+**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models, and tokenizer or model metadata work uses recorded counts or mocked `/api/show` and `/api/tags`. Live app checks use a hosted provider (Claude Code or Codex CLI), and end-to-end profiles are seeded with a hosted provider or none, never a local provider that could answer or embed.
 
-**Why:** Loading a local model makes the machine unusable. On 2026-11-19 the prompt size estimator was calibrated by sending synthetic prompts to OpenAdmin 8B and gpt-oss 20B through the local Ollama, and the maintainer forbade it during the local model accuracy work for the 8B demos.
+**Why:** Loading a local model makes the machine unusable. On 2026-11-19 the prompt size estimator was calibrated by sending synthetic prompts to OpenAdmin 8B and gpt-oss 20B through the local Ollama, and the maintainer forbade it during the local model accuracy work for the 8B demos. The PR #212 end-to-end check also launched a dev build whose seeded profile had Ollama active.
 
 **How to apply:** Before an end-to-end or smoke run, confirm its provider is a mock or a hosted CLI. Run `ollama ps` afterwards (it reads status and loads nothing); if a model is listed, run `ollama stop <model>` at once. Name the provider and model used in every hand-back, and pass this rule to every delegated child and reviewer.
+
+---
+
+## Do not edit a worktree while a reviewer is reading it
+
+**Pattern:** While a delegated reviewer reviews a commit in the shared worktree, keep the tree at that commit: write fixes for findings from other reviewers into a patch outside the tree (or wait), and apply them after every reviewer of the round has reported.
+
+**Why:** In PR #212 I edited files during Muse's rounds 8, 10 and 15 although the brief promised an untouched tree; Muse saw mixed states, one test run failed on a half-applied change, and its results had to be qualified.
+
+**How to apply:** After starting a review round, do not touch tracked files until all reviewers of that round report. If a finding arrives early, save the fix with `git diff > <scratchpad>/patch` and `git checkout -- .`, or prepare it only in notes. Before the first edit after any reviewer reports, list which reviewers of the round are still running and edit only when none is; it slipped again in round 26 when one report arrived and the fix felt ready.

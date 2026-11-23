@@ -373,6 +373,10 @@ export function humanizeMsalError(
   if (error instanceof Error && error.name === "TenantConnectCancelledError") {
     return "Sign-in was cancelled. Nothing was connected.";
   }
+  // A reset in progress says so itself; it is not a sign-in failure.
+  if (error instanceof Error && (error.name === "DataFolderSealedError" || raw.startsWith("OpenAdminOS is resetting"))) {
+    return raw;
+  }
   if (error instanceof Error && error.name === "TenantConnectTimeoutError") {
     return "Microsoft sign-in timed out after five minutes. Start again when you are ready.";
   }

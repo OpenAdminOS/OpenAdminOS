@@ -16,6 +16,19 @@ interface Pending {
 
 const pending = new Map<string, Pending>();
 
+/** Set while Reset OpenAdminOS runs: no connector send is approved until the restart. */
+let blockedReason: string | undefined;
+
+export function blockConnectorConfirmations(reason: string | undefined): void {
+  blockedReason = reason;
+  if (!reason) return;
+  // Requests waiting on the admin are declined now; nothing is sent.
+  for (const [requestId, entry] of pending) {
+    pending.delete(requestId);
+    entry.resolve({ approved: false, reason });
+  }
+}
+
 let getMainWindow: () => BrowserWindow | null = () => null;
 let connectorNameLookup: (id: string) => string = (id) => id;
 let connectorConfigLookup: (id: string) => Record<string, unknown> = () => ({});
@@ -49,6 +62,7 @@ export async function requestConnectorConfirmation(
   signal?: AbortSignal,
 ): Promise<ConfirmationDecision> {
   signal?.throwIfAborted();
+  if (blockedReason) return { approved: false, reason: blockedReason };
   const window = getMainWindow();
   if (!window || window.isDestroyed()) {
     return { approved: false, reason: "No renderer attached to receive confirmation." };
@@ -95,7 +109,9 @@ export function respondConnectorConfirm(
   if (!entry) return;
   pending.delete(requestId);
   entry.resolve(
-    decision.approved
+    blockedReason
+      ? { approved: false, reason: blockedReason }
+      : decision.approved
       ? { approved: true }
       : { approved: false, reason: decision.reason },
   );
