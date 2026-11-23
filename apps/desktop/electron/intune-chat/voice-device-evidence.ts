@@ -1,4 +1,5 @@
 import { graphCacheRequestFromNextLink } from "../state-helpers.js";
+import { formatCacheRefreshTime, formatChatDateTime } from "../../src/shared/chat-date-time.js";
 import { randomUUID } from "node:crypto";
 import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from '@openadminos/agent-sdk';
 import type { IntuneChatToolContext } from './tools.js';
@@ -44,7 +45,7 @@ export function voiceDeviceEvidenceIntent(question: string): DeviceEvidenceQuery
 }
 
 /** Render verified fields directly. No model can invent causal explanations on this path. */
-export async function voiceDeviceEvidenceAnswer(question: string, statuses: GraphCacheResourceStatus[], ctx: IntuneChatToolContext, progress: (message: string) => void, trace?: (entry: IntuneChatToolTraceEntry) => void): Promise<string | undefined> {
+export async function voiceDeviceEvidenceAnswer(question: string, statuses: GraphCacheResourceStatus[], ctx: IntuneChatToolContext, generatedAt: string, progress: (message: string) => void, trace?: (entry: IntuneChatToolTraceEntry) => void): Promise<string | undefined> {
   const query = deviceEvidenceQuery(question);
   if (!query) return undefined;
   const { kind } = query;
@@ -55,7 +56,8 @@ export async function voiceDeviceEvidenceAnswer(question: string, statuses: Grap
   trace?.({ id: randomUUID(), tool: "query_cache", params: { resource: "managedDevices", filters: query.filters, limit: 50 }, resultSummary: `${result.returnedRows} of ${result.totalCount} matching rows; snapshot ${status.refreshedAt}`, durationMs: 0, createdAt: new Date().toISOString(), completedAt: new Date().toISOString() });
   const rows = result.rows.map(r => r.row as Record<string, unknown>);
   const partial = status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal);
-  const prefix = `Intune snapshot refreshed ${status.refreshedAt}: ${status.rows} cached device records${partial ? '; coverage is partial' : ''}.${status.lastError ? ' The latest refresh failed; this is older evidence.' : ''}`;
+  const refreshTime = formatCacheRefreshTime(status.refreshedAt) ?? 'earlier';
+  const prefix = `Intune snapshot refreshed ${refreshTime}: ${status.rows} cached device records${partial ? '; coverage is partial' : ''}.${status.lastError ? ' The latest refresh failed; this is older evidence.' : ''}`;
   const label = result.totalCount === 1 ? query.label.replace(/\bdevices\b/, 'device').replace(/\breport\b/, 'reports').replace(/\bhave\b/, 'has').replace(/\bare\b/, 'is') : query.label;
   progress(`Reading reported ${kind === 'encryption' ? 'encryption' : 'compliance'}: ${result.returnedRows} of ${result.totalCount} matching cached devices.`);
   if (kind !== 'causes') {
@@ -63,7 +65,8 @@ export async function voiceDeviceEvidenceAnswer(question: string, statuses: Grap
     const unknown = kind === 'encryption' ? ' Missing encryption values are unknown, not counted as encrypted or unencrypted.' : '';
     return `${prefix}\n${result.totalCount} ${label} in this snapshot.${partial || status.lastError ? ' This does not establish the current tenant-wide count.' : ''}${unknown}${!query.countOnly && result.totalCount > rows.length ? ` Showing the first ${rows.length}; this is not the complete list.` : ''}\n${query.countOnly ? '' : names.map(n => `- ${n}`).join('\n')}`;
   }
-  const lines = [prefix, `${result.totalCount} devices are marked non-compliant. Causes below come from live policy setting states checked ${new Date().toISOString()}, not inferred from inventory fields.`];
+  const checkedAt = formatChatDateTime(new Date(generatedAt), { year: "numeric" });
+  const lines = [prefix, `${result.totalCount} devices are marked non-compliant. Causes below come from live policy setting states checked ${checkedAt}, not inferred from inventory fields.`];
   let graph: Awaited<ReturnType<IntuneChatToolContext['graphForScopes']>>;
   try { graph = await ctx.graphForScopes(['DeviceManagementConfiguration.Read.All']); }
   catch { ctx.signal?.throwIfAborted(); return `${prefix} I cannot read compliance policy details with this connection. Check DeviceManagementConfiguration.Read.All consent in tenant settings. The causes remain unverified.`; }

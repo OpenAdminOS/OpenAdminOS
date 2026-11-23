@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
+import { formatChatDateTime } from "../shared/chat-date-time";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -5272,12 +5273,7 @@ function formatDateTime(value: string) {
   // The epoch is the store's stale-since-write marker, not a real
   // refresh time; never render it as a 1970 date or a 20k-day age.
   if (date.getTime() === 0) return "Before the last write (stale)";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatChatDateTime(date);
 }
 
 interface ComposerAgentMatch {

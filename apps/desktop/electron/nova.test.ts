@@ -747,8 +747,10 @@ it('keeps the full noncompliant list through channel selection, failed setup and
     questions.push(input.content);
     const content = await voiceDeviceEvidenceAnswer(input.content, [{resource:'managedDevices',rows:9,refreshedAt:'2026-09-13T21:56:23.006Z'}] as any, {
       tenantId:'tenant-a', store:{queryGraphCache: () => ({totalCount:2,returnedRows:2,rows:[{row:{deviceName:'Device A'}},{row:{deviceName:'Device B'}}]})}
-    } as any, () => {});
+    } as any, '2026-09-14T08:00:00.000Z', () => {});
     assert.ok(content, input.content);
+    assert.match(content, /^Intune snapshot refreshed .*2026.*: 9 cached device records/);
+    assert.doesNotMatch(content, /2026-09-13T21:56:23/);
     return {conversation:{id:'report'},assistantMessage:{content,status:'completed'}} as SendIntuneChatMessageResult;
   }, fetch, { ...novaSettingsHost, activeTenantId: async () => f.state.activeTenantId,
     classifyCommand: async () => { throw new Error('Explicit commands must not need a model'); },

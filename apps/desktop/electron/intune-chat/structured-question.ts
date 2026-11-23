@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
+import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite-store.js";
 
 /**
@@ -579,12 +580,14 @@ export function computeStructuredResult(input: {
   query: StructuredQuery;
   cacheStatus: readonly GraphCacheResourceStatus[];
   generatedAt: string;
+  timestampLocale?: ChatDateTimeLocale;
 }): ComputedResult | undefined {
   const { store, tenantId, query } = input;
   const status = input.cacheStatus.find((entry) => entry.resource === query.resource);
   const snapshot = snapshotOf(status);
   if (!status?.refreshedAt) return undefined;
-  if (query.kind === "device-detail") return computeDeviceDetail(input.store, tenantId, query, snapshot, input.generatedAt);
+  const refreshTime = formatCacheRefreshTime(status.refreshedAt, input.timestampLocale);
+  if (query.kind === "device-detail") return computeDeviceDetail(input.store, tenantId, query, snapshot, input.generatedAt, refreshTime);
 
   const listSet = query.list && !query.focus;
   const ids = query.ids ? { ids: query.ids } : {};
@@ -669,8 +672,8 @@ export function computeStructuredResult(input: {
     if (unknown > 0) facts.push(`${unknown} ${unknown === 1 ? "device has" : "devices have"} no reported sync time and ${unknown === 1 ? "is" : "are"} not counted in the sync window.`);
   }
   // A failed latest refresh is said, as the direct answers say it: these counts are older evidence.
-  if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
-  facts.push(`Counted from the Intune device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
+  if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${refreshTime ?? "earlier"}.`);
+  facts.push(`Counted from the Intune device cache${refreshTime ? ` refreshed ${refreshTime}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
 
   // Built from the filters, so a chain of follow-ups reads "Intune managed Windows devices not compliant".
   const listedLabel = describeFilters(dedupe(listedFilters));
@@ -712,6 +715,7 @@ function computeDeviceDetail(
   query: DeviceDetailQuery,
   snapshot: ComputedResult["snapshot"],
   generatedAt: string,
+  refreshTime: string | undefined,
 ): ComputedResult | undefined {
   // The asked name is resolved again in the snapshot that answers, as the first lookup did it: a refresh in this
   // turn can have renamed the device, added another of that name, or added the whole name ("Device Lab" next to
@@ -725,9 +729,9 @@ function computeDeviceDetail(
   if (!row) return undefined;
   const facts: string[] = [];
   // A failed latest refresh is said, as the computed counts say it: this state is older evidence.
-  if (snapshot?.lastError) facts.push(`The latest refresh failed, so this is the device's state in the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
+  if (snapshot?.lastError) facts.push(`The latest refresh failed, so this is the device's state in the snapshot refreshed ${refreshTime ?? "earlier"}.`);
   const state = row.complianceState ?? "not reported";
-  facts.push(`${row.name}${row.operatingSystem ? ` (${row.operatingSystem})` : ""} is marked ${state} in the Intune device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}.`);
+  facts.push(`${row.name}${row.operatingSystem ? ` (${row.operatingSystem})` : ""} is marked ${state} in the Intune device cache${refreshTime ? ` refreshed ${refreshTime}` : ""}.`);
   // Only a failing state has a failed rule to look up; for any other state the question's premise is corrected first.
   const premise = FAILING_COMPLIANCE_STATES.has(state)
     ? undefined

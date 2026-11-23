@@ -2362,7 +2362,7 @@ export class IntuneChatService {
     // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
     // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
     const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext && !modelAnsweredBefore(history)
-      ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
+      ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), answerGeneratedAt, () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
         )
@@ -3160,7 +3160,7 @@ export class IntuneChatService {
     // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
     const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext) || modelAnsweredBefore(history)
       ? undefined
-      : codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+      : codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), answerGeneratedAt, message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;

@@ -4,6 +4,7 @@ import type { GraphCacheResourceStatus } from '@openadminos/agent-sdk';
 import type { IntuneChatToolContext } from './tools.js';
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from './voice-device-evidence.js';
 const status = [{ resource: 'managedDevices', refreshedAt: '2026-09-12T10:00:00Z', rows: 9 }] as GraphCacheResourceStatus[];
+const generatedAt = '2026-09-14T10:00:00.000Z';
 function fixture(request: (input: any) => Promise<unknown>) {
   const reads: any[] = [];
   const ctx = { tenantId: 'test', store: { queryGraphCache: (input: any) => { reads.push(input); return { totalCount: 1, returnedRows: 1, rows: [{ row: { id: 'device-1', deviceName: 'Test device', isEncrypted: false, complianceState: 'noncompliant' } }] }; } }, graphForScopes: async () => ({ request }) } as unknown as IntuneChatToolContext;
@@ -18,9 +19,10 @@ it('recognizes the actual transcript without silently dropping OS or ownership f
 });
 it('lists only explicitly reported false encryption and retains freshness and truncation caveats', async () => {
   const f = fixture(async () => { throw new Error('Unexpected network'); });
-  const text = await voiceDeviceEvidenceAnswer('List devices that are not encrypted', status, f.ctx, () => {});
+  const text = await voiceDeviceEvidenceAnswer('List devices that are not encrypted', status, f.ctx, generatedAt, () => {});
   assert.equal(f.reads[0].filters[0].value, false);
-  assert.match(text!, /1 device reports not encrypted/); assert.match(text!, /unknown/); assert.match(text!, /2026-09-12/);
+  assert.match(text!, /1 device reports not encrypted/); assert.match(text!, /unknown/); assert.match(text!, /refreshed .*2026/);
+  assert.doesNotMatch(text!, /2026-09-12T10:00/);
 });
 it('reads paged failed policy settings and never substitutes guessed encryption or OS causes', async () => {
   const paths: string[] = [];
@@ -31,15 +33,17 @@ it('reads paged failed policy settings and never substitutes guessed encryption 
     return { value: [{ settingName: 'RequireRemainContact', state: 'nonCompliant' }] };
   });
   const traces: unknown[] = [];
-  const text = await voiceDeviceEvidenceAnswer('Why are they non-compliant?', status, f.ctx, () => {}, t => traces.push(t));
+  const text = await voiceDeviceEvidenceAnswer('Why are they non-compliant?', status, f.ctx, generatedAt, () => {}, t => traces.push(t));
   assert.match(text!, /RequireRemainContact/); assert.doesNotMatch(text!, /missing encryption|outdated/);
+  assert.match(text!, /policy setting states checked .*2026/);
+  assert.doesNotMatch(text!, /2026-09-14T10:00/);
   assert.equal(paths.length, 3); assert.equal(traces.length, 4);
   assert.ok(paths.every(p => p.startsWith('/deviceManagement/')));
 });
 it('reports unavailable causes when policy settings fail or are absent', async () => {
   for (const fail of [true, false]) {
     const f = fixture(async () => { if (fail) throw new Error('HTTP 403'); return { value: [] }; });
-    const text = await voiceDeviceEvidenceAnswer('Why are they non-compliant?', status, f.ctx, () => {});
+    const text = await voiceDeviceEvidenceAnswer('Why are they non-compliant?', status, f.ctx, generatedAt, () => {});
     assert.match(text!, fail ? /reason unavailable.*403/ : /reason is unverified/);
   }
 });
@@ -48,7 +52,7 @@ it('renders actual rows for list wording instead of asking the model to summariz
   const f = fixture(async () => { throw new Error('Unexpected Graph call'); });
   for (const question of ['Show all the non-compliant devices as a list', 'list of non-compliant devices', 'List noncompliant devices', 'Show the list of non-compliant devices']) {
     assert.equal(voiceDeviceEvidenceIntent(question), 'compliance', question);
-    const answer = await voiceDeviceEvidenceAnswer(question, status, f.ctx, () => {});
+    const answer = await voiceDeviceEvidenceAnswer(question, status, f.ctx, generatedAt, () => {});
     assert.match(answer!, /- Test device/);
     assert.doesNotMatch(answer!, /refer to.*rows/);
   }
@@ -89,24 +93,24 @@ it('answers encryption and compliance lists/counts across platforms using actual
   ];
   try {
     for (const [question, expected] of matrix) {
-      const answer = await voiceDeviceEvidenceAnswer(question, status, ctx, () => {});
+      const answer = await voiceDeviceEvidenceAnswer(question, status, ctx, generatedAt, () => {});
       assert.ok(answer, question);
       assert.deepEqual(answer.split('\n').filter(line => line.startsWith('- ')).map(line => line.slice(2)).sort(), expected.sort(), question);
       assert.doesNotMatch(answer, /OTHER-TENANT/);
     }
     for (const question of ['How many Windows devices are not encrypted?', 'How many unencrypted Windows devices do we have?']) {
-      const answer = await voiceDeviceEvidenceAnswer(question, status, ctx, () => {});
+      const answer = await voiceDeviceEvidenceAnswer(question, status, ctx, generatedAt, () => {});
       assert.match(answer!, /1 Windows device reports not encrypted/);
       assert.doesNotMatch(answer!, /- WIN/);
     }
     for (const question of ['List unencrypted Windows 11 devices', 'List unencrypted devices except Windows', 'List encrypted and noncompliant Windows devices', 'Retire unencrypted Windows devices']) assert.equal(voiceDeviceEvidenceIntent(question), undefined, question);
     for (const changed of [{ pageLimitReached: true }, { rows: 6, tenantTotal: 12 }, { lastError: 'HTTP 403' }]) {
-      const answer = await voiceDeviceEvidenceAnswer('Which Linux devices are unencrypted?', [{ ...status[0]!, ...changed }], ctx, () => {});
+      const answer = await voiceDeviceEvidenceAnswer('Which Linux devices are unencrypted?', [{ ...status[0]!, ...changed }], ctx, generatedAt, () => {});
       assert.match(answer!, /does not establish the current tenant-wide count/);
     }
-    assert.match((await voiceDeviceEvidenceAnswer(matrix[0]![0], [], ctx, () => {}))!, /unavailable/);
+    assert.match((await voiceDeviceEvidenceAnswer(matrix[0]![0], [], ctx, generatedAt, () => {}))!, /unavailable/);
     store.replaceGraphResources({ tenantId: 'test', resource: 'managedDevices', label: 'Devices', scopeSet: [], refreshedAt: status[0]!.refreshedAt!, rows: Array.from({ length: 55 }, (_, i) => ({ ...rows[0], id: String(i) })) });
-    const capped = await voiceDeviceEvidenceAnswer(matrix[0]![0], [{ ...status[0]!, rows: 55 }], ctx, () => {});
+    const capped = await voiceDeviceEvidenceAnswer(matrix[0]![0], [{ ...status[0]!, rows: 55 }], ctx, generatedAt, () => {});
     assert.match(capped!, /55 Windows devices/); assert.match(capped!, /first 50/);
     assert.equal(capped!.split('\n').filter(line => line.startsWith('- ')).length, 50);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
@@ -114,7 +118,7 @@ it('answers encryption and compliance lists/counts across platforms using actual
 
 it('answers natural unknown-encryption phrasing without dropping additional conditions', async () => {
   const f = fixture(async () => { throw new Error('Unexpected network'); });
-  const answer = await voiceDeviceEvidenceAnswer('Which Windows devices have unknown encryption status?', status, f.ctx, () => {});
+  const answer = await voiceDeviceEvidenceAnswer('Which Windows devices have unknown encryption status?', status, f.ctx, generatedAt, () => {});
   assert.match(answer!, /Windows device has unknown encryption status/);
   assert.deepEqual(f.reads[0].filters, [
     { field: 'isEncrypted', op: 'eq', value: null },
