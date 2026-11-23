@@ -22,7 +22,7 @@ import type {
   SandboxBrokerRequest,
   SandboxBrokerResponse,
 } from "@openadminos/agent-sdk";
-import { ContextTooSmallError } from "@openadminos/agent-sdk";
+import { ContextTooSmallError, contextTooSmallFromError } from "@openadminos/agent-sdk";
 
 import { agentTemplateToRegistrySummary } from "./agent-template.js";
 import {
@@ -221,22 +221,29 @@ async function runScriptAgent(
         }
 
         if (sandboxResult.exitCode !== 0) {
-          // A script that ended on a refused model request (its error names
-          // the refusal) fails with the typed reason, not its stack trace.
-          // A script that caught the refusal and failed later keeps its error.
-          const tooLarge = broker.getContextFailure();
-          if (tooLarge && endedOnSizeRefusal(sandboxResult.stderr)) {
-            throw new ContextTooSmallError(tooLarge);
-          }
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
+          // A model reply with reasoning and no answer is kept as the cause
+          // when the error the script ended with, as its process recorded
+          // it, carries it. That record decides before any reading of the
+          // script's output.
+          const ended = await readExitRecord(exitRecordPath);
+          const reasoning = ended ? broker.llmFailureFor(ended) : undefined;
+          const terminal = ended ? broker.failuresEndedWith(ended) : [];
+          // A script that ended on a refused model request fails with the
+          // typed reason, not its stack trace. A script that caught the
+          // refusal and failed later keeps its error. The recorded broker
+          // failure decides; only without one is the output read for it.
+          const sizeRefusals = terminal.map((error) => contextTooSmallFromError(error));
+          const tooLarge = reasoning
+            ? undefined
+            : terminal.length > 0
+              ? sizeRefusals.every((failure) => failure !== undefined) ? sizeRefusals.at(-1) : undefined
+              : endedOnSizeRefusal(sandboxResult.stderr) ? broker.getContextFailure() : undefined;
+          if (tooLarge) throw new ContextTooSmallError(tooLarge);
           // The script sees only the message of a Graph denial. When it exits
           // on that denial, the typed error is kept as the cause so the run
           // records the Graph denial.
-          // A model reply with reasoning and no answer is kept the same way
-          // when the error the script ended with, as its process recorded
-          // it, carries it.
-          const ended = await readExitRecord(exitRecordPath);
-          const cause = (ended ? broker.llmFailureFor(ended) : undefined) ?? broker.graphDenialFor(detail);
+          const cause = reasoning ?? broker.graphDenialFor(detail);
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
             cause ? { cause } : undefined,

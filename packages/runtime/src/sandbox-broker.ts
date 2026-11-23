@@ -53,6 +53,11 @@ export interface SandboxBroker {
    * such failure is a reply with reasoning and no answer.
    */
   llmFailureFor(endedWith: ScriptExitRecord): Error | undefined;
+  /**
+   * The broker failures the error the script ended with is, matched the same
+   * way: none when the script ended on an error of its own.
+   */
+  failuresEndedWith(endedWith: ScriptExitRecord): Error[];
 }
 
 /** The error a script ended with, as its process recorded it. */
@@ -145,24 +150,25 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
         : undefined,
-    llmFailureFor: (endedWith) => {
+    llmFailureFor(endedWith) {
+      const candidates = this.failuresEndedWith(endedWith);
+      // Attribute the cause only when every candidate agrees on it.
+      if (candidates.length === 0 || !candidates.every((error) => isReasoningWithoutAnswerError(error))) return undefined;
+      return candidates[candidates.length - 1];
+    },
+    failuresEndedWith(endedWith) {
       const matches = (message: string) => ({ method, error }: { method: string; error: Error }) =>
         message === error.message || message === `${method}: ${error.message}`;
-      const isBrokerFailure = matches(endedWith.message);
-      let candidates: Array<{ method: string; error: Error }>;
       if (endedWith.brokerRequestId !== undefined) {
         // Only a failure under the id whose message the error carrying the id
         // has, which may be a cause the script wrapped. An answer the broker
         // never handled, such as a refused request file, reuses no failure.
-        candidates = (failures.get(endedWith.brokerRequestId) ?? [])
-          .filter(matches(endedWith.brokerErrorMessage ?? endedWith.message));
-      } else {
-        // Without an id, only an error that is the broker failure itself.
-        candidates = [...failures.values()].flat().filter(isBrokerFailure);
+        return (failures.get(endedWith.brokerRequestId) ?? [])
+          .filter(matches(endedWith.brokerErrorMessage ?? endedWith.message))
+          .map(({ error }) => error);
       }
-      // Attribute the cause only when every candidate agrees on it.
-      if (candidates.length === 0 || !candidates.every(({ error }) => isReasoningWithoutAnswerError(error))) return undefined;
-      return candidates[candidates.length - 1]!.error;
+      // Without an id, only an error that is the broker failure itself.
+      return [...failures.values()].flat().filter(matches(endedWith.message)).map(({ error }) => error);
     },
   };
 }

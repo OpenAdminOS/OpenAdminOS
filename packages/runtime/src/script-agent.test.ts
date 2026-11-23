@@ -377,6 +377,64 @@ definition:
     });
   });
 
+  it("lets the recorded broker failure the script ended on decide over the output's size refusal", async () => {
+    const reasoning = Object.assign(
+      new Error('Ollama returned only reasoning from "context-too-small:latest" and no answer.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    const timeout = new Error('Ollama timed out after 180000ms for "tokens of context:latest".');
+    const refusal = { code: "context-too-small" as const, promptTokens: 20_000, answerTokens: 100, neededTokens: 20_100, limitTokens: 16_384, model: "m" };
+    for (const [first, expected] of [[reasoning, "reasoning"], [timeout, "none"]] as const) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-terminal-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const one = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          // A later request is refused for its size; the script ends on the first failure.
+          await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-2", method: "llm.complete", params: { prompt: "Summarize more." } } satisfies SandboxBrokerRequest);
+          const stderr = uncaught(input, `Error: llm.complete: ${one.ok ? "" : one.error.message}`);
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      let calls = 0;
+      ctx.llm = { ...ctx.llm, complete: async () => { calls += 1; throw calls === 1 ? first : new ContextTooSmallError(refusal); } };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error);
+      assert.equal(error instanceof ContextTooSmallError, false, expected);
+      assert.equal(reasoningWithoutAnswerInChain(error), expected === "reasoning", expected);
+    }
+  });
+
   it("reads only the error the script ended on", () => {
     const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
     assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
