@@ -423,7 +423,10 @@ another model, that model's own value is sent instead and a rejection of it is
 handled the same way, at most two resends per request.
 Without either, the name decides. Reasoning a model writes inline in its
 content, in `<think>` blocks (also split across chunks, or never closed),
-is taken out of the answer as it streams. A reply with reasoning and no answer
+is taken out of the answer as it streams. The think value, version and
+family a send uses are taken right before it, after context sizing; the last
+resend after a rejected level always sends `false`, without remembering it
+when the model could not be confirmed. A reply with reasoning and no answer
 is never returned as the answer: it fails with
 `OllamaReasoningWithoutAnswerError`, naming the token limit when
 `done_reason` is `length`, before any completed chunk. A run records it as
@@ -437,8 +440,11 @@ message of the error carrying it; only a failure under that id with that
 message counts, also when the script wrapped it or reused the id, so an
 answer the broker never handled (a refused request file) is none; without an
 id only an error that is exactly the broker failure counts, so the output is never parsed for it, and every matching failure must
-be this cause), and the failure panel shows only the
-"Model reasoned without answering" card. Chat shows a failed message with the
+be this cause; that recorded failure also decides before the output is read
+for a context size refusal), and the failure panel shows only the
+"Model reasoned without answering" card; such a run gets no model fit offer
+from text that reads like a context limit, and Chat's compact loop fails the
+message with the cause instead of falling back to cached data. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
 cause, other summary failures keep the deterministic summary. The provider Test
