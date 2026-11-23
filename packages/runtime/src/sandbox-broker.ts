@@ -142,13 +142,11 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       const isBrokerFailure = matches(endedWith.message);
       let candidates: Array<{ method: string; error: Error }>;
       if (endedWith.brokerRequestId !== undefined) {
-        const forId = failures.get(endedWith.brokerRequestId) ?? [];
-        // One failure under the id is the one the script ended with. With a
-        // reused id, only the failures whose message the error carrying the
-        // id has, which may be a cause the script wrapped.
-        candidates = forId.length === 1
-          ? forId
-          : forId.filter(matches(endedWith.brokerErrorMessage ?? endedWith.message));
+        // Only a failure under the id whose message the error carrying the id
+        // has, which may be a cause the script wrapped. An answer the broker
+        // never handled, such as a refused request file, reuses no failure.
+        candidates = (failures.get(endedWith.brokerRequestId) ?? [])
+          .filter(matches(endedWith.brokerErrorMessage ?? endedWith.message));
       } else {
         // Without an id, only an error that is the broker failure itself.
         candidates = [...failures.values()].flat().filter(isBrokerFailure);

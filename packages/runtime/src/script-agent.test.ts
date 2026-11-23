@@ -387,8 +387,12 @@ definition:
       { agent: `throw new Error(${carried});`, cause: true },
       // A rejected promise carrying it.
       { agent: `await Promise.reject(new Error(${carried}));`, cause: true },
-      // Its message also holds a diagnostic with a caret; the error carries the request id, as the bundled scripts set it.
-      { agent: `throw Object.assign(new Error(${caretNote} + "\\n" + ${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // The script prints a diagnostic with a caret, then throws the failure carrying the request id, as the bundled scripts set it.
+      { agent: `console.error(${caretNote}); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // An error carrying the request id with a message of its own is not the failure.
+      { agent: `throw Object.assign(new Error(${caretNote} + "\\n" + ${carried}), { brokerRequestId: "llm-1" });`, cause: false },
+      // The reasoning failure was caught; the same id then got an answer the broker never handled (a refused request file).
+      { agent: `throw Object.assign(new Error("llm.complete: Broker request file id must match the JSON request id."), { brokerRequestId: "llm-1" });`, cause: false },
       // Wrapped: the failure with its request id is the cause of the error the script throws.
       { agent: `throw new Error("summary step failed", { cause: Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }) });`, cause: true },
       // An error of the script's own that only quotes the failure.
