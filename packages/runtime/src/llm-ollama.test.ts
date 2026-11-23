@@ -2152,7 +2152,7 @@ describe("Ollama reasoning models", () => {
   });
 
 
-  it("reads the model list after context sizing, so a model replaced while the request was sized gets its own value", async () => {
+  it("reads the model list again when the sizing lookup saw another revision, so a model replaced in between gets its own value", async () => {
     let shown = false;
     const sent: unknown[] = [];
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -2162,14 +2162,14 @@ describe("Ollama reasoning models", () => {
         // The name held a Llama until the sizing lookup; a gpt-oss copy replaced it then.
         if (req.url === "/api/tags") {
           res.end(JSON.stringify({ models: [shown
-            ? { name: "resized-report:latest", digest: "sha256:oss", details: { family: "gptoss" } }
-            : { name: "resized-report:latest", digest: "sha256:llama", details: { family: "llama" } }] }));
+            ? { name: "resized-report:latest", digest: "sha256:oss", modified_at: "2026-11-20T10:00:00.123456789Z", details: { family: "gptoss" } }
+            : { name: "resized-report:latest", digest: "sha256:llama", modified_at: "2026-11-01T10:00:00.123456789Z", details: { family: "llama" } }] }));
           return;
         }
         if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
         if (req.url === "/api/show") {
           shown = true;
-          res.end(JSON.stringify({ model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
+          res.end(JSON.stringify({ modified_at: "2026-11-20T10:00:00.123456789Z", model_info: { "general.architecture": "gptoss", "gptoss.context_length": 131072 } }));
           return;
         }
         sent.push((JSON.parse(raw) as { think?: unknown }).think);
@@ -2181,6 +2181,64 @@ describe("Ollama reasoning models", () => {
     try {
       await createOllamaLlm({ endpoint, defaultModel: "resized-report:latest" }).complete({ prompt: "word ".repeat(18000) });
       assert.deepEqual(sent, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sizes the request again for a model pinned smaller that replaced the one the list read", async () => {
+    let replaced = false;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          const entry = replaced
+            ? { name: "pinned-swap:latest", digest: "sha256:new", modified_at: "2026-11-20T10:00:00Z" }
+            : { name: "pinned-swap:latest", digest: "sha256:old", modified_at: "2026-11-01T10:00:00Z" };
+          // Replaced right after this read: the sizing lookup sees the new model.
+          replaced = true;
+          res.end(JSON.stringify({ models: [entry] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          // The model the name holds now: the old one unpinned, the new one pinned to 4,096.
+          res.end(JSON.stringify(replaced
+            ? { modified_at: "2026-11-20T10:00:00Z", parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { modified_at: "2026-11-01T10:00:00Z", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "pinned-swap:latest" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 0, "nothing reaches /api/chat");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("starts the chat request's timeout after the model list read", async () => {
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") { setTimeout(() => res.end(JSON.stringify({ models: [] })), 100); return; }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "slow-list:latest", timeoutMs: 40 }).complete({ prompt: "p" })).text, "ok");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

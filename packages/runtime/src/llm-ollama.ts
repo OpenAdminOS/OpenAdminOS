@@ -141,9 +141,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
         return installed;
       };
-      // Read right before the first send, after context sizing, so a model
-      // replaced under the name while the request was sized is the one known.
-      let installedModel = ollamaModelName(model);
+      let installedModel = await settleInstalledModel();
 
       // Each request to /api/chat gets its own controller and timeout, so a
       // retry is not charged for the time the first request and the model
@@ -396,7 +394,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         let numCtx = cachedCtx;
         // A model without a pinned num_ctx gets room for this request on the
         // first send, so it is never served at a smaller default.
-        const sized = await ollamaRequestNumCtx({
+        const sizeRequest = () => ollamaRequestNumCtx({
           endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
           ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
           ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
@@ -404,7 +402,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
           timeoutMs: lookupTimeoutMs, signal: controller.signal,
         });
+        let sized = await sizeRequest();
         if (opts.signal?.aborted) throw stoppedByUser();
+        // The sizing lookup saw another revision than the model list read
+        // before it: the model was replaced under the name in between. The
+        // list is read again and the request sized again, once, so the think
+        // value and the context both belong to the model installed now.
+        const listedRevision = ollamaModelRevisions.get(familyKey(endpoint, installedModel));
+        if (sized?.revision !== undefined && listedRevision !== undefined && !sameRevision(sized.revision, listedRevision)) {
+          installedModel = await settleInstalledModel();
+          sized = await sizeRequest();
+          if (opts.signal?.aborted) throw stoppedByUser();
+        }
         // The revision this request was sized for; a kept size binds to it.
         requestRevision = sized?.revision;
         // Without a known pin status the maximum is not the limit (a pin
@@ -435,7 +444,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.
         const firstSent = numCtx;
-        installedModel = await settleInstalledModel();
         captureThink();
         let detail: string;
         [response, detail] = await sendWithThinkFallback(numCtx);
@@ -698,6 +706,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
   };
 }
 
+/** Whether two `modified_at` values name the same revision, also when written with another precision. */
+function sameRevision(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [x, y] = [Date.parse(a), Date.parse(b)];
+  return Number.isFinite(x) && x === y;
+}
+
 const THINK_OPEN = "<think>";
 const THINK_CLOSE = "</think>";
 const THINK_TAGS = { [THINK_OPEN]: /<think>/i, [THINK_CLOSE]: /<\/think>/i } as const;
@@ -780,6 +795,8 @@ const ollamaModelGenerations = new Map<string, number>();
 const nextGeneration = (key: string) => ollamaModelGenerations.set(key, (ollamaModelGenerations.get(key) ?? 0) + 1);
 /** The model version (digest) each recorded family belongs to. */
 const ollamaModelDigests = new Map<string, string>();
+/** When each listed model was last changed (`modified_at`), to compare with the revision a context lookup saw. */
+const ollamaModelRevisions = new Map<string, string>();
 const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${ollamaModelName(model)}`;
 
 /**
@@ -864,6 +881,7 @@ function forgetOllamaModelKey(key: string, read: number): void {
   ollamaThinkLearned.delete(key);
   ollamaModelFamilies.delete(key);
   ollamaModelDigests.delete(key);
+  ollamaModelRevisions.delete(key);
   nextGeneration(key);
 }
 
@@ -879,8 +897,10 @@ export function beginOllamaModelRead(): number {
 
 function recordFamily(key: string, show: unknown): void {
   const data = typeof show === "object" && show !== null
-    ? show as { digest?: unknown; details?: { family?: unknown }; model_info?: Record<string, unknown> }
+    ? show as { digest?: unknown; modified_at?: unknown; details?: { family?: unknown }; model_info?: Record<string, unknown> }
     : {};
+  if (typeof data.modified_at === "string" && data.modified_at.length > 0) ollamaModelRevisions.set(key, data.modified_at);
+  else ollamaModelRevisions.delete(key);
   // Another version under this name: what Ollama's answers showed about the
   // one before no longer applies.
   const digest = typeof data.digest === "string" ? data.digest : undefined;
