@@ -16,7 +16,7 @@
     },
     "allowedProviders": {
       "type": "array",
-      "description": "The AI providers this device may use. Any other provider is not offered or selectable, and the app refuses it for Chat, agents and provider tests. Allowing ollama includes Ollama Cloud models and aliases on a signed-in Ollama. Each Chat send to a cloud model requires the usual hosted confirmation. To limit Ollama to an installed local model, set defaultProvider to ollama and lock defaultModel to that model.",
+      "description": "The AI providers this device may use. Any other provider is not offered or selectable, and the app refuses it for Chat, agents and provider tests. Allowing ollama includes Ollama Cloud models and aliases on a signed-in Ollama. Each Chat send to a cloud model requires the usual hosted confirmation. To limit Ollama to an installed local model, set defaultProvider to ollama and lock defaultModel to that model. The lock pins the model name, so keep that name backed by a model that runs on this device.",
       "items": { "$ref": "#/$defs/providerId" },
       "uniqueItems": true
     },
