@@ -404,8 +404,10 @@ app reads the model's entry from `/api/tags` (which loads no model; a name
 it does not list, such as a server alias, is read with `/api/show`, which
 reports the family of the model it points to; on Ollama 0.17, where
 `/api/show` does not know server aliases but Chat resolves them, a 404 there
-is followed by `GET /api/experimental/aliases` (exact aliases through chains,
-else the longest prefix alias) and the alias takes its target's list entry; a list read without such a
+is followed by `GET /api/experimental/aliases` (an exact alias, else the
+longest prefix alias on the short name, then exact aliases from there, a
+cycle resolving to nothing) and the alias takes its target's entry as the
+newest applied list read has it; a list read without such a
 name keeps what `/api/show` showed, which only a "not found" from it clears; a
 list read overtaken by a newer one never skips that lookup,
 and without a digest a new `modified_at` counts as another version), so a model

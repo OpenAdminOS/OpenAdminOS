@@ -1197,7 +1197,19 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const target = await resolveOllamaServerAlias(endpoint, model, controller.signal);
     if (target === "unknown") return;
     if (target !== undefined) {
-      const entry = data.models.find((candidate) => entryName(candidate) === ollamaModelName(target));
+      // The target as the newest applied list read has it: this read's entry
+      // when it applied, else what is recorded (none when a newer read found
+      // the target removed).
+      const targetKey = familyKey(endpoint, target);
+      const entry: unknown = applied
+        ? data.models.find((candidate) => entryName(candidate) === ollamaModelName(target))
+        : ollamaModelDigests.has(targetKey) || ollamaModelFamilies.has(targetKey)
+          ? {
+              digest: ollamaModelDigests.get(targetKey),
+              modified_at: ollamaModelRevisions.get(targetKey),
+              details: { family: ollamaModelFamilies.get(targetKey) },
+            }
+          : undefined;
       const key = familyKey(endpoint, model);
       if (entry !== undefined && (ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
         ollamaFamilyReadApplied.set(key, showSeq);
@@ -1243,20 +1255,23 @@ async function resolveOllamaServerAlias(endpoint: string, model: string, signal:
   const aliases = entries.filter((entry): entry is { alias: string; target: string; prefix_matching?: unknown } =>
     typeof entry.alias === "string" && typeof entry.target === "string");
   const exact = (name: string) => aliases.find((entry) => entry.prefix_matching !== true && ollamaModelName(entry.alias) === ollamaModelName(name));
-  let current = model;
-  let found = false;
-  for (let depth = 0; depth < 8; depth += 1) {
-    const next = exact(current);
-    if (!next) break;
-    current = next.target;
-    found = true;
-  }
-  if (found) return current;
-  const lower = model.trim().toLowerCase();
-  const prefix = aliases
-    .filter((entry) => entry.prefix_matching === true && lower.startsWith(entry.alias.toLowerCase()))
+  // Prefix aliases match the short name Ollama shows (no ":latest"), case insensitive.
+  const shortName = (name: string) => ollamaModelName(name).replace(/:latest$/, "");
+  const prefixMatch = (name: string) => aliases
+    .filter((entry) => entry.prefix_matching === true && shortName(name).startsWith(entry.alias.trim().toLowerCase()))
     .sort((a, b) => b.alias.length - a.alias.length)[0];
-  return prefix?.target;
+  // The first match is an exact alias, else the longest prefix alias; from
+  // there exact aliases are followed, and a cycle resolves to nothing.
+  const first = exact(model) ?? prefixMatch(model);
+  if (!first) return undefined;
+  let current = first.target;
+  const seen = new Set([ollamaModelName(model)]);
+  for (let next = exact(current); next; next = exact(current)) {
+    if (seen.has(ollamaModelName(current))) return undefined;
+    seen.add(ollamaModelName(current));
+    current = next.target;
+  }
+  return current;
 }
 
 /**
