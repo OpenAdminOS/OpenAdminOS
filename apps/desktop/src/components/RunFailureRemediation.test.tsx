@@ -377,3 +377,53 @@ it("shows Graph advice for a stored replan failure on a required Teams connector
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });
+
+it("explains a reasoning-only Ollama reply instead of suggesting a model pull", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it.each([
+  'Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.',
+])("gives the other reasoning-only Ollama reply the same recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+});
+
+it("does not read a server body that mentions reasoning as a reasoning-only reply", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama responded with HTTP 500: proxy note: upstream returned only reasoning from "gpt-oss:20b" and no answer.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Model reasoned without answering")).not.toBeInTheDocument();
+});
+
+it("shows only the reasoning card for a model whose name matches another playbook", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama returned only reasoning from "gpt-oss-timeout" and no answer. Retry, or pick a model that answers without reasoning.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+});
+
+it.each([
+  'The plan could not be checked against the tenant before applying, so nothing was applied. Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer.',
+  'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.',
+])("gives a wrapped reasoning-only failure its card from the recorded cause: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, failureCause: "reasoning-without-answer" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, it, mock } from "node:test";
 import { providerCatalog } from "@openadminos/agent-sdk";
+import { createOllamaLlm } from "@openadminos/runtime";
 import { checkOllama } from "./provider-detail.js";
 
 afterEach(() => mock.restoreAll());
@@ -67,4 +68,66 @@ it("reuses capability results for an unchanged model digest", async () => {
   assert.deepEqual((await checkOllama(provider)).models, ["cached-writer"]);
   assert.deepEqual((await checkOllama(provider)).models, ["cached-writer"]);
   assert.equal(shows, 1);
+});
+
+it("gives a gpt-oss copy under another name the lowest think level from the family the check read", async () => {
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "office-report:latest", details: { family: "gptoss" } }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion", "thinking"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "office-report:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  const result = await checkOllama(provider);
+  assert.deepEqual(result.models, ["office-report:latest"]);
+  assert.equal((await createOllamaLlm({ defaultModel: "office-report:latest" }).complete({ prompt: "p" })).text, "ok");
+  assert.deepEqual(thinks, ["low"]);
+});
+
+it("sends the family of the model installed now when a name is replaced and restored to a cached digest", async () => {
+  let installed = { digest: "sha256:oss", family: "gptoss" };
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "office-report:latest", digest: installed.digest, details: { family: installed.family } }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "office-report:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  const ask = () => createOllamaLlm({ defaultModel: "office-report:latest" }).complete({ prompt: "p" });
+  for (const next of [{ digest: "sha256:oss", family: "gptoss" }, { digest: "sha256:qwen", family: "qwen3" }, { digest: "sha256:oss", family: "gptoss" }]) {
+    installed = next;
+    await checkOllama(provider);
+    await ask();
+  }
+  assert.deepEqual(thinks, ["low", false, "low"]);
+});
+
+it("reads a model list entry named only in its model field", async () => {
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ model: "model-field-only:latest", digest: "sha256:m", details: { family: "gptoss" } }] });
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "model-field-only:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  const result = await checkOllama(provider);
+  assert.deepEqual(result.models, ["model-field-only:latest"]);
+  await createOllamaLlm({ defaultModel: "model-field-only:latest", refreshModelFamily: false }).complete({ prompt: "p" });
+  assert.deepEqual(thinks, ["low"]);
+});
+
+it("keeps a known family when a check reads a reply without a model list", async () => {
+  let tags: unknown = { models: [{ name: "renamed-oss:latest", digest: "sha256:r", details: { family: "gptoss" } }] };
+  const thinks: unknown[] = [];
+  mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/api/tags")) return Response.json(tags);
+    if (url.endsWith("/api/show")) return Response.json({ capabilities: ["completion"] });
+    thinks.push((JSON.parse(String(init?.body)) as { think?: unknown }).think);
+    return new Response(`${JSON.stringify({ model: "renamed-oss:latest", message: { content: "ok" }, done: true, eval_count: 1 })}\n`);
+  });
+  await checkOllama(provider);
+  tags = {};
+  await checkOllama(provider);
+  await createOllamaLlm({ defaultModel: "renamed-oss:latest", refreshModelFamily: false }).complete({ prompt: "p" });
+  assert.deepEqual(thinks, ["low"]);
 });

@@ -15,7 +15,7 @@ import type {
 
 import { GRAPH_CACHE_RESOURCES, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
-import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
+import { fenceTenantData, reasoningWithoutAnswerInChain, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
 import { writeMcpQuery } from "./mcp-query-writer.js";
 import { mcpSentText } from "./chat-steps.js";
@@ -480,6 +480,9 @@ export async function runAgenticChat(
       completion = await input.llm.complete(options);
     }
     } catch (caught) {
+      // A reply with reasoning and no answer has its own typed cause: the
+      // message fails with it, whatever its text (a model name) matches.
+      if (reasoningWithoutAnswerInChain(caught)) throw caught;
       // A local prompt that overflowed the context window falls back; any other error is the provider's.
       const detail = caught instanceof Error ? caught.message : String(caught);
       // The agent runtime's own prompt fit refusal (ContextTooSmallError, PR #214) is a context limit too.

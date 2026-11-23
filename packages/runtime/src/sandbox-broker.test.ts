@@ -31,6 +31,67 @@ it("fences the script prompt, keeps the author system prompt, and strips echoed 
   if (response.ok) assert.deepEqual(response.result, { text: "Evidence reviewed", model: "test" });
 });
 
+it("keeps a model reply with reasoning and no answer for the script failure that carries it", async () => {
+  const agent = fakeAgent();
+  const failure = Object.assign(new Error("Ollama stopped \"gpt-oss:20b\" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning."), { name: "OllamaReasoningWithoutAnswerError" });
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw failure; } }) });
+  const response = await broker.handle({ id: "llm", method: "llm.complete", params: { prompt: "Summarize." } });
+  assert.equal(response.ok, false);
+  // By the request id the error carries with its message.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}`, brokerRequestId: "llm" }), failure);
+  assert.equal(broker.llmFailureFor({ message: "Could not write summary", brokerRequestId: "llm", brokerErrorMessage: `llm.complete: ${failure.message}` }), failure);
+  // An error carrying the id with another message, such as a refused request file answered outside the broker.
+  assert.equal(broker.llmFailureFor({ message: "llm.complete: Broker request file id must match the JSON request id.", brokerRequestId: "llm" }), undefined);
+  assert.equal(broker.llmFailureFor({ message: failure.message, brokerRequestId: "llm" }), failure);
+  // Without an id the error is the script's own, even with the same text as the failure it handled.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}` }), undefined);
+  assert.equal(broker.llmFailureFor({ message: failure.message }), undefined);
+  assert.equal(broker.failuresEndedWith({ message: failure.message }).length, 0);
+  // Later requests, such as a read in a finally block, do not erase it.
+  assert.equal((await broker.handle({ id: "read", method: "graph.request", params: { method: "GET", path: "/users" } })).ok, false);
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${failure.message}`, brokerRequestId: "llm" }), failure);
+  assert.equal(broker.graphDenialFor(`Error: llm.complete: ${failure.message}`), undefined);
+});
+
+it("takes the model failure of the request the script ended on, never one its message only quotes", async () => {
+  const agent = fakeAgent();
+  const tokenLimit = Object.assign(new Error('Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const onlyReasoning = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+  const replies = [tokenLimit, timeout, onlyReasoning];
+  let calls = 0;
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw replies[calls++]!; } }) });
+  for (const id of ["a", "b", "c"]) await broker.handle({ id, method: "llm.complete", params: { prompt: "Summarize." } });
+  // The request the error carries decides, whatever the order.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${timeout.message}`, brokerRequestId: "b" }), undefined);
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${tokenLimit.message}`, brokerRequestId: "a" }), tokenLimit);
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${onlyReasoning.message}`, brokerRequestId: "c" }), onlyReasoning);
+  // The id decides between failures: another request's message under it is none of them.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${tokenLimit.message}`, brokerRequestId: "b" }), undefined);
+  // Without an id: an error that only quotes a failure is not that failure.
+  assert.equal(broker.llmFailureFor({ message: `retry failed: llm.complete: ${timeout.message}` }), undefined);
+  assert.equal(broker.llmFailureFor({ message: `ENOSPC: could not write the fallback report after llm.complete: ${tokenLimit.message}` }), undefined);
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${timeout.message}` }), undefined);
+});
+
+it("keeps every failure of a reused request id and needs the ended message to pick between them", async () => {
+  const agent = fakeAgent();
+  const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+  const onlyReasoning = Object.assign(new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+  const replies = [timeout, onlyReasoning];
+  let calls = 0;
+  const broker = createSandboxBroker({ agent, ctx: fakeContext(agent, { llmComplete: async () => { throw replies[calls++]!; } }) });
+  // The script retries under the same id, then rethrows the first error.
+  for (let i = 0; i < 2; i += 1) await broker.handle({ id: "same", method: "llm.complete", params: { prompt: "Summarize." } });
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${timeout.message}`, brokerRequestId: "same" }), undefined);
+  assert.equal(broker.llmFailureFor({ message: "wrapped by the script", brokerRequestId: "same" }), undefined);
+  // A wrapper around the failure carrying the id: its message decides.
+  assert.equal(broker.llmFailureFor({ message: "Could not write summary", brokerRequestId: "same", brokerErrorMessage: `llm.complete: ${onlyReasoning.message}` }), onlyReasoning);
+  assert.equal(broker.llmFailureFor({ message: "Could not write summary", brokerRequestId: "same", brokerErrorMessage: `llm.complete: ${timeout.message}` }), undefined);
+  // It ends with the reasoning failure itself: that one is the cause.
+  assert.equal(broker.llmFailureFor({ message: `llm.complete: ${onlyReasoning.message}`, brokerRequestId: "same" }), onlyReasoning);
+});
+
 describe("sandbox broker", () => {
   it("allows only manifest-declared Graph GET requests", async () => {
     const graphRequests: GraphRequestInput[] = [];

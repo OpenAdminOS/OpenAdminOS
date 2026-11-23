@@ -4,7 +4,7 @@ import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
-import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
+import { fenceTenantData, isReasoningWithoutAnswerError, reasoningWithoutAnswerInChain, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -1276,7 +1276,7 @@ export class IntuneChatService {
     }
 
     const summary = buildMultiTenantSummary(comparisons);
-    const assistantText = await this.buildMultiTenantAssistantText({
+    const { text: assistantText, error: assistantError } = await this.buildMultiTenantAssistantText({
       tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
@@ -1338,7 +1338,10 @@ export class IntuneChatService {
       conversationId: conversation.id,
       role: "assistant",
       content: assistantText,
-      status: finalStatus === "completed" || finalStatus === "partial" ? "completed" : "failed",
+      // The tenant results stay in the job; a summary model that reasoned
+      // without answering fails the message.
+      status: !assistantError && (finalStatus === "completed" || finalStatus === "partial") ? "completed" : "failed",
+      ...(assistantError ? { error: assistantError } : {}),
       createdAt: new Date().toISOString(),
       providerId,
       ...(preflight.model ? { model: preflight.model } : {}),
@@ -1743,10 +1746,10 @@ export class IntuneChatService {
     model?: string;
     summary: MultiTenantChatJob["summary"];
     comparisons: MultiTenantChatJob["comparisons"];
-  }): Promise<string> {
+  }): Promise<{ text: string; error?: string }> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
     const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
-    if (!llm.available) return deterministic;
+    if (!llm.available) return { text: deterministic };
     try {
       const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
       const prompt = [
@@ -1770,10 +1773,12 @@ export class IntuneChatService {
         temperature: 0.2,
         maxTokens: 700,
       })).text.trim(), prompt);
-      return text || deterministic;
+      return { text: text || deterministic };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      const text = `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      // Other provider failures keep the deterministic summary as the answer.
+      return isReasoningWithoutAnswerError(error) ? { text, error: message } : { text };
     }
   }
 
@@ -3507,7 +3512,8 @@ export class IntuneChatService {
               ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
               : caught instanceof Error ? caught.message : String(caught);
             // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
-            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
+            // A reply with reasoning and no answer has its own cause, whatever its text (a model name) matches.
+            modelFit = options.voice || options.scope || reasoningWithoutAnswerInChain(caught) ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;

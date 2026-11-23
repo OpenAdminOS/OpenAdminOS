@@ -1110,6 +1110,13 @@ export interface RunRecord {
    * records without it, stored by earlier versions, are read from their text.
    */
   graphDenialChecked?: boolean;
+  /**
+   * A failure classified from its typed error and kept through the app's
+   * wrappers (a failed check of the reviewed plan, a sandboxed script's
+   * exit), so the failure panel does not read it from the message.
+   * "reasoning-without-answer": the model reasoned and wrote no answer.
+   */
+  failureCause?: "reasoning-without-answer";
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */

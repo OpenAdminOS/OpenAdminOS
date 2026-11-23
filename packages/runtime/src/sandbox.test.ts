@@ -88,6 +88,7 @@ describe("MXC sandbox runner", () => {
         [OPENADMINOS_MXC_FLAG]: "1",
         PATH: "/usr/bin",
         OPENAI_API_KEY: "secret",
+        OPENADMINOS_EXIT_RECORD: "/tmp/openadminos-run/work/exit-record.json",
       },
       loadSdk: async () => ({
         getPlatformSupport: () => ({ isSupported: true }),
@@ -120,6 +121,8 @@ describe("MXC sandbox runner", () => {
     assert.deepEqual(capturedOptions, { usePty: false });
     assert.equal(capturedEnv?.PATH, "/usr/bin");
     assert.equal(capturedEnv?.OPENAI_API_KEY, undefined);
+    // The script's process records the error it ended with here.
+    assert.equal(capturedEnv?.OPENADMINOS_EXIT_RECORD, "/tmp/openadminos-run/work/exit-record.json");
 
     const network = capturedPolicy?.network as { allowOutbound?: boolean } | undefined;
     assert.equal(network?.allowOutbound, false);

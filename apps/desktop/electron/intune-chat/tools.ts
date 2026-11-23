@@ -15,7 +15,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
-import { fenceTenantData } from "@openadminos/runtime";
+import { fenceTenantData, reasoningWithoutAnswerInChain } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { mcpHost, type McpCatalogEntry, type McpItemIdForm, type McpItemIdRule, type McpResultFormat, type McpResultShape } from "../mcp/catalog.js";
@@ -1011,6 +1011,9 @@ export async function executeIntuneChatTool(
     };
     return { result, trace };
   } catch (caught) {
+    // Not a tool result: a model that reasoned without answering fails the
+    // Chat message with that cause instead of handing the loop a fallback.
+    if (reasoningWithoutAnswerInChain(caught)) throw caught;
     const completedAtMs = Date.now();
     const message = caught instanceof Error ? caught.message : String(caught);
     const trace: IntuneChatToolTraceEntry = {
@@ -1220,6 +1223,8 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     proposed = await hooks.writeQuery(entry);
   } catch (caught) {
     ctx.signal?.throwIfAborted();
+    // A model that reasoned without answering fails the Chat message with that cause.
+    if (reasoningWithoutAnswerInChain(caught)) throw caught;
     throw new Error(`the ${entry.serverName} query could not be written: ${caught instanceof Error ? caught.message : String(caught)}. Nothing was sent to ${entry.host}.`);
   }
   const { args, checked } = canonicalMcpArgs(entry, validateMcpArgs(entry, proposed), hooks.references(entry.serverId));
