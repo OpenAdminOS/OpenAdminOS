@@ -13,7 +13,7 @@ Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership,
 | Field | Value |
 | --- | --- |
 | Agent ID | `find-inactive-devices` |
-| Version | `1.1.0` |
+| Version | `1.2.0` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `devices` |
@@ -21,7 +21,7 @@ Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership,
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `6b31f810` |
+| Last changed | 2026-11-19 · `8f663445` |
 
 ## Execution
 

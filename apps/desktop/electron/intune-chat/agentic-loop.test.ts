@@ -516,6 +516,88 @@ describe("Intune Chat agentic loop", () => {
   });
 });
 
+it("does not accept a zero after a rejected count_cached call", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-count-guard-"));
+  const store = seededStore(dir);
+  try {
+    const llm = scriptedLlm([
+      JSON.stringify({ tool: "count_cached", params: { resource: "managedDevices" } }),
+      JSON.stringify({ tool: "count_cached", params: { resource: "managedDevices", groupBy: ["noSuchField"] } }),
+      JSON.stringify({ final: true, answer: "0 devices match." }),
+    ]);
+    const result = await runAgenticChat(baseInput(store, llm));
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.answer, /could not establish which records match/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+describe("compact budget for a local model in Chat", () => {
+  const counting = (responses: string[]) => {
+    const llm = scriptedLlm(responses);
+    let calls = 0;
+    return { llm: { ...llm, complete: async (options: Parameters<RunLlmApi["complete"]>[0]) => { calls += 1; return llm.complete(options); } } as RunLlmApi, calls: () => calls };
+  };
+
+  it("falls back after two malformed replies, where the default budget takes four", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-compact-"));
+    const store = seededStore(dir);
+    try {
+      const compact = counting(["```json\n{\"tool\": \"query_ca\n```"]);
+      const result = await runAgenticChat({ ...baseInput(store, compact.llm), budget: "compact" });
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.failureReason, "malformed");
+        assert.equal(result.fallbackNotice, "The local model did not return a valid tool request. Answered from cached data instead.");
+      }
+      assert.equal(compact.calls(), 2);
+      // Without the compact budget (a hosted model, or always investigative) the established budget and wording stay.
+      const full = counting(["```json\n{\"tool\": \"query_ca\n```"]);
+      const hosted = await runAgenticChat({ ...baseInput(store, full.llm), providerId: "anthropic", providerIsLocal: false });
+      assert.equal(full.calls(), 4);
+      if (!hosted.ok) {
+        assert.equal(hosted.failureReason, "malformed");
+        assert.match(hosted.fallbackNotice, /malformed tool JSON 4 times/);
+      }
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("falls back on a second progress message instead of keeping it as the answer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-compact-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        JSON.stringify({ tool: "query_cache", params: { resource: "managedDevices" } }),
+        JSON.stringify({ final: true, answer: "I'll check that now." }),
+        JSON.stringify({ final: true, answer: "Let me look into it." }),
+      ])), budget: "compact" });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.failureReason, "unfinished");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("names a reply with nothing in it thinking-only, and a context overflow context-too-small", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-compact-"));
+    const store = seededStore(dir);
+    try {
+      const empty = await runAgenticChat({ ...baseInput(store, scriptedLlm([""])), budget: "compact" });
+      assert.equal(empty.ok, false);
+      if (!empty.ok) {
+        assert.equal(empty.failureReason, "thinking-only");
+        assert.equal(empty.fallbackNotice, "The local model returned only its reasoning and no answer. Answered from cached data instead.");
+      }
+      const overflow: RunLlmApi = { available: true, async complete() { throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but openadmin-8b supports at most 16,384."); }, async *stream() {} };
+      const tooSmall = await runAgenticChat({ ...baseInput(store, overflow), budget: "compact" });
+      assert.equal(tooSmall.ok, false);
+      if (!tooSmall.ok) {
+        assert.equal(tooSmall.failureReason, "context-too-small");
+        assert.match(tooSmall.failureDetail ?? "", /needs 40,652 tokens of context, but openadmin-8b supports at most 16,384/);
+      }
+      // Without the compact budget the provider error is the provider's, as before.
+      await assert.rejects(runAgenticChat(baseInput(store, overflow)), /context size too small/);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
 function baseInput(store: IntelligenceSqliteStore, llm: RunLlmApi) {
   return {
     question: "Inspect managed devices.",
@@ -1078,7 +1160,7 @@ describe("stop during a streamed reply", () => {
 // context; the Splashtop set is read-only and MCP servers are reference
 // servers, and a side-effecting tool added there needs its own test.
 describe("the tool set behind Nova shortcuts and follow-ups", () => {
-  const READ_TOOLS = new Set(["list_cached_resources", "query_cache", "find_graph_endpoint", "graph_get", "refresh_resource", "query_drift", "web_search"]);
+  const READ_TOOLS = new Set(["list_cached_resources", "query_cache", "count_cached", "find_graph_endpoint", "graph_get", "refresh_resource", "query_drift", "web_search"]);
   const WRITE_ASKS = ["send_message", "connector_send", "start_run", "run_agent", "remember_note", "create_follow_up", "graph_post", "retire_managed_device"];
 
   for (const voice of [true, false]) {

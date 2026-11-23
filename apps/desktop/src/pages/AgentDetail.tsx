@@ -3256,8 +3256,10 @@ function formatDuration(run: RunRecord) {
 
 function updateRequiresNewerApp(agent: {
   compatibility?: { appVersion: string };
-  updateAvailable?: { minAppVersion?: string };
+  updateAvailable?: { minAppVersion?: string; supported?: boolean };
 }) {
+  // The host reads nightly minimums exactly; use its answer when it gave one.
+  if (typeof agent.updateAvailable?.supported === "boolean") return !agent.updateAvailable.supported;
   const min = agent.updateAvailable?.minAppVersion;
   const current = agent.compatibility?.appVersion;
   if (!min || !current) return false;

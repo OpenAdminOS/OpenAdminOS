@@ -63,3 +63,11 @@ Format:
 **Why:** During the model fit work (PR #213, 2026-11-19) I probed Ollama with a chat request and then ran the dev app against a small-context copy of OpenAdmin 8B to trigger a real overflow. Loading the model made the machine unusable, and the maintainer had already asked for hosted-only live checks.
 
 **How to apply:** Before any live check, confirm the app profile has a hosted provider active and no local one that could answer or embed. To show a local-model failure state, inject it in tests, not on the machine. Check `ollama ps` afterwards and run `ollama stop <model>` if anything is loaded. Pass this rule to every reviewer or implementer subagent.
+
+## Never load a local model on the maintainer's Mac
+
+**Pattern:** Tests and live checks never load a model in Ollama or LM Studio: no `ollama run`, no requests to `/api/chat` or `/api/generate` on localhost:11434. Tests use scripted mock models, and tokenizer or model metadata work uses recorded counts or mocked `/api/show` and `/api/tags`. Live app checks use a hosted provider (Claude Code or Codex CLI).
+
+**Why:** Loading a local model makes the machine unusable. On 2026-11-19 the prompt size estimator was calibrated by sending synthetic prompts to OpenAdmin 8B and gpt-oss 20B through the local Ollama, and the maintainer forbade it during the local model accuracy work for the 8B demos.
+
+**How to apply:** Before an end-to-end or smoke run, confirm its provider is a mock or a hosted CLI. Run `ollama ps` afterwards (it reads status and loads nothing); if a model is listed, run `ollama stop <model>` at once. Name the provider and model used in every hand-back, and pass this rule to every delegated child and reviewer.

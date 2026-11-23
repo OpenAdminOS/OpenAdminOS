@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { compareSemver } from "./index.js";
+import { appVersionSatisfies, compareSemver } from "./index.js";
 
 describe("compareSemver", () => {
   it("returns 0 for identical versions", () => {
@@ -72,5 +72,33 @@ describe("compareSemver", () => {
     assert.ok(compareSemver(nightly, "0.7.1") >= 0);
     assert.ok(compareSemver(nightly, "0.7.0") > 0);
     assert.ok(compareSemver(nightly, "0.7.2") < 0);
+  });
+});
+
+describe("appVersionSatisfies", () => {
+  const min = "0.7.3-nightly.20261120040000";
+
+  it("keeps the compareSemver rule for a plain minimum", () => {
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261119222839", "0.7.3"), true);
+    assert.equal(appVersionSatisfies("0.7.2", "0.7.3"), false);
+    assert.equal(appVersionSatisfies("0.7.3", "0.1.0"), true);
+  });
+
+  it("refuses the last nightly without the features and accepts the first one with them", () => {
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261119222839", min), false);
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261120040000", min), true);
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261121090000", min), true);
+  });
+
+  it("lets the stable release and later versions in, and keeps earlier ones out", () => {
+    assert.equal(appVersionSatisfies("0.7.3", min), true);
+    assert.equal(appVersionSatisfies("0.7.4-nightly.20261201000000", min), true);
+    assert.equal(appVersionSatisfies("0.8.0", min), true);
+    assert.equal(appVersionSatisfies("0.7.2", min), false);
+  });
+
+  it("is refused by the compareSemver gate released apps use", () => {
+    assert.ok(compareSemver("0.7.2", min) < 0);
+    assert.ok(compareSemver("0.7.3-nightly.20261119222839", min) < 0);
   });
 });
