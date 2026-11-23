@@ -4,7 +4,7 @@ import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
-import { fenceTenantData, isReasoningWithoutAnswerError, withTenantDataOutputFilter } from "@openadminos/runtime";
+import { fenceTenantData, isReasoningWithoutAnswerError, reasoningWithoutAnswerInChain, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -3512,7 +3512,8 @@ export class IntuneChatService {
               ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
               : caught instanceof Error ? caught.message : String(caught);
             // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
-            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
+            // A reply with reasoning and no answer has its own cause, whatever its text (a model name) matches.
+            modelFit = options.voice || options.scope || reasoningWithoutAnswerInChain(caught) ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;

@@ -1136,6 +1136,18 @@ describe("Model fit after a local model failure (PR #213 with #215)", () => {
     }));
   });
 
+  it("fails with the reasoning cause and offers no context fit when the error text reads like a context limit", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      reply(() => {
+        throw Object.assign(new Error('Ollama returned only reasoning from "exceed_context_size_error:latest" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+      });
+      const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
+      assert.equal(answered.status, "failed");
+      assert.match(answered.error ?? "", /returned only reasoning/);
+      assert.equal(answered.modelFit, undefined);
+    }));
+  });
+
   it("offers a provider once the 8B model has failed the tool loop repeatedly, and not after one malformed answer", async () => {
     await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
       reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "Deterministic answer."));
