@@ -1197,13 +1197,11 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const target = await resolveOllamaServerAlias(endpoint, model, controller.signal);
     if (target === "unknown") return;
     if (target !== undefined) {
-      // The target as the newest applied list read has it: this read's entry
-      // when it applied, else what is recorded (none when a newer read found
-      // the target removed).
+      // The target as recorded now, after the alias lookup: the newest
+      // applied list read has it (this one, or a newer one that also may
+      // have found it replaced or removed).
       const targetKey = familyKey(endpoint, target);
-      const entry: unknown = applied
-        ? data.models.find((candidate) => entryName(candidate) === ollamaModelName(target))
-        : ollamaModelDigests.has(targetKey) || ollamaModelFamilies.has(targetKey)
+      const entry: unknown = ollamaModelDigests.has(targetKey) || ollamaModelFamilies.has(targetKey)
           ? {
               digest: ollamaModelDigests.get(targetKey),
               modified_at: ollamaModelRevisions.get(targetKey),

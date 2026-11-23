@@ -3151,6 +3151,42 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("reads an alias's target as recorded after the alias lookup, when a newer list read lands during it", async () => {
+    let replaced = false;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", async () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "team:latest", digest: "sha256:oss", details: { family: "gptoss" } }
+            : { name: "team:latest", digest: "sha256:llama", details: { family: "llama" } }] }));
+          return;
+        }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") {
+          // A gpt-oss copy replaces the target and a provider check records it before this answer.
+          replaced = true;
+          await refreshOllamaModelFamily(endpoint, "team:latest");
+          res.end(JSON.stringify({ aliases: [{ alias: "office-alias", target: "team:latest" }] }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await createOllamaLlm({ endpoint, defaultModel: "office-alias" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
     let version: string | undefined = "0.17.7";
     const sent: unknown[] = [];
