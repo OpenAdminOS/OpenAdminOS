@@ -2684,6 +2684,50 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("does not refuse the first send by the old :local target's pin when an upgrade seen meanwhile resolves it to a larger one", async () => {
+    let version = "0.17.7";
+    let shows = 0;
+    const sentCtx: Array<number | undefined> = [];
+    const unpinned = { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const pinned = { parameters: "num_ctx                        32768", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "audit:local", digest: "sha256:tagged" }, { name: "audit:latest", digest: "sha256:default" }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          // The first request's sizing answers slowly, for the model tagged local.
+          if (shows === 1) { setTimeout(() => res.end(JSON.stringify(unpinned)), 150); return; }
+          res.end(JSON.stringify(version === "0.18.0" ? pinned : unpinned));
+          return;
+        }
+        sentCtx.push((JSON.parse(raw) as { options?: { num_ctx?: number } }).options?.num_ctx);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "audit:local" });
+      const first = llm.complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }).then(() => undefined, (error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Upgraded meanwhile; another request reads the new version.
+      version = "0.18.0";
+      await llm.complete({ prompt: "p" });
+      // The default tag's 32,768 pin holds the request; the tagged model's 4,096 does not refuse it.
+      assert.equal(await first, undefined);
+      assert.equal(sentCtx.length, 2);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("starts the chat request's timeout after the model list read", async () => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       req.resume();

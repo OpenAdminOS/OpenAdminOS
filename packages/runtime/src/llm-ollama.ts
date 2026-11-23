@@ -406,6 +406,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             sized = resized;
             applySizing();
             numCtx = resized?.numCtx;
+            // A timeout names the size this resend sends.
+            attemptLabel = numCtx !== undefined ? ` with a ${formatTokens(numCtx)} token context sized for this request` : "";
           }
           // Chosen after every lookup, from what is known right before the resend.
           installedModel = ollamaInstalledModelNow(endpoint, model);
@@ -451,6 +453,15 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           sized = await sizeRequest();
           if (opts.signal?.aborted) throw stoppedByUser();
         }
+        // A name that resolves to another installed model by now (a server
+        // upgraded while this request was sized reads a lone :local as the
+        // default tag) is sized again before anything is decided from the
+        // lookup, so that model's own pin holds, either way.
+        if (ollamaInstalledModelNow(endpoint, model) !== installedModel) {
+          installedModel = await settleInstalledModel();
+          sized = await sizeRequest();
+          if (opts.signal?.aborted) throw stoppedByUser();
+        }
         applySizing();
         if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
         if (sized?.dropKept) {
@@ -470,20 +481,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
         }
 
-        // A name that resolves to another installed model by now (a server
-        // upgraded while this request was sized reads a lone :local as the
-        // default tag) is sized again, so its own pin holds.
-        if (ollamaInstalledModelNow(endpoint, model) !== installedModel) {
-          installedModel = await settleInstalledModel();
-          sized = await sizeRequest();
-          if (opts.signal?.aborted) throw stoppedByUser();
-          applySizing();
-          if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
-          numCtx = sized?.numCtx;
-          raisedCtx = sized?.numCtx;
-          retry = sized?.numCtx === undefined ? undefined : { requested: sized.neededTokens, numCtx: sized.numCtx, sizedUpFront: true };
-          if (sized?.numCtx !== undefined) retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
-        }
         startAttempt(sized?.numCtx !== undefined
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
