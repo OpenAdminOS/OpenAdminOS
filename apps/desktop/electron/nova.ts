@@ -290,7 +290,7 @@ export class NovaService {
       if (!state.activeTenantId || state.activeTenantId !== input.tenantId)
         throw new Error("Select a tenant before starting Nova.");
       this.requireReasoningProvider(state, input.mode);
-      const provider = activeModelProvider(state.providers.find((p) => p.id === state.activeProviderId), state.activeModelByProviderId);
+      const provider = novaReasoningProvider(state);
       if (input.mode === "local" && !provider?.isLocal)
         throw new Error(
           "Choose a local agent provider before using local voice.",
@@ -429,7 +429,7 @@ export class NovaService {
       state.activeTenantId !== session.tenantId ||
       state.activeProviderId !== session.providerId ||
       selectedNovaModel(state) !== session.model ||
-      activeModelProvider(state.providers.find((p) => p.id === session.providerId), state.activeModelByProviderId)?.isLocal !==
+      novaReasoningProvider(state)?.isLocal !==
         session.reasoningIsLocal
     )
       throw new Error(
@@ -565,7 +565,7 @@ export class NovaService {
         const latest = await this.state();
         if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
             latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
-            selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+            selectedNovaModel(latest) !== session.model || novaReasoningProvider(latest)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
       }
       if (command.kind === "research" && (novaDeliveryRequest(input.text) || (connectorReply && followUp)))
@@ -667,7 +667,7 @@ export class NovaService {
         const latest = await this.state();
         if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
             latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
-            selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+            selectedNovaModel(latest) !== session.model || novaReasoningProvider(latest)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
         if (failure) {
           if (intent) session.commandContext = { request: JSON.stringify(intent.kind === "send" ? { ...intent, question: undefined } : intent).slice(0, 1200), at: Date.now() };
@@ -730,7 +730,7 @@ export class NovaService {
             assertAnswerActive(signal);
             if (this.session !== session || current.activeTenantId !== session.tenantId ||
                 current.activeProviderId !== session.providerId || selectedNovaModel(current) !== session.model ||
-                current.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+                novaReasoningProvider(current)?.isLocal !== session.reasoningIsLocal)
               throw new Error("Nova’s tenant or provider changed. Start a new conversation before searching.");
             const key = await this.secrets.get("api-key");
             assertAnswerActive(signal);
@@ -787,7 +787,7 @@ export class NovaService {
         current.activeTenantId !== session.tenantId ||
         current.activeProviderId !== session.providerId ||
         selectedNovaModel(current) !== session.model ||
-        current.providers.find((p) => p.id === session.providerId)?.isLocal !==
+        novaReasoningProvider(current)?.isLocal !==
           session.reasoningIsLocal
       )
         throw new Error(
@@ -947,7 +947,7 @@ export class NovaService {
       throw new Error(
         "Connect and select a tenant in Settings before starting Nova.",
       );
-    const provider = activeModelProvider(state.providers.find((p) => p.id === state.activeProviderId), state.activeModelByProviderId);
+    const provider = novaReasoningProvider(state);
     if (mode === "local" && !provider?.isLocal)
       throw new Error(
         "Choose a local agent provider in Settings before using local voice.",
@@ -1076,7 +1076,7 @@ function sessionContextDiffers(
     tenantConnection(state, session.tenantId) !== session.connection ||
     state.activeProviderId !== session.providerId ||
     selectedNovaModel(state) !== session.model ||
-    activeModelProvider(state.providers.find((p) => p.id === session.providerId), state.activeModelByProviderId)?.isLocal !== session.reasoningIsLocal ||
+    novaReasoningProvider(state)?.isLocal !== session.reasoningIsLocal ||
     (endpoint ?? undefined) !== (session.endpoint ?? undefined)
   );
 }
@@ -1090,7 +1090,7 @@ export function buildNovaInstructions(
   profileBlock = "",
 ): string {
   const tenant = state.tenants.find((t) => t.id === state.activeTenantId);
-  const provider = activeModelProvider(state.providers.find((p) => p.id === state.activeProviderId), state.activeModelByProviderId);
+  const provider = novaReasoningProvider(state);
   const allowed = (capability: "webSearch" | "startAgents" | "navigation") =>
     !settings || novaCapabilityAllowed(settings.profile, settings.policy, capability);
   const sendTargets = NOVA_SEND_CONNECTORS.filter((connector) => !settings || novaConnectorSendAllowed(settings.profile, settings.policy, connector.id)).map((connector) => connector.label);
@@ -1193,6 +1193,10 @@ function assertAnswerActive(signal: AbortSignal) {
       "Nova's tenant query timed out. Preload relevant data in Cache or choose a faster reasoning model, then retry.",
     );
   signal.throwIfAborted();
+}
+
+function novaReasoningProvider(state: AppState) {
+  return activeModelProvider(state.providers.find((provider) => provider.id === state.activeProviderId), state.activeModelByProviderId);
 }
 
 function selectedNovaModel(state: AppState): string | undefined {

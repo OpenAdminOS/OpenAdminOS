@@ -84,6 +84,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Nova uses the selected model to identify where reasoning runs, including Ollama Cloud aliases.
 - Agent schedules pause for review when the model destination changes. The schedule card and run history show why.
 - A managed provider list with no hosted providers blocks Ollama Cloud unless IT explicitly locks a cloud model.
 

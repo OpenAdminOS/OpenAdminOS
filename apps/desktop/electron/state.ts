@@ -7986,7 +7986,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
                 () => undefined,
                 {
                   signal: AbortSignal.any([signal, controller.signal]),
-                  scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: provider?.isLocal === true },
+                  scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: providerForModel(provider, followUp.model)?.isLocal === true },
                   // Checked against the stored follow-up instead of the five-minute window of a typed send.
                   scheduledConsent: (check) => this.novaFollowUpConsentMatches(followUp.id, check, fresh.endpoint),
                   // The model is built for the endpoint the follow-up was set for, not one saved since.
