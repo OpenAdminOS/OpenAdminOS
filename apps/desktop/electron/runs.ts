@@ -969,8 +969,9 @@ export class RunService {
         agent = { ...agent, settings: { ...defaults, ...agent.settings } };
       }
       const queuedRun = createQueuedRun({ agent, providerId, model, dryRun: options.dryRun });
-      if (activeProvider?.id === "ollama" && (activeProvider.isLocal || ollamaCloud)) {
-        queuedRun.ollamaCloud = ollamaCloud;
+      if (activeProvider?.id === "ollama") {
+        if (activeProvider.isLocal || ollamaCloud) queuedRun.ollamaCloud = ollamaCloud;
+        else queuedRun.ollamaOffDevice = true;
       }
       // A model fit rerun keeps its admission checks for every later phase (plan, replan, apply).
       if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
@@ -1549,6 +1550,11 @@ export class RunService {
         throw new Error(`OpenAdminOS could not confirm that ${model ?? provider?.name ?? providerId} still runs on this device, so nothing was sent to it. Start the run again.`);
       }
     }
+    const verifyOllama = this.host.verifyLocalOllamaModel;
+    const legacyOllama = providerId === "ollama" && run.ollamaCloud === undefined && run.ollamaOffDevice !== true;
+    if (legacyOllama && verifyOllama && (!model || !(await verifyOllama(model)))) {
+      throw new Error(`OpenAdminOS could not confirm that ${model ?? "the saved Ollama model"} still runs on this device, so nothing was sent to it. Start the run again.`);
+    }
     let llm: RunLlmApi;
     try {
       llm = run.providerEndpointBinding
@@ -1561,7 +1567,8 @@ export class RunService {
       throw error;
     }
     // A hosted model fit rerun runs only the model its review named, call by call.
-    if (!run.requireOnDeviceModel && (run.ollamaCloud !== false || !model || !this.host.verifyLocalOllamaModel)) {
+    const verifyLocalOllama = (run.ollamaCloud === false || legacyOllama) && model && verifyOllama;
+    if (!run.requireOnDeviceModel && !verifyLocalOllama) {
       return run.providerEndpointBinding?.scope === "model-fit" ? guardModelFitLlm(llm, { before: async () => undefined, dispatched: () => undefined, model }) : llm;
     }
     // Every model call of the phase checks again, since evidence gathering and the
@@ -1578,7 +1585,7 @@ export class RunService {
           : undefined;
         const onDevice = run.requireOnDeviceModel
           ? current?.isLocal === true && await this.host.verifyOnDeviceModel?.(providerId, model)
-          : model && await this.host.verifyLocalOllamaModel?.(model);
+          : model && await verifyOllama?.(model);
         if (!onDevice) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? current?.name ?? providerId} still runs on this device, so nothing more was sent to it. Start the run again.`);
         }

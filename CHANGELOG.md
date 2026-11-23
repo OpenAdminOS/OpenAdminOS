@@ -86,6 +86,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Chat asks for separate consent for Ollama Cloud and an off-device Ollama server.
 - Agent Team checks that reviewed local Ollama models still run on this device before sending evidence.
+- Runs saved before Ollama Cloud tracking verify that the saved model is still on this device before they resume.
 - Nova uses the selected model to identify where reasoning runs, including Ollama Cloud aliases.
 - Agent schedules pause for review when the model destination changes. The schedule card and run history show why.
 - A managed provider list with no hosted providers blocks Ollama Cloud unless IT explicitly locks a cloud model.

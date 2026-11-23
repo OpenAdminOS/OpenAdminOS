@@ -1090,6 +1090,8 @@ export interface RunRecord {
   providerId?: ProviderId;
   /** Ollama Cloud or on-device Ollama, recorded at admission to preserve the model destination. */
   ollamaCloud?: boolean;
+  /** A reviewed Ollama server outside this device, separate from Ollama Cloud. */
+  ollamaOffDevice?: true;
   model?: string;
   trigger?: "manual" | "schedule";
   /**

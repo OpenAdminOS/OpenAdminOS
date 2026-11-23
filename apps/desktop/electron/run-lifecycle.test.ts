@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { RunRecord, AgentSummary, GraphRequestInput } from "@openadminos/agent-sdk";
+import type { RunRecord, RunLlmApi, AgentSummary, GraphRequestInput } from "@openadminos/agent-sdk";
 import { RunService, type RunPersistedState, type RunServiceHost } from "./runs.js";
 
 function deferred() {
@@ -80,6 +80,41 @@ describe("run lifecycle", () => {
     assert.deepEqual(h.state().runs.map((r) => r.status), ["awaiting-confirmation", "failed", "failed"]);
     assert.match(h.state().runs[1]?.summary ?? "", /Review the tenant/);
     assert.equal(h.requests.length, 0);
+  });
+
+  it("checks a legacy Ollama run at phase start and again before sending", async () => {
+    const h = harness();
+    const agent = { slug: "write-test", mode: "write" } as AgentSummary;
+    const model = "writer:latest";
+    const run = { providerId: "ollama", model } as RunRecord;
+    const phase = h.service as unknown as {
+      baseRunLlm(run: RunRecord, agent: AgentSummary, provider: "ollama", model: string): Promise<RunLlmApi>;
+    };
+    let onDevice = false;
+    let reads = 0;
+    let builds = 0;
+    let calls = 0;
+    Object.assign(h.host, {
+      verifyLocalOllamaModel: async (name: string) => {
+        assert.equal(name, model);
+        reads++;
+        return onDevice;
+      },
+      buildLlm: async () => {
+        builds++;
+        return { available: true, complete: async () => { calls++; return { model, text: "Answer" }; } };
+      },
+    });
+
+    await assert.rejects(phase.baseRunLlm(run, agent, "ollama", model), /could not confirm that writer:latest still runs on this device/);
+    assert.equal(builds, 0);
+    onDevice = true;
+    const llm = await phase.baseRunLlm(run, agent, "ollama", model);
+    await llm.complete({ prompt: "Reviewed request" });
+    onDevice = false;
+    await assert.rejects(llm.complete({ prompt: "Later request" }), /could not confirm that writer:latest still runs on this device/);
+    assert.equal(reads, 4);
+    assert.equal(calls, 1);
   });
 
   it("leaves approval pending if provider discovery fails before apply", async () => {
