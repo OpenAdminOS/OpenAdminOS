@@ -1192,6 +1192,21 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
       }
       return;
     }
+    // /api/show does not know server aliases (Ollama 0.17), which Chat
+    // resolves: such a name takes the listed entry of the model it points to.
+    const target = await resolveOllamaServerAlias(endpoint, model, controller.signal);
+    if (target === "unknown") return;
+    if (target !== undefined) {
+      const entry = data.models.find((candidate) => entryName(candidate) === ollamaModelName(target));
+      const key = familyKey(endpoint, model);
+      if (entry !== undefined && (ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
+        ollamaFamilyReadApplied.set(key, showSeq);
+        recordFamily(key, entry);
+        ollamaShownOnly.add(key);
+        return;
+      }
+      if (entry !== undefined) return;
+    }
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
     forgetOllamaModel(endpoint, model, showSeq);
@@ -1201,6 +1216,47 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     clearTimeout(timer);
     signal?.removeEventListener("abort", stop);
   }
+}
+
+/**
+ * The model a server alias points to, as Ollama 0.17 resolves it for Chat
+ * (`GET /api/experimental/aliases`, removed in 0.18): an exact alias,
+ * followed through aliases of aliases, else the longest prefix alias, case
+ * insensitive. Undefined when the endpoint has no such alias or no alias
+ * support; "unknown" when the read failed otherwise.
+ */
+async function resolveOllamaServerAlias(endpoint: string, model: string, signal: AbortSignal): Promise<string | undefined | "unknown"> {
+  const url = `${endpoint.trim().replace(/\/$/, "")}/api/experimental/aliases`;
+  let entries: Array<{ alias?: unknown; target?: unknown; prefix_matching?: unknown }>;
+  try {
+    const response = await fetch(url, { signal, redirect: modelServerRedirect(url) });
+    if (isRefusedRedirect(response, url)) return "unknown";
+    // A version without aliases: the name is not one.
+    if (response.status === 404 || response.status === 405) return undefined;
+    if (!response.ok) return "unknown";
+    const data = (await response.json()) as { aliases?: unknown };
+    if (!Array.isArray(data.aliases)) return "unknown";
+    entries = data.aliases as typeof entries;
+  } catch {
+    return "unknown";
+  }
+  const aliases = entries.filter((entry): entry is { alias: string; target: string; prefix_matching?: unknown } =>
+    typeof entry.alias === "string" && typeof entry.target === "string");
+  const exact = (name: string) => aliases.find((entry) => entry.prefix_matching !== true && ollamaModelName(entry.alias) === ollamaModelName(name));
+  let current = model;
+  let found = false;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const next = exact(current);
+    if (!next) break;
+    current = next.target;
+    found = true;
+  }
+  if (found) return current;
+  const lower = model.trim().toLowerCase();
+  const prefix = aliases
+    .filter((entry) => entry.prefix_matching === true && lower.startsWith(entry.alias.toLowerCase()))
+    .sort((a, b) => b.alias.length - a.alias.length)[0];
+  return prefix?.target;
 }
 
 /**

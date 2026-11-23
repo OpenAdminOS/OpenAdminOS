@@ -1893,6 +1893,7 @@ describe("Ollama reasoning models", () => {
           return;
         }
         if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
         calls += 1;
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         if (calls === 1) {
@@ -2003,6 +2004,7 @@ describe("Ollama reasoning models", () => {
         }
         // Removed: Ollama no longer knows the name.
         if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         res.end(answered);
       });
@@ -2924,6 +2926,7 @@ describe("Ollama reasoning models", () => {
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
         if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
         if (req.url === "/api/show") {
           if (show === "busy") { res.statusCode = 503; res.end(); return; }
           if (show === "gone") { res.statusCode = 404; res.end(JSON.stringify({ error: "model not found" })); return; }
@@ -3021,6 +3024,58 @@ describe("Ollama reasoning models", () => {
       await refreshOllamaModelFamily(endpoint, "other:latest");
       await pending;
       assert.deepEqual(thinks, ["low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("gives a server alias Ollama 0.17 resolves in Chat, which /api/show does not know, its target's value", async () => {
+    const thinks: Array<[unknown, unknown]> = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } },
+            { name: "qwen3:8b", digest: "sha256:qwen", details: { family: "qwen3" } },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/show") {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: `model '${(JSON.parse(raw) as { model?: string }).model}' not found` }));
+          return;
+        }
+        if (req.url === "/api/experimental/aliases") {
+          res.end(JSON.stringify({ aliases: [
+            { alias: "tenant-auditor", target: "team-oss" },
+            { alias: "team-oss", target: "gpt-oss:20b" },
+            { alias: "draft-", target: "qwen3:8b", prefix_matching: true },
+            { alias: "draft-oss-", target: "gpt-oss:20b", prefix_matching: true },
+          ] }));
+          return;
+        }
+        const body = JSON.parse(raw) as { model?: unknown; think?: unknown };
+        thinks.push([body.model, body.think]);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const auditor = createOllamaLlm({ endpoint, defaultModel: "tenant-auditor" });
+      await auditor.complete({ prompt: "p" });
+      await auditor.complete({ prompt: "p" });
+      // The longest prefix alias decides.
+      await createOllamaLlm({ endpoint, defaultModel: "draft-oss-report" }).complete({ prompt: "p" });
+      await createOllamaLlm({ endpoint, defaultModel: "draft-notes" }).complete({ prompt: "p" });
+      assert.deepEqual(thinks, [
+        ["tenant-auditor", "low"],
+        ["tenant-auditor", "low"],
+        ["draft-oss-report", "low"],
+        ["draft-notes", false],
+      ]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -3149,6 +3204,7 @@ describe("Ollama reasoning models", () => {
         // A name the list omits and Ollama does not know: each read finds it missing.
         if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
         if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
+        if (req.url === "/api/experimental/aliases") { res.statusCode = 404; res.end(); return; }
         const think = (JSON.parse(raw) as { think?: unknown }).think;
         sent.push(think);
         if (think !== false) {
