@@ -3261,7 +3261,10 @@ export class IntuneChatService {
             assistantContent = chunk.accumulated;
             if (assistantContent.trim()) finishAnswerStep.writing();
             // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-            emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+            // After a compact loop a reply that looks like the loop's JSON is not shown live: it is replaced by
+            // its answer text or the failure message once complete, so it would only flash on screen.
+            const protocolShaped = afterCompactLoop && (/^\s*(?:```|\{)/.test(assistantContent) || /"tool"\s*:/.test(assistantContent));
+            emitLive(protocolShaped ? "" : relabelUnverifiedLearn(assistantContent, false), protocolShaped ? "" : chunk.delta);
           }
           // After a compact loop the fallback is one model call, so the turn stays bounded.
           if (isCancelled() || nudge >= (afterCompactLoop ? 0 : MAX_PROMISE_NUDGES) || !looksLikeUnkeptPromise(assistantContent)) break;
@@ -4244,26 +4247,36 @@ export class IntuneChatService {
 /** Tool names the Chat loop offers: a "tool" naming one of these is a request wherever it sits in a reply. */
 const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
 
+/** Prose this long around a quoted tool call is an answer that shows the call, not a lead-in to a request. */
+const PROSE_AROUND_REQUEST_LIMIT = 160;
+
 /**
  * A reply in the tool loop's JSON protocol: `{ answer }` when it carries an answer text, `{ request }` when it
  * is a tool request or a protocol object with no answer, undefined for prose.
- * - A "tool" naming a Chat tool anywhere in the reply is a request: before or after prose, next to a JSON
- *   example, or cut short with its closing brace missing.
  * - A whole-reply object (bare or in one fence) is read as the loop reads it: final with an answer or content
- *   text is the answer; otherwise a tool, final or kind key makes it a request.
+ *   text is the answer, also when it carries a tool name too; otherwise a tool, final or kind key makes it a
+ *   request.
+ * - A "tool" naming a Chat tool anywhere else is a request when the prose around the JSON is a short lead-in
+ *   ("I need to check:"): before or after it, next to a JSON example, or cut short with its closing brace
+ *   missing. A prose answer that quotes a tool call as an example ("call it like this: ...") stays an answer.
  * - A final answer object after prose ("Hope this helps." after it, or before it) is the answer.
  * - A reply that opens as a protocol object and does not parse was cut short: a request.
  * - Any other JSON, such as an FAQ example inside a prose answer, stays prose.
  */
 function protocolReply(text: string): { answer: string } | { request: true } | undefined {
-  for (const match of text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)) {
-    if (CHAT_TOOL_NAME.test(match[1]!.trim())) return { request: true };
-  }
   const answerOf = (record: Record<string, unknown>): string | undefined => {
     const value = typeof record.answer === "string" ? record.answer : typeof record.content === "string" ? record.content : undefined;
     return value?.trim() ? value.trim() : undefined;
   };
   const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
+  const namesChatTool = [...text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)].some((match) => CHAT_TOOL_NAME.test(match[1]!.trim()));
+  if (namesChatTool && !bare.startsWith("{")) {
+    // The prose outside the JSON: before its first brace or fence, and after its last one.
+    const first = text.search(/\{|```/);
+    const last = Math.max(text.lastIndexOf("}"), text.lastIndexOf("```") + 2);
+    const outside = `${text.slice(0, first)} ${last >= first ? text.slice(last + 1) : ""}`.replace(/\s+/g, " ").trim();
+    if (outside.length < PROSE_AROUND_REQUEST_LIMIT) return { request: true };
+  }
   if (bare.startsWith("{")) {
     let whole: unknown;
     let parses = true;
@@ -4281,6 +4294,8 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
       if (answer) return { answer };
       return "final" in record || "kind" in record || "tool" in record ? { request: true } : undefined;
     }
+    // A whole reply that names a Chat tool and does not parse was cut short: a request.
+    if (!parses && namesChatTool) return { request: true };
   }
   const extracted = extractLastJsonObject(text);
   if (extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)) {
@@ -4295,7 +4310,7 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */
 const LOCAL_FALLBACK_UNFINISHED =
-  "The local model did not finish an answer. Its answer from cached data was empty, only a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
+  "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.

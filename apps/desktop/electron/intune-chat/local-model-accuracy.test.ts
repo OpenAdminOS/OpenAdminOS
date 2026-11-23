@@ -684,6 +684,38 @@ describe("The fallback after a failed compact loop", () => {
     });
   });
 
+  it("reads a whole final answer that also names a tool as the answer, and keeps a prose answer that quotes a tool call", async () => {
+    await withHarness(async ({ store, reply }) => {
+      const howTo = "To count noncompliant devices yourself, ask Chat to run the cached count with a filter on the compliance state. "
+        + "The request the model sends looks like the example below, and the host answers it from the Intune device cache without calling Graph:\n"
+        + '```json\n{"tool":"count_cached","params":{"resource":"managedDevices","where":{"complianceState":"noncompliant"}}}\n```';
+      for (const [fallbackReply, expected] of [
+        ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
+        [howTo, howTo],
+      ] as const) {
+        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : fallbackReply));
+        const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
+        assert.equal(message.status, "completed", fallbackReply.slice(0, 40));
+        assert.equal(message.content, expected, fallbackReply.slice(0, 40));
+      }
+    });
+  });
+
+  it("does not show a tool request live while the streamed fallback is still arriving, and says plainly why it failed", async () => {
+    await withHarness(async ({ store, reply }) => {
+      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
+      reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : '{"tool":"count_cached","params":{"resource":"managedDevices"}}'));
+      const live: string[] = [];
+      const message = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, (event) => {
+        if (event.type === "delta") live.push(event.content);
+      })).assistantMessage;
+      assert.ok(!live.some((text) => text.includes('"tool"')), "the raw request never reached the screen");
+      assert.equal(message.status, "failed");
+      assert.equal(message.content, "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.");
+    });
+  });
+
   it("reads a final answer object followed by prose, and a content field, as the answer", async () => {
     await withHarness(async ({ store, reply }) => {
       for (const [send, fallbackReply, expected] of [
@@ -914,6 +946,21 @@ describe("computed answers on partial and never-synced data", () => {
       const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: lookup, cacheStatus, generatedAt: at })!.facts;
       assert.match(detail[0]!, /^The latest refresh failed, so this is the device's state in the snapshot refreshed /);
       assert.match(detail.join("\n"), /MAC-02 \(macOS\) is marked noncompliant/);
+    });
+  });
+
+  it("never shows an unreadable sync time as a date", async () => {
+    await withHarness(async ({ cache }) => {
+      const at = new Date().toISOString();
+      cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: at,
+        rows: [...managedDevices, { id: "md-garbled", deviceName: "WIN-GARBLED", operatingSystem: "Windows", complianceState: "noncompliant", lastSyncDateTime: "not-a-date" }] });
+      const cacheStatus = cache.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const listed = computeStructuredResult({ store: cache, tenantId: tenant.id, query: structuredQueryForQuestion({ question: "Which devices are not compliant?", generatedAt: at })!, cacheStatus, generatedAt: at })!.facts.join("\n");
+      assert.match(listed, /- WIN-GARBLED \(Windows, noncompliant, no readable sync time\)/);
+      assert.doesNotMatch(listed, /last sync not-a-da/);
+      const detail = computeStructuredResult({ store: cache, tenantId: tenant.id, query: deviceComplianceReasonQuery("why is WIN-GARBLED not compliant?", cache, tenant.id)!, cacheStatus, generatedAt: at })!.facts.join("\n");
+      assert.match(detail, /The cached last sync time for this device is not readable\./);
+      assert.doesNotMatch(detail, /not-a-da|Intune reports no sync/);
     });
   });
 
