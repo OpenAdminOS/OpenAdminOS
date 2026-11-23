@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -9,6 +10,7 @@ import {
   type ManagedPolicyStatus,
   type ProviderId,
   type ProviderSummary,
+  type RunLlmApi,
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
@@ -64,7 +66,7 @@ const catalog: McpCatalogEntry[] = [
  * with it, there is no state file, so the first-run scan is pending.
  */
 async function makeFixture(
-  options: { policy?: ManagedPolicyStatus; initial?: Record<string, unknown>; fresh?: boolean; providers?: () => ProviderSummary[] } = {},
+  options: { policy?: ManagedPolicyStatus; initial?: Record<string, unknown>; fresh?: boolean; providers?: () => ProviderSummary[]; useRuntimeAdapter?: boolean } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-managed-policy-"));
   const statePath = join(dir, "state.json");
@@ -94,10 +96,12 @@ async function makeFixture(
       appVersion: "0.8.0",
       mcpCatalog: catalog,
       providerListFactory: options.providers ?? (() => readyProviders()),
-      llmFactory: async (providerId, model) => {
-        llmCalls.push([providerId, model]);
-        return { available: true } as never;
-      },
+      ...(!options.useRuntimeAdapter ? {
+        llmFactory: async (providerId, model) => {
+          llmCalls.push([providerId, model]);
+          return { available: true } as never;
+        },
+      } : {}),
       interactiveSignIn: async (request) => {
         signIns.push(request);
         throw new Error("sign-in is not part of this test");
@@ -131,8 +135,8 @@ async function makeFixture(
   };
 }
 
-function buildLlm(store: AppStateStore, providerId: ProviderId, model?: string): Promise<unknown> {
-  return (store as unknown as { buildLlm(id: ProviderId, model: string | undefined): Promise<unknown> }).buildLlm(providerId, model);
+function buildLlm(store: AppStateStore, providerId: ProviderId, model?: string): Promise<RunLlmApi> {
+  return (store as unknown as { buildLlm(id: ProviderId, model: string | undefined): Promise<RunLlmApi> }).buildLlm(providerId, model);
 }
 
 const LOCAL_ONLY = { allowedProviders: ["ollama", "lm-studio", "apple-foundation"] };
@@ -174,6 +178,7 @@ describe("managed policy: providers", () => {
       const ollama = (await fixture.store.listProviders()).find((provider) => provider.id === "ollama");
       assert.deepEqual(ollama?.models, ["writer:latest"]);
       assert.equal(ollama?.defaultModel, "writer:latest");
+      await assert.rejects(fixture.store.setActiveModel("ollama", alias), /policy\.json.*cloud-writer:latest/);
       await assert.rejects(buildLlm(fixture.store, "ollama", alias), /policy\.json.*cloud-writer:latest/);
       assert.deepEqual(fixture.llmCalls, []);
 
@@ -184,6 +189,40 @@ describe("managed policy: providers", () => {
       await buildLlm(fixture.store, "ollama", alias);
       assert.deepEqual(fixture.llmCalls, [["ollama", alias]]);
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it("refuses to send when a previously local alias is now cloud-backed", async () => {
+    const alias = "writer:latest";
+    let chatSends = 0;
+    const server = createServer((request, response) => {
+      if (request.url === "/api/tags") {
+        response.end(JSON.stringify({ models: [{ name: alias, remote_model: "cloud-writer" }] }));
+      } else {
+        if (request.url === "/api/chat") chatSends++;
+        response.writeHead(404).end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const previous = process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${address.port}`;
+    const fixture = await makeFixture({
+      policy: await policyOf(LOCAL_ONLY), useRuntimeAdapter: true,
+      providers: () => readyProviders().map((provider) => provider.id === "ollama"
+        ? { ...provider, models: [alias], defaultModel: alias }
+        : provider),
+    });
+    try {
+      const llm = await buildLlm(fixture.store, "ollama", alias);
+      await assert.rejects(llm.complete({ prompt: "Reviewed local request" }), /policy\.json.*writer:latest/);
+      assert.equal(chatSends, 0);
+    } finally {
+      if (previous === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = previous;
+      server.close();
       await fixture.close();
     }
   });

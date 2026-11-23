@@ -8183,6 +8183,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (!provider) {
         throw new Error(`Provider not found: ${providerId}`);
       }
+      if (providerId === "ollama" && provider.isLocal && model !== lockedModel &&
+          policyRestrictsOllamaCloud(this.managedPolicy) && isRemoteBackedModel(provider, model)) {
+        throw new ManagedPolicyError(managedOllamaCloudMessage(model));
+      }
       const known = provider.models ?? [];
       if (known.length > 0 && !known.includes(model)) {
         throw new Error(
