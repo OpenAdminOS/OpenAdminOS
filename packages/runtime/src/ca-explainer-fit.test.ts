@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,7 +13,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { checkPromptFit, estimateTokens } from "./prompt-fit.js";
-import { createQueuedRun, executeRun } from "./index.js";
+import { appVersionSatisfies, createQueuedRun, executeRun } from "./index.js";
 import { createOllamaLlm } from "./llm-ollama.js";
 import { syntheticConditionalAccessPolicies } from "./test-fixtures/conditional-access.js";
 
@@ -222,5 +223,18 @@ describe("Conditional Access explainer prompt size", () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+
+describe("Conditional Access explainer minimum app version", () => {
+  it("accepts the first nightly with the compact records and later builds, not 0.7.2 or earlier nightlies", () => {
+    const manifest = readFileSync(resolve(agent.registryPath!, "manifest.yaml"), "utf8");
+    const min = /^\s*minAppVersion:\s*(\S+)\s*$/m.exec(manifest)?.[1];
+    assert.equal(min, "0.7.3-nightly.20261123094040");
+    assert.equal(appVersionSatisfies("0.7.2", min!), false);
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261120052634", min!), false);
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261123094040", min!), true);
+    assert.equal(appVersionSatisfies("0.7.3-nightly.20261123100828", min!), true);
+    assert.equal(appVersionSatisfies("0.7.3", min!), true);
   });
 });
