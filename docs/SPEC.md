@@ -406,8 +406,10 @@ reports the family of the model it points to; on Ollama 0.17, where
 `/api/show` does not know server aliases but Chat resolves them, a 404 there
 is followed by `GET /api/experimental/aliases` (an exact alias, else the
 longest prefix alias on the short name, then exact aliases from there, a
-cycle resolving to nothing) and the alias takes its target's entry as the
-newest applied list read has it; a list read without such a
+cycle resolving to nothing); only which model the alias points to is kept,
+and the alias then resolves to that installed model like a lone `:local`
+does, so its family, version and limits are the target's when each send and
+lookup is made, while Chat still gets the alias; a list read without such a
 name keeps what `/api/show` showed, which only a "not found" from it clears; a
 list read overtaken by a newer one never skips that lookup,
 and without a digest a new `modified_at` counts as another version), so a model

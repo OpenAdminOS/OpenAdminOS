@@ -360,7 +360,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       // The context lookup for this request, by the name as given.
       // Takes the signal of the attempt it belongs to; the lookup has its own timeout.
       const sizeRequest = (signal: AbortSignal = controller.signal) => ollamaRequestNumCtx({
-        endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
+        endpoint, model: ollamaLookupName(endpoint, model), ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
         ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
         ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
         ...(opts.enforceContextWindow ? { enforce: true } : {}),
@@ -539,7 +539,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // plus the answer, up to what the model supports, and retry once.
           const readRetryShow = async (): Promise<OllamaShowContext | undefined> => {
             try {
-              return await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+              return await readOllamaShowForRetry(endpoint, ollamaLookupName(endpoint, model), opts.signal ?? new AbortController().signal, lookupTimeoutMs);
             } catch (error) {
               if (opts.signal?.aborted) throw stoppedByUser();
               // An agent run does not raise without the lookup, and Ollama's
@@ -988,6 +988,8 @@ export function recordOllamaModelList(endpoint: string, models: readonly unknown
     if (name === ollamaModelName("")) continue;
     listed.add(familyKey(endpoint, name));
     ollamaShownOnly.delete(familyKey(endpoint, name));
+    // An installed model under the name comes before an alias of it.
+    ollamaAliasTargets.delete(familyKey(endpoint, name));
     recordOllamaModelFamily(endpoint, name, entry, read);
   }
   const prefix = familyKey(endpoint, "").split("\0")[0] + "\0";
@@ -1011,6 +1013,7 @@ function forgetOllamaModelKey(key: string, read: number): void {
   ollamaModelDigests.delete(key);
   ollamaModelRevisions.delete(key);
   ollamaShownOnly.delete(key);
+  ollamaAliasTargets.delete(key);
   nextGeneration(key);
 }
 
@@ -1129,7 +1132,18 @@ function installedModelFor(name: string, version: string | undefined): string {
  * reads the model list.
  */
 function ollamaInstalledModelNow(endpoint: string, model: string): string {
-  return installedModelFor(ollamaModelName(model), ollamaServerVersions.get(ollamaEndpointKey(endpoint))?.version);
+  const name = installedModelFor(ollamaModelName(model), ollamaServerVersions.get(ollamaEndpointKey(endpoint))?.version);
+  // A server alias (Ollama 0.17) runs the model it points to: what is known
+  // is that model's, read when it is needed.
+  return ollamaAliasTargets.get(familyKey(endpoint, name)) ?? name;
+}
+
+/** Server aliases (Ollama 0.17) and the installed model each points to, per endpoint. */
+const ollamaAliasTargets = new Map<string, string>();
+
+/** The name a model lookup (/api/show) asks for: an alias's target, which /api/show knows. */
+export function ollamaLookupName(endpoint: string, model: string): string {
+  return ollamaAliasTargets.get(familyKey(endpoint, ollamaModelName(model))) ?? model;
 }
 
 /**
@@ -1197,25 +1211,15 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const target = await resolveOllamaServerAlias(endpoint, model, controller.signal);
     if (target === "unknown") return;
     if (target !== undefined) {
-      // The target as recorded now, after the alias lookup: the newest
-      // applied list read has it (this one, or a newer one that also may
-      // have found it replaced or removed).
-      const targetKey = familyKey(endpoint, target);
-      const entry: unknown = ollamaModelDigests.has(targetKey) || ollamaModelFamilies.has(targetKey)
-          ? {
-              digest: ollamaModelDigests.get(targetKey),
-              modified_at: ollamaModelRevisions.get(targetKey),
-              details: { family: ollamaModelFamilies.get(targetKey) },
-            }
-          : undefined;
+      // Only which model the alias points to is kept; that model's family,
+      // digest and generation are read from it right before each send.
       const key = familyKey(endpoint, model);
-      if (entry !== undefined && (ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
+      if ((ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
         ollamaFamilyReadApplied.set(key, showSeq);
-        recordFamily(key, entry);
+        ollamaAliasTargets.set(key, ollamaModelName(target));
         ollamaShownOnly.add(key);
-        return;
       }
-      if (entry !== undefined) return;
+      return;
     }
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
