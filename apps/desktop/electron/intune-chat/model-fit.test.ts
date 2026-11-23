@@ -148,7 +148,7 @@ describe("Model fit: classifying a failure", () => {
   it("reads the LM Studio adapter's messages and the newer Ollama forms, as the runtime words them", () => {
     const local = { providerId: "lm-studio" as const, model: "qwen3-8b", isLocal: true };
     const needs = classifyModelFitFailure("LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Reload the model in LM Studio with a context length to at least 17,408.", local);
-    assert.deepEqual([needs?.neededTokens, needs?.limitTokens], [15857, 4096]);
+    assert.deepEqual([needs?.neededTokens, needs?.limitTokens], [16881, 4096]);
     const loadedOnly = classifyModelFitFailure("LM Studio context length too small: This request does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio.", local);
     assert.deepEqual([loadedOnly?.reason, loadedOnly?.neededTokens, loadedOnly?.limitTokens], ["context-too-small", undefined, 8192]);
     assert.equal(classifyModelFitFailure("LM Studio context length too small: This request does not fit in the context length qwen3-8b is loaded with in LM Studio.", local)?.reason, "context-too-small");
@@ -364,15 +364,18 @@ describe("Model fit: the per-request override", () => {
     assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL, neededTokens: 40652 }, contextWindows: new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), 65536], [modelFitContextKey("ollama", "big-70b"), 65536]]), providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
   });
 
-  it("requires room for the answer when llama.cpp reports a prompt-only count", () => {
-    const issue = classifyModelFitFailure('HTTP 400 {"error":{"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":8192}}', {
-      providerId: "lemonade", model: "local-8b", isLocal: true,
+  for (const [providerId, error] of [
+    ["lemonade", 'HTTP 400 {"error":{"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":8192}}'],
+    ["lm-studio", "LM Studio context length too small: This request needs 20,000 tokens of context, but local-8b is loaded in LM Studio with a context length of 8,192."],
+  ] as const) {
+    it(`requires room for the answer when ${providerId} reports a prompt-only count`, () => {
+      const issue = classifyModelFitFailure(error, { providerId, model: "local-8b", isLocal: true });
+      assert.ok(issue);
+      const contextWindow = (tokens: number) => new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), tokens]]);
+      assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(21023) }).local, []);
+      assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(21024) }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
     });
-    assert.ok(issue);
-    const contextWindow = (tokens: number) => new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), tokens]]);
-    assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(20000) }).local, []);
-    assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(21024) }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
-  });
+  }
 
   it("offers a same-size local model with enough context only for a context failure", () => {
     const provider = { ...ollama, models: [LOCAL_MODEL, "another-8b"] };

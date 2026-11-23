@@ -2780,6 +2780,10 @@ it goes through the same model choke point; no masking exists on main yet. The
 renderer shows an offer only in its own conversation and withdraws it when the
 organization or the active model changes.
 
+For prompt-only counts from LM Studio or llama.cpp, model fit adds 1,024
+tokens for the answer when checking whether another local model can fit the
+request.
+
 Apple Foundation reports the prompt's own tokens and the model's total; the
 helper also reserves room for the answer, so a prompt below the total reads
 "uses about N of the M tokens <model> supports, which leaves too little room

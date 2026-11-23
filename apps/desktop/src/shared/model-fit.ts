@@ -33,6 +33,11 @@ function positive(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
+function promptWithAnswerRoom(text: string | undefined): number | undefined {
+  const promptTokens = count(text);
+  return promptTokens === undefined ? undefined : positive(promptTokens + 1024);
+}
+
 /**
  * A typed failure from the runtime, read by its shape so this module does
  * not depend on one class: `kind` or `code` names the reason, with the
@@ -115,7 +120,7 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
   // The LM Studio adapter (packages/runtime/src/llm-lm-studio.ts).
   const lmStudio = /LM Studio context length too small: This request needs ([\d,]+) tokens of context, but .+? is loaded in LM Studio with a context length of ([\d,]+)\./i.exec(text);
   if (lmStudio) {
-    const neededTokens = count(lmStudio[1]);
+    const neededTokens = promptWithAnswerRoom(lmStudio[1]);
     const limitTokens = count(lmStudio[2]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
@@ -150,9 +155,7 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
   // llama.cpp server, which LM Studio and Lemonade run.
   const availableContext = /exceeds the available context size/i.test(text);
   if (/exceed_context_size_error|\b(?:request|prompt) exceeds the available context size\b/i.test(text) || (availableContext && /"n_ctx"\s*:/.test(text))) {
-    const promptTokens = count(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
-    // The server reports only the prompt. Leave room for the answer when checking another model.
-    const neededTokens = promptTokens === undefined ? undefined : positive(promptTokens + 1024);
+    const neededTokens = promptWithAnswerRoom(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
