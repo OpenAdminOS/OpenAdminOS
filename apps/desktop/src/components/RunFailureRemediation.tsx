@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
+import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -142,9 +142,28 @@ const SUGGESTIONS: Suggestion[] = [
   },
 ];
 
+/** Recovery for a request that did not fit the model, read from the typed reason. */
+function contextTooSmallSuggestion(failure: ContextTooSmallFailure): Suggestion {
+  const tokens = (value: number) => value.toLocaleString("en-US");
+  const model = failure.model ?? "The selected model";
+  return {
+    match: () => true,
+    title: "Prompt larger than the model's context",
+    body:
+      `This run needs about ${tokens(failure.neededTokens)} tokens of context and ${model} accepts ${tokens(failure.limitTokens)}, ` +
+      (failure.sentToProvider
+        ? "so the model refused the request or stopped before finishing its answer. "
+        : "so OpenAdminOS stopped before sending anything. ") +
+      "Pick a local model with a larger context window in Settings → LLM Providers, " +
+      "switch to a hosted provider (the prompt then leaves this device), or run the agent against a narrower scope, then re-run.",
+  };
+}
+
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
+  // A typed reason is exact, so it comes first and replaces the guesses.
+  const typed = run.failureReason?.code === "context-too-small" ? run.failureReason : undefined;
   // A failed lookup of the Ollama model's context limit, an LM Studio
   // context error and an Ollama reply with only reasoning each have one
   // cause and one recovery; an HTTP status or a
@@ -152,19 +171,24 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const own = ownText(run.error);
   // A cause the runtime classified from its typed error decides, whatever
   // wrapper the app put in front of the message.
-  const exclusive = run.failureCause === "reasoning-without-answer"
-    ? isReasoningWithoutAnswer
-    : EXCLUSIVE.find((match) => match(own));
-  const matched = exclusive
-    ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
-    : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
+  const exclusive = typed
+    ? undefined
+    : run.failureCause === "reasoning-without-answer"
+      ? isReasoningWithoutAnswer
+      : EXCLUSIVE.find((match) => match(own));
+  const matched = typed
+    ? [contextTooSmallSuggestion(typed)]
+    : exclusive
+      ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+      : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
   // Only a Graph error gets Graph recovery advice. Runs stored by earlier
   // versions can carry an accessDenial for a 403 from a model server, a
   // vendor API, or an MCP server, for example a "403 MiB" in what Ollama
   // said; that stored value is ignored. A failure classified from its typed
   // error is never read from its text; a run stored by an earlier version is
   // read from its message, as Graph code wrote it before denials were stored.
-  const accessDenial = exclusive
+  // A typed context reason is never a Graph denial.
+  const accessDenial = typed || exclusive
     ? undefined
     : storedGraphAccessDenial(run.accessDenial, run.error)
       ?? (run.graphDenialChecked ? undefined : graphAccessDenialFromStoredText(run.error));

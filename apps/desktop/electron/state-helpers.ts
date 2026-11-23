@@ -57,6 +57,7 @@ import {
   staleManagedDeviceSyncThresholdDays,
   thresholdIsoDaysBefore,
 } from "./intune-chat/planner.js";
+import { DEVICE_FIELD_WORDS, deviceRowFilters, QUESTION_WORDS } from "./intune-chat/structured-question.js";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
 
 
@@ -371,6 +372,10 @@ export function humanizeMsalError(
     "This is a problem with the published app, not your tenant. Report it to OpenAdminOS, and connect with your own app registration in the meantime.";
   if (error instanceof Error && error.name === "TenantConnectCancelledError") {
     return "Sign-in was cancelled. Nothing was connected.";
+  }
+  // A reset in progress says so itself; it is not a sign-in failure.
+  if (error instanceof Error && (error.name === "DataFolderSealedError" || raw.startsWith("OpenAdminOS is resetting"))) {
+    return raw;
   }
   if (error instanceof Error && error.name === "TenantConnectTimeoutError") {
     return "Microsoft sign-in timed out after five minutes. Start again when you are ready.";
@@ -973,19 +978,50 @@ export function readPlannedChatRows(
     limitPerResource: number;
   },
 ): Record<GraphCacheResourceKind, unknown[]> {
+  // OS and compliance state named in the question filter the device rows on their fields.
+  // Question words ("how", "many") match nothing a row is named for; ANDed as text they only emptied the match.
+  const deviceFilters = deviceRowFilters(input.question);
+  const terms = input.searchTerms.filter((term) => !QUESTION_WORDS.has(term));
+  const others = input.resources.filter((resource) => resource !== "managedDevices");
   const rows = store.readGraphRows({
     tenantId: input.tenantId,
-    resources: input.resources,
-    searchTerms: input.searchTerms,
+    resources: others,
+    searchTerms: terms,
     limitPerResource: input.limitPerResource,
   });
+  if (input.resources.includes("managedDevices")) {
+    // The device words the field filters replace leave the text match of device rows.
+    rows.managedDevices = store.readGraphRows({
+      tenantId: input.tenantId,
+      resources: ["managedDevices"],
+      searchTerms: terms.filter((term) => !DEVICE_FIELD_WORDS.has(term)),
+      limitPerResource: input.limitPerResource,
+      ...(deviceFilters.length > 0 ? { filters: { managedDevices: deviceFilters } } : {}),
+    }).managedDevices;
+  }
   const staleSyncDays = staleManagedDeviceSyncThresholdDays(input.question);
   if (staleSyncDays !== undefined && input.resources.includes("managedDevices")) {
     rows.managedDevices = store.readManagedDevicesLastSyncBefore({
       tenantId: input.tenantId,
       thresholdIso: thresholdIsoDaysBefore(input.generatedAt, staleSyncDays),
       limit: input.limitPerResource,
+      ...(deviceFilters.length > 0 ? { filters: deviceFilters } : {}),
     });
+  }
+  // A device the question names stays in the samples whatever its words filter on: in "is Windows-Lab compliant"
+  // the OS and the state are about that device, which may be a noncompliant Mac. Without filters too: a name the
+  // text search cannot tokenize ("上海总部") would otherwise be one row among many and fall out of the pack.
+  if (input.resources.includes("managedDevices")) {
+    const named = store.findGraphRowsNamedIn({ tenantId: input.tenantId, resource: "managedDevices", text: input.question, limit: 5 });
+    if (named.length > 0) {
+      const namedRows = store.countGraphCache({ tenantId: input.tenantId, resource: "managedDevices", filters: [{ field: "id", op: "in", value: named.map((entry) => entry.id) }], listLimit: named.length }).rows ?? [];
+      // Every named row goes first, also one already sampled further down, so no cap after this drops it.
+      const namedIds = new Set(namedRows.map((row) => (row as { id?: unknown }).id));
+      const others = (rows.managedDevices ?? []).filter((row) => !namedIds.has(row && typeof row === "object" ? (row as { id?: unknown }).id : undefined));
+      // Marked, so a model reading the samples does not take a named device for one that matched the filters.
+      const marked = namedRows.map((row) => (row && typeof row === "object" ? { ...(row as Record<string, unknown>), namedInQuestion: true } : row));
+      rows.managedDevices = [...marked, ...others].slice(0, Math.max(input.limitPerResource, namedRows.length));
+    }
   }
   return rows;
 }
@@ -1402,16 +1438,15 @@ export function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLl
     get defaultModel() {
       return base.defaultModel;
     },
-    complete: (options) =>
-      base.complete({
-        ...options,
-        system: composeSystem(options.system),
-      }),
+    get streamsIncrementally() {
+      return base.streamsIncrementally;
+    },
+    ...(base.contextWindow ? { contextWindow: (model?: string) => base.contextWindow!(model) } : {}),
+    // The run's size check counts this, so it sees the request as sent.
+    systemSuffix: [base.systemSuffix, overlay].filter(Boolean).join("\n\n"),
+    complete: (options) => base.complete({ ...options, system: composeSystem(options.system) }),
     async *stream(options) {
-      yield* base.stream({
-        ...options,
-        system: composeSystem(options.system),
-      });
+      yield* base.stream({ ...options, system: composeSystem(options.system) });
     },
   };
 }
@@ -1500,6 +1535,7 @@ export function resourcesFromToolTrace(
     const params = (entry.params ?? {}) as Record<string, unknown>;
     if (
       entry.tool === "query_cache" ||
+      entry.tool === "count_cached" ||
       entry.tool === "refresh_resource" ||
       entry.tool === "query_drift"
     ) {

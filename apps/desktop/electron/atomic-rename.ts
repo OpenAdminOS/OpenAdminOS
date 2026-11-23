@@ -11,11 +11,14 @@ export async function atomicRename(
     platform?: NodeJS.Platform;
     replace?: typeof rename;
     wait?: (ms: number) => Promise<unknown>;
+    /** Runs before every attempt, retries included; throwing stops the replacement. */
+    beforeAttempt?: () => void;
   } = {},
 ): Promise<void> {
   const replace = options.replace ?? rename;
   const wait = options.wait ?? delay;
   for (let attempt = 0; ; attempt++) {
+    options.beforeAttempt?.();
     try {
       await replace(source, destination);
       return;

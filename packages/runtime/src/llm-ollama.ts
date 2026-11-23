@@ -5,7 +5,10 @@ import type {
   LlmTokenUsage,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
+import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { isRefusedRedirect, modelServerRedirect, redirectRefusedDetail } from "./llm-openai-compatible.js";
+import { keepOllamaSize, keptOllamaRevision, ollamaRequestNumCtx, parseOllamaShow, readOllamaContextWindow, type OllamaShowContext } from "./ollama-context.js";
+import { checkPromptFit, DEFAULT_ANSWER_RESERVE_TOKENS } from "./prompt-fit.js";
 
 export interface OllamaProviderOptions {
   endpoint?: string;
@@ -75,6 +78,8 @@ export interface OllamaEndpointTrust {
 }
 
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
+  // The /api/show reading each model's size check got, per adapter (one run).
+  const checkedShows = new Map<string, OllamaShowContext>();
   const endpoint = resolveOllamaEndpoint(options.endpoint);
   const defaultModel = options.defaultModel;
   const lookupTimeoutMs = options.lookupTimeoutMs ?? OLLAMA_SHOW_TIMEOUT_MS;
@@ -89,6 +94,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
     available: true,
     defaultModel,
     streamsIncrementally: true,
+    // The retry below raises num_ctx for a model without a pinned one, so
+    // that model's maximum is its limit; a pinned num_ctx is the limit.
+    contextWindow: (model) => {
+      const name = model ?? defaultModel;
+      return readOllamaContextWindow(endpoint, name, {
+        appRaisesNumCtx: true, timeoutMs: lookupTimeoutMs,
+        // Kept for this adapter's requests: if their own lookup fails, the
+        // pin the size check saw still holds.
+        onShow: (show) => { if (name) checkedShows.set(name, show); },
+      });
+    },
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       let last: LlmStreamChunk | undefined;
       for await (const chunk of this.stream(opts)) {
@@ -229,9 +245,15 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       let response: Response;
       let raisedCtx: number | undefined;
       // Set while the retry runs, so a memory failure can name both sizes.
-      let retry: { requested: number; numCtx: number } | undefined;
+      // Also set for a first send sized up front (sizedUpFront), which a
+      // failure treats the same way.
+      let retry: { requested: number; numCtx: number; sizedUpFront?: boolean } | undefined;
       let modelMax: number | undefined;
-      const cachedCtx = ollamaContextOverrides.get(cacheKey);
+      let requestRevision: string | undefined;
+      // Mutable: a kept size below a model's new pin is dropped before sending.
+      let cachedCtx = ollamaContextOverrides.get(cacheKey);
+      // Read with the size, so the two are checked as one.
+      const cachedRevision = cachedCtx === undefined ? undefined : keptOllamaRevision(endpoint, model);
       /**
        * Forgets a size the attempt that just failed sent. A failure is
        * evidence only about the size that attempt asked for, at the moment it
@@ -251,6 +273,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
        * the running attempt sent did not fit or could not be loaded. Forgets
        * that size and returns the message; undefined for other failures.
        */
+      // The limit this request's first lookup saw (pin, else maximum), for a
+      // typed reason when Ollama's own message carries no counts.
+      let lookupLimit: number | undefined;
       const contextFailure = (text: string, answering: boolean): Error | undefined => {
         const counted = parseContextOverflow(text);
         const memory = isOllamaMemoryError(text);
@@ -265,12 +290,45 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (retry) {
             return new Error(
               answering
-                ? `Ollama failed partway through an answer from ${model} on the retry with a ${formatTokens(retry.numCtx)} token context size, usually because free memory ran out. Ollama said: ${truncate(text, 200)}`
+                ? `Ollama failed partway through an answer from ${model} ${retry.sizedUpFront ? "with the" : "on the retry with a"} ${formatTokens(retry.numCtx)} token context size, usually because free memory ran out. Ollama said: ${truncate(text, 200)}`
                 : contextMemoryMessage(model, retry.requested, retry.numCtx, text),
             );
           }
           if (cachedCtx !== undefined) return new Error(cachedContextMemoryMessage(model, cachedCtx, text, answering));
           return undefined;
+        }
+        if (counted && opts.enforceContextWindow) {
+          // An agent run gets the typed reason for an overflow Ollama reports
+          // after the retry or mid-stream, as for one found before sending.
+          const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+          return new ContextTooSmallError({
+            code: "context-too-small",
+            promptTokens: counted.requested,
+            answerTokens,
+            neededTokens: counted.requested + answerTokens,
+            limitTokens: counted.available,
+            model,
+            sentToProvider: true,
+          });
+        }
+        if (!counted && opts.enforceContextWindow) {
+          // Ollama's other wording ("the prompt is longer than the context
+          // length") has no counts. The request needed more than the size it
+          // was sent with; the estimate fills in the rest.
+          const limit = sent ?? lookupLimit;
+          if (limit !== undefined) {
+            const fit = checkPromptFit({ ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt, ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}) });
+            const neededTokens = Math.max(fit.neededTokens, limit + 1);
+            return new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: neededTokens - fit.answerTokens,
+              answerTokens: fit.answerTokens,
+              neededTokens,
+              limitTokens: limit,
+              model,
+              sentToProvider: true,
+            });
+          }
         }
         if (counted) {
           const atModelLimit = modelMax !== undefined && counted.available >= modelMax;
@@ -317,22 +375,103 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       };
       try {
         let numCtx = cachedCtx;
+        // A model without a pinned num_ctx gets room for this request on the
+        // first send, so it is never served at a smaller default.
+        const sized = await ollamaRequestNumCtx({
+          endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
+          ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+          ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
+          ...(opts.enforceContextWindow ? { enforce: true } : {}),
+          ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
+          timeoutMs: lookupTimeoutMs, signal: controller.signal,
+        });
+        if (opts.signal?.aborted) throw stoppedByUser();
+        // The revision this request was sized for; a kept size binds to it.
+        requestRevision = sized?.revision;
+        // Without a known pin status the maximum is not the limit (a pin
+        // below it may apply), so none is assumed.
+        lookupLimit = sized?.pinnedNumCtx !== undefined
+          ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
+          : sized?.pinKnown ? sized.modelMaxContext : undefined;
+        if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
+        if (sized?.dropKept) {
+          if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
+          cachedCtx = undefined;
+          numCtx = undefined;
+        }
+        if (sized?.skipKept) {
+          // This request only: the kept size stays for Chat.
+          cachedCtx = undefined;
+          numCtx = undefined;
+        }
+        if (sized?.numCtx !== undefined) {
+          numCtx = sized.numCtx;
+          raisedCtx = sized.numCtx;
+          retry = { requested: sized.neededTokens, numCtx: sized.numCtx, sizedUpFront: true };
+          retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sized.numCtx)) ?? 0;
+        }
 
-        startAttempt(cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
+        startAttempt(sized?.numCtx !== undefined
+          ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
+          : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
+        // The size this first send asked for: kept, sized up front, or none.
+        const firstSent = numCtx;
         let detail: string;
         [response, detail] = await sendWithThinkFallback(numCtx);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
-          // Less room than the kept size asked for means Ollama can no longer
-          // give it. Otherwise the prompt grew and the kept size stays.
-          if (cachedCtx !== undefined && overflow.available < cachedCtx) forgetSize(cachedCtx);
+          // Less room than this send asked for means Ollama can no longer give
+          // it, so that size is forgotten (and a concurrent request that sent
+          // it is not kept) before the retry lookup. A size this request did
+          // not send is untouched. Otherwise the prompt grew and the size stays.
+          if (firstSent !== undefined && overflow.available < firstSent) forgetSize(firstSent);
           // The first request's budget ends here; the lookup has its own.
           clearTimeout(timer);
+          // An agent run is held to the pin this request's first lookup saw:
+          // Ollama counted more than the estimate, so refuse before any retry
+          // lookup can lose that pin or fail.
+          const answerBudget = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+          const seenLimit = sized?.pinnedNumCtx !== undefined
+            ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
+            : sized?.modelMaxContext;
+          if (opts.enforceContextWindow && seenLimit !== undefined && overflow.requested + answerBudget > seenLimit) {
+            throw new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: overflow.requested,
+              answerTokens: answerBudget,
+              neededTokens: overflow.requested + answerBudget,
+              limitTokens: seenLimit,
+              model,
+              sentToProvider: true,
+            });
+          }
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          modelMax = await readOllamaContextLength(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+          let retryShow: OllamaShowContext | undefined;
+          try {
+            retryShow = await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+          } catch (error) {
+            if (opts.signal?.aborted) throw stoppedByUser();
+            // An agent run does not raise without the lookup, and Ollama's
+            // own count is the typed reason; Chat keeps the lookup's error.
+            if (!opts.enforceContextWindow) throw error;
+            throw new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: overflow.requested,
+              answerTokens: answerBudget,
+              neededTokens: overflow.requested + answerBudget,
+              limitTokens: overflow.available,
+              model,
+              sentToProvider: true,
+            });
+          }
           if (opts.signal?.aborted) throw stoppedByUser();
+          // A retry lookup for the same revision that omits something keeps
+          // what the first lookup saw.
+          const sameRevision = retryShow?.revision === undefined || retryShow.revision === sized?.revision;
+          modelMax = retryShow?.modelMaxContext ?? (sameRevision ? sized?.modelMaxContext : undefined);
+          if (retryShow?.revision !== undefined) requestRevision = retryShow.revision;
           // The model may have been replaced under its name during the lookup:
           // the retry gets the think value of the model installed now.
           installedModel = await settleInstalledModel();
@@ -341,10 +480,53 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
           sentFamily = ollamaModelFamilies.get(familyKey(endpoint, installedModel));
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
+          // An agent run holds a pinned model to its pin, on the retry too.
+          // Ollama counted more than the estimate, so the request did not fit.
+          // A retry lookup without a pin for the same revision keeps the pin the
+          // first lookup saw.
+          const pin = retryShow?.pinnedNumCtx ?? (sameRevision ? sized?.pinnedNumCtx : undefined);
+          // That the model is unpinned carries over from the first lookup only
+          // for a revision both lookups name.
+          const pinKnown = pin !== undefined || retryShow?.pinKnown === true ||
+            (retryShow?.revision !== undefined && retryShow.revision === sized?.revision && sized?.pinKnown === true);
+          // An agent run that never learned whether the model is pinned does
+          // not raise num_ctx, which would override a pin: the size Ollama
+          // ran it with is the limit it gets.
+          if (opts.enforceContextWindow && !pinKnown) {
+            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+            throw new ContextTooSmallError({
+              code: "context-too-small",
+              promptTokens: overflow.requested,
+              answerTokens,
+              neededTokens: overflow.requested + answerTokens,
+              limitTokens: overflow.available,
+              model,
+              sentToProvider: true,
+            });
+          }
+          // An agent run is held to the pin, else to the model's maximum, with
+          // room for its answer.
+          const enforcedLimit = !opts.enforceContextWindow
+            ? undefined
+            : pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : modelMax;
+          if (enforcedLimit !== undefined) {
+            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+            if (overflow.requested + answerTokens > enforcedLimit) {
+              throw new ContextTooSmallError({
+                code: "context-too-small",
+                promptTokens: overflow.requested,
+                answerTokens,
+                neededTokens: overflow.requested + answerTokens,
+                limitTokens: enforcedLimit,
+                model,
+                sentToProvider: true,
+              });
+            }
+          }
           if (modelMax !== undefined && overflow.requested > modelMax) {
             throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
           }
-          numCtx = modelMax === undefined ? wanted : Math.min(wanted, modelMax);
+          numCtx = Math.min(wanted, enforcedLimit ?? modelMax ?? Infinity);
           retry = { requested: overflow.requested, numCtx };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
@@ -426,7 +608,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               // Kept only once the stream finished cleanly, and before the
               // caller sees the last chunk and may stop reading. Concurrent
               // requests can raise it at once; keep the largest that worked.
-              ollamaContextOverrides.set(cacheKey, Math.max(ollamaContextOverrides.get(cacheKey) ?? 0, raisedCtx));
+              keepOllamaSize(ollamaContextOverrides, cacheKey, endpoint, model, raisedCtx, requestRevision);
             }
             if (typeof chunk.model === "string" && chunk.model.length > 0) {
               actualModel = chunk.model;
@@ -1019,17 +1201,16 @@ export function parseContextOverflow(detail: string): { requested: number; avail
 }
 
 /**
- * The model's maximum context length from /api/show. Undefined only when
- * Ollama answered successfully without that metadata; a stop of the caller's signal
- * returns undefined so the caller reports it, and a failed or timed out
- * lookup throws.
+ * The model's /api/show reading for the retry: its maximum context length,
+ * a pinned num_ctx and its revision. A stop of the caller's signal returns
+ * undefined so the caller reports it, and a failed or timed out lookup throws.
  */
-async function readOllamaContextLength(
+async function readOllamaShowForRetry(
   endpoint: string,
   model: string,
   signal: AbortSignal,
   timeoutMs = OLLAMA_SHOW_TIMEOUT_MS,
-): Promise<number | undefined> {
+): Promise<OllamaShowContext | undefined> {
   const timeout = AbortSignal.timeout(timeoutMs);
   const url = `${endpoint.replace(/\/$/, "")}/api/show`;
   const failure = (error: unknown): Error | undefined => {
@@ -1076,12 +1257,10 @@ async function readOllamaContextLength(
   if (answer.error !== undefined) {
     throw new Error(`Ollama could not report the model's context limit: ${url} answered with an error: ${truncate(errorText(answer.error), 200)}`);
   }
-  // A valid answer without the metadata leaves the limit unknown.
-  if (typeof answer.model_info !== "object" || answer.model_info === null) return undefined;
-  for (const [key, value] of Object.entries(answer.model_info as Record<string, unknown>)) {
-    if (key.endsWith(".context_length") && typeof value === "number" && value > 0) return value;
-  }
-  return undefined;
+  // The same reading as the size check: the architecture's own key (not a
+  // rope or other key that also ends in context_length), the pin and the
+  // revision. A valid answer without model_info leaves the maximum unknown.
+  return parseOllamaShow(answer);
 }
 
 /** Readable text for an error field of any shape. */

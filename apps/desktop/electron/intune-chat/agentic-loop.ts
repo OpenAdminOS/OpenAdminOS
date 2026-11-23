@@ -69,8 +69,50 @@ const MAX_UNFINISHED_RETRIES = 2;
  * reported loop success, so capability memory never flipped either.
  */
 const MAX_NO_EVIDENCE_RETRIES = 2;
+
+/**
+ * The compact budget a local model gets in Chat. The default budget let a
+ * failing 8B model spend about 22 calls and over four minutes before the
+ * fallback; a local turn that is going wrong now ends within four model
+ * calls. A question code can count never reaches the loop on a local model.
+ */
+export const COMPACT_LOOP_LIMITS = { iterations: 4, malformed: 1, unfinished: 1, noEvidence: 1, promiseNudges: 1, attempts: 4 } as const;
+
+/**
+ * Why a tool-loop answer fell back, as one value a caller can act on.
+ * Workstream E offers a hosted model from these; Chat words its notice
+ * from them.
+ */
+export type AgenticFailureReason =
+  | "malformed"
+  | "thinking-only"
+  | "context-too-small"
+  | "iteration-cap"
+  | "no-evidence"
+  | "empty-answer"
+  | "unfinished"
+  | "provider-unavailable";
+
+/** The fallback notice for a local model, in plain words. */
+export const LOCAL_FALLBACK_NOTICES: Record<AgenticFailureReason, string> = {
+  malformed: "The local model did not return a valid tool request. Answered from cached data instead.",
+  "thinking-only": "The local model returned only its reasoning and no answer. Answered from cached data instead.",
+  "context-too-small": "The question and its data did not fit the local model's context window. Answered from cached data instead.",
+  "iteration-cap": "The local model did not finish its plan. Answered from cached data instead.",
+  "no-evidence": "The local model answered without checking tenant data. Answered from cached data instead.",
+  "empty-answer": "The local model returned an empty answer. Answered from cached data instead.",
+  unfinished: "The local model described a lookup without finishing it. Answered from cached data instead.",
+  "provider-unavailable": "The local model is not available. Answered from cached data instead.",
+};
+
+/** Provider errors that mean the prompt did not fit the model's context window. */
+/** A request that never reached the model: the server is down or refused the connection. */
+const PROVIDER_UNREACHABLE = /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|fetch failed|socket hang up|isn't running|is not running|connection refused|could not connect/i;
+const CONTEXT_TOO_SMALL = /context (?:length|window|size|limit)|num_ctx|maximum context|context_length_exceeded|too many tokens|prompt is too long|exceeds? (?:the )?(?:model'?s )?(?:maximum )?context/i;
+
 const EVIDENCE_TOOLS = new Set<string>([
   "query_cache",
+  "count_cached",
   "graph_get",
   "refresh_resource",
   "query_drift",
@@ -86,7 +128,7 @@ const EVIDENCE_TOOLS = new Set<string>([
  */
 function isEvidenceResult(tool: string, result: unknown): boolean {
   if (!EVIDENCE_TOOLS.has(tool as never)) return false;
-  if (tool !== "query_cache") return true;
+  if (tool !== "query_cache" && tool !== "count_cached") return true;
   if (result === null || typeof result !== "object") return false;
   const record = result as {
     returnedRows?: unknown;
@@ -151,6 +193,12 @@ export interface RunAgenticChatInput {
   voiceProfile?: string;
   /** The first answer of a new chat: the final JSON may carry a short `title`. */
   askTitle?: boolean;
+  /**
+   * "compact" for a local model in Chat: a smaller retry budget, no repair
+   * turn for a missing question kind, a context overflow falls back, and
+   * the fallback notice says what happened in plain words.
+   */
+  budget?: "compact";
   promptByteLimit?: number;
   question: string;
   /**
@@ -270,6 +318,10 @@ export type RunAgenticChatResult =
   | {
       ok: false;
       reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer" | "empty-answer" | "no-evidence";
+      /** The finer reason, for callers that act on it (a notice, an offer to switch models). */
+      failureReason: AgenticFailureReason;
+      /** For context-too-small: the provider's error, which names the tokens needed and the model's limit. */
+      failureDetail?: string;
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -295,12 +347,17 @@ type ParsedModelAction =
 export async function runAgenticChat(
   input: RunAgenticChatInput,
 ): Promise<RunAgenticChatResult> {
+  const compact = input.budget === "compact";
+  const limits = compact ? COMPACT_LOOP_LIMITS : { iterations: MAX_AGENTIC_ITERATIONS, malformed: MAX_MALFORMED_RETRIES, unfinished: MAX_UNFINISHED_RETRIES, noEvidence: MAX_NO_EVIDENCE_RETRIES, promiseNudges: MAX_PROMISE_NUDGES, attempts: Number.POSITIVE_INFINITY };
+  /** A local model's notice says what happened; a hosted model keeps the established wording. */
+  const noticeFor = (failure: AgenticFailureReason, hosted: string) => (compact ? LOCAL_FALLBACK_NOTICES[failure] : hosted);
   if (!input.llm.available) {
     return {
       ok: false,
       reason: "provider-unavailable",
-      fallbackNotice:
-        "Deterministic retrieval: the selected model is not available for investigative mode.",
+      failureReason: "provider-unavailable",
+      fallbackNotice: noticeFor("provider-unavailable",
+        "Deterministic retrieval: the selected model is not available for investigative mode."),
       toolTrace: [],
       iterations: 0,
     };
@@ -316,7 +373,10 @@ export async function runAgenticChat(
   let webSearchAttempts = 0;
   // Undefined until the model's first reply decides it; it can only be upgraded from docs to mixed.
   let questionKind: IntuneChatQuestionKind | undefined = input.classify ? undefined : input.questionKind ?? "tenant";
-  let kindRepaired = false;
+  // A local model gets no repair turn for a missing kind: the keyword kind decides at once.
+  let kindRepaired = compact;
+  // The last thing that went wrong, so a spent compact budget falls back with its cause.
+  let lastProblem: AgenticFailureReason | undefined;
   // Servers named in the question, or chosen for it, must be called once.
   let required = new Set(input.requiredServerIds ?? []);
   // Installed servers the model declared as its sources or asked in its classifying reply. They are never required calls, but the withheld docs index waits for them.
@@ -326,6 +386,8 @@ export async function runAgenticChat(
   // Servers whose tool that reads one result in full (get_article) answered in this answer.
   const readServers = new Set<string>();
   let excerptsRepaired = false;
+  /** The answer rests on search excerpts: the compact budget had no room to read the article. */
+  let excerptsOnly = false;
   let learnAnswered = false;
   // An MCP server returned results in this answer, so the withheld local docs index stays out.
   let serverAnswered = false;
@@ -364,7 +426,7 @@ export async function runAgenticChat(
   let iteration = 0;
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_PROMISE_NUDGES + 1 + MAX_NO_EVIDENCE_RETRIES * 2 + 3;
+  const maxAttempts = Math.min(limits.attempts, MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_PROMISE_NUDGES + 1 + MAX_NO_EVIDENCE_RETRIES * 2 + 3);
   // Streamed final text the loop did not accept is withdrawn as soon as
   // that is known, before any slow work (a refresh, a tool, a fallback).
   let answerShown = false;
@@ -373,7 +435,7 @@ export async function runAgenticChat(
     answerShown = false;
     input.onAnswerText?.("", learnAnswered);
   };
-  while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
+  while (iteration < limits.iterations && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
     withdrawAnswer();
@@ -386,7 +448,7 @@ export async function runAgenticChat(
       try { assertVoicePromptBudget(system, prompt, input.promptByteLimit); }
       catch {
         if (invalidQueries.size) return blockedAnswer();
-        return { ok: false, reason: "context-limit", fallbackNotice: "Nova used bounded retrieved evidence because this investigation exceeded its voice context budget.", toolTrace, iterations: iteration, model: responseModel };
+        return { ok: false, reason: "context-limit", failureReason: "context-too-small", fallbackNotice: "Nova used bounded retrieved evidence because this investigation exceeded its voice context budget.", toolTrace, iterations: iteration, model: responseModel };
       }
     }
     const options = {
@@ -400,6 +462,7 @@ export async function runAgenticChat(
     let completion: { text: string; model: string };
     consultedSources = citations.sources.length;
     input.modelStep?.start();
+    try {
     if (input.onAnswerText && input.llm.streamsIncrementally) {
       completion = { text: "", model: responseModel ?? "" };
       for await (const chunk of input.llm.stream(options)) {
@@ -416,8 +479,29 @@ export async function runAgenticChat(
     } else {
       completion = await input.llm.complete(options);
     }
+    } catch (caught) {
+      // A local prompt that overflowed the context window falls back; any other error is the provider's.
+      const detail = caught instanceof Error ? caught.message : String(caught);
+      // The agent runtime's own prompt fit refusal (ContextTooSmallError, PR #214) is a context limit too.
+      const typedContextLimit = (caught as { code?: unknown } | null)?.code === "context-too-small" || /tokens of context \(\S+ for the prompt and \S+ for the answer\)/i.test(detail);
+      // A local model that could not be reached ends the loop with a reason, as an overflow does; the fallback
+      // then meets the same provider and shows its designed error.
+      if (compact && !input.signal?.aborted && PROVIDER_UNREACHABLE.test(detail) && !CONTEXT_TOO_SMALL.test(detail) && !typedContextLimit) {
+        input.modelStep?.finish({ kind: "unreachable" });
+        withdrawAnswer();
+        if (invalidQueries.size) return blockedAnswer();
+        return { ok: false, reason: "provider-unavailable", failureReason: "provider-unavailable", failureDetail: detail, fallbackNotice: LOCAL_FALLBACK_NOTICES["provider-unavailable"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };
+      }
+      if (!compact || input.signal?.aborted || !(CONTEXT_TOO_SMALL.test(detail) || typedContextLimit)) throw caught;
+      input.modelStep?.finish({ kind: "context-limit" });
+      withdrawAnswer();
+      if (invalidQueries.size) return blockedAnswer();
+      return { ok: false, reason: "context-limit", failureReason: "context-too-small", failureDetail: detail, fallbackNotice: LOCAL_FALLBACK_NOTICES["context-too-small"], toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}) };
+    }
     responseModel = completion.model;
     const assistantText = completion.text.trim();
+    // Nothing in the reply at all: a thinking model spent its turn on reasoning only.
+    const thinkingOnly = assistantText === "";
     turns.push({ role: "assistant", content: assistantText });
 
     const action = parseModelAction(assistantText, input.tools.mcp, input.tools.splashtop);
@@ -437,13 +521,16 @@ export async function runAgenticChat(
     };
     if (action.kind === "malformed") {
       malformedCount += 1;
-      await settleModelStep({ kind: "repair", reason: "malformed" });
-      if (malformedCount > MAX_MALFORMED_RETRIES) {
+      lastProblem = "malformed";
+      // The step says the loop ended when no retry follows, instead of a retry that never runs.
+      await settleModelStep({ kind: "repair", reason: "malformed", ...(malformedCount > limits.malformed || attempts >= maxAttempts ? { ends: true } : {}) });
+      if (malformedCount > limits.malformed) {
         if (invalidQueries.size) return blockedAnswer();
         return {
           ok: false,
           reason: "malformed-output",
-          fallbackNotice: `Investigative mode returned malformed tool JSON ${malformedCount} times. Deterministic retrieval was used instead.`,
+          failureReason: "malformed",
+          fallbackNotice: noticeFor("malformed", `Investigative mode returned malformed tool JSON ${malformedCount} times. Deterministic retrieval was used instead.`),
           toolTrace,
           iterations: iteration,
           ...(responseModel ? { model: responseModel } : {}),
@@ -518,9 +605,10 @@ export async function runAgenticChat(
     const finalAnswer = action.kind === "final" ? stripTenantDataFences(action.answer).trim() : "";
     if (action.kind === "final" && !finalAnswer) {
       // An empty answer, also one that is only fences, is never a completed answer.
-      await settleModelStep({ kind: "repair", reason: "empty" });
-      if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
-        ok: false, reason: "empty-answer", fallbackNotice: `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`,
+      await settleModelStep({ kind: "repair", reason: "empty", ...(unfinishedCount + 1 > limits.unfinished || attempts >= maxAttempts ? { ends: true } : {}) });
+      lastProblem = thinkingOnly ? "thinking-only" : "empty-answer";
+      if (++unfinishedCount > limits.unfinished) return invalidQueries.size ? blockedAnswer() : {
+        ok: false, reason: "empty-answer", failureReason: lastProblem, fallbackNotice: noticeFor(lastProblem, `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`),
         toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
       };
       turns.push({ role: "repair", content: 'That final answer was empty. Write the answer in "answer" now, or call a tool if you still need evidence.' });
@@ -529,10 +617,21 @@ export async function runAgenticChat(
     // A final answer that only promises work gets up to two repair turns, in
     // Chat and in voice. After that voice falls back to deterministic
     // retrieval, as before; Chat keeps the answer it has.
-    if (action.kind === "final" && promiseNudges < MAX_PROMISE_NUDGES + (input.voice ? 1 : 0) && looksLikeUnkeptPromise(finalAnswer)) {
-      await settleModelStep({ kind: "repair", reason: "unfinished" });
-      if (++promiseNudges > MAX_PROMISE_NUDGES) return {
-        ok: false, reason: "unfinished-answer", fallbackNotice: "The model returned progress instead of a completed answer.",
+    // On the compact budget a progress message after the last nudge falls back; it is never kept as the answer.
+    if (compact && action.kind === "final" && promiseNudges >= limits.promiseNudges && looksLikeUnkeptPromise(finalAnswer)) {
+      await settleModelStep({ kind: "repair", reason: "unfinished", ends: true });
+      // A failed lookup still blocks a fallback that could state a zero count from it.
+      if (invalidQueries.size) return blockedAnswer();
+      return {
+        ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: LOCAL_FALLBACK_NOTICES.unfinished,
+        toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
+      };
+    }
+    if (action.kind === "final" && promiseNudges < limits.promiseNudges + (input.voice ? 1 : 0) && looksLikeUnkeptPromise(finalAnswer)) {
+      await settleModelStep({ kind: "repair", reason: "unfinished", ...(promiseNudges + 1 > limits.promiseNudges || attempts >= maxAttempts ? { ends: true } : {}) });
+      lastProblem = "unfinished";
+      if (++promiseNudges > limits.promiseNudges) return invalidQueries.size ? blockedAnswer() : {
+        ok: false, reason: "unfinished-answer", failureReason: "unfinished", fallbackNotice: noticeFor("unfinished", "The model returned progress instead of a completed answer."),
         toolTrace, iterations: iteration, model: responseModel,
       };
       turns.push({ role: "repair", content: "That was a progress message, not a finished answer. Perform the required read-only tool call now, then answer the current question using its result. If blocked, explain the concrete blocker. No work continues after a final response; do not promise a future lookup." });
@@ -540,7 +639,10 @@ export async function runAgenticChat(
     }
     const missingSources = [...required].filter((id) => !attemptedServers.has(id));
     const missingNames = missingSources.map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
-    if (action.kind === "final" && missingSources.length > 0 && missingSourceCount < MAX_NO_EVIDENCE_RETRIES) {
+    // Asking a missing source takes three more calls on the compact budget (the request, its query writer and the
+    // answer); when they do not fit, the answer is kept and says the source was not consulted.
+    const sourceRepairFits = !compact || attempts + 3 <= maxAttempts;
+    if (action.kind === "final" && missingSources.length > 0 && missingSourceCount < MAX_NO_EVIDENCE_RETRIES && sourceRepairFits) {
       missingSourceCount += 1;
       await settleModelStep({ kind: "repair", reason: "sources" });
       const names = missingNames;
@@ -550,12 +652,14 @@ export async function runAgenticChat(
     }
     if (action.kind === "final" && !docsOnly && !input.smallTalk && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
       noEvidenceCount += 1;
-      await settleModelStep({ kind: "repair", reason: "evidence" });
-      if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
+      lastProblem = "no-evidence";
+      await settleModelStep({ kind: "repair", reason: "evidence", ...(noEvidenceCount > limits.noEvidence || attempts >= maxAttempts ? { ends: true } : {}) });
+      if (noEvidenceCount > limits.noEvidence) {
         return {
           ok: false,
           reason: "no-evidence",
-          fallbackNotice: "Investigative mode returned an answer without checking tenant data. Deterministic retrieval was used instead.",
+          failureReason: "no-evidence",
+          fallbackNotice: noticeFor("no-evidence", "Investigative mode returned an answer without checking tenant data. Deterministic retrieval was used instead."),
           toolTrace,
           iterations: iteration,
           ...(responseModel ? { model: responseModel } : {}),
@@ -577,7 +681,12 @@ export async function runAgenticChat(
     const unread = action.kind === "final" && !excerptsRepaired && !input.voice && !input.smallTalk && invalidQueries.size === 0 && asksHowTo(input.adminQuestion ?? "")
       ? (input.tools.mcp?.tools ?? []).find((tool) => tool.itemIds?.params?.length && !readServers.has(tool.serverId) && mcpResults.some((item) => item.serverId === tool.serverId && item.id))
       : undefined;
-    if (unread) {
+    // On the compact budget the read takes three more calls (request, writer, answer); when they do not fit,
+    // the answer is kept and says it rests on the search excerpts.
+    if (unread && compact && attempts + 3 > maxAttempts) {
+      excerptsRepaired = true;
+      excerptsOnly = true;
+    } else if (unread) {
       excerptsRepaired = true;
       await settleModelStep({ kind: "repair", reason: "excerpts" });
       turns.push({ role: "repair", content: `The ${unread.serverName} results so far are titles and short excerpts, and the question asks how to do something. Request ${unread.name} with empty params to read the best matching result in full, then answer from it. The host writes the id. If no result matches the question, answer again and say so.` });
@@ -596,7 +705,9 @@ export async function runAgenticChat(
         }
       : undefined;
     const pendingIndex = indexLoad ?? lateIndex;
-    if (action.kind === "final" && pendingIndex) {
+    // With no model call left the index is not searched: the answer is kept as written, and What ran does not
+    // count passages the model never read.
+    if (action.kind === "final" && pendingIndex && (!compact || attempts < maxAttempts)) {
       // The local docs index loads only now, so the answer was written
       // without those passages. It is accepted only when none matched;
       // otherwise the model answers again with them.
@@ -620,9 +731,11 @@ export async function runAgenticChat(
       const notConsulted = missingNames.length > 0
         ? `\n\n${missingNames.join(" and ")} ${missingNames.length === 1 ? "was" : "were"} not consulted for this answer. The model answered without calling ${missingNames.length === 1 ? "it" : "them"}.`
         : "";
+      // Worded without the server: a later docs index repair may have added local passages to the answer.
+      const excerptsNote = excerptsOnly ? "\n\nThis answer is based on search excerpts; the full article was not read." : "";
       return {
         ok: true,
-        answer: finalAnswer + notConsulted,
+        answer: finalAnswer + notConsulted + excerptsNote,
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
@@ -636,6 +749,24 @@ export async function runAgenticChat(
       };
     }
 
+    const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
+    // The query writer is a model call and counts like any other. A lookup that would leave no call for the
+    // answer is not run; the model is told to answer from what it has, so a turn never exceeds the budget.
+    // Any other tool needs one more call to use its result; with none left it is not run either (a Graph refresh
+    // would read tenant data no answer uses).
+    if (compact && attempts >= maxAttempts) {
+      await settleModelStep({ kind: "repair", reason: "budget-spent" });
+      // The loop ran out of calls on a valid tool request; an earlier, repaired problem is not the reason.
+      lastProblem = undefined;
+      break;
+    }
+    if (compact && mcpTool && attempts >= maxAttempts - 1) {
+      await settleModelStep({ kind: "repair", reason: "budget" });
+      turns.push({ role: "repair", content: mcpResults.length > 0
+        ? `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.`
+        : `No model call is left for a lookup, so ${mcpTool.serverName} was not asked. Answer now from what is in this prompt, citing any passages it holds by their numbers, and say that ${mcpTool.serverName} was not consulted.` });
+      continue;
+    }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
     if (isTenantTool(action.tool)) {
       // A docs answer that needs tenant data becomes mixed: it then needs tenant evidence too.
@@ -647,7 +778,7 @@ export async function runAgenticChat(
       assertNotCancelled(input.signal);
     }
     const startedAt = new Date().toISOString();
-    const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
+    let writerRan = false;
     input.onToolStart?.({
       tool: action.tool,
       // The model's params for an MCP tool are never sent, so they are not shown either.
@@ -657,16 +788,19 @@ export async function runAgenticChat(
     });
     const tool = action.tool;
     const mcpHooks: McpCallHooks | undefined = mcpTool ? {
-      writeQuery: (entry) => writeMcpQuery({
-        llm: input.llm,
-        ...(input.model ? { model: input.model } : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
-        question: input.adminQuestion ?? "",
-        tool: entry,
-        earlierResults: mcpResults,
-        sentQueries,
-        earlierCalls: mcpCalls.filter((call) => call.serverId === entry.serverId && call.tool === entry.tool).map(({ sent, listed, matched, counts }) => ({ sent, listed, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) })),
-      }),
+      writeQuery: (entry) => {
+        writerRan = true;
+        return writeMcpQuery({
+          llm: input.llm,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+          question: input.adminQuestion ?? "",
+          tool: entry,
+          earlierResults: mcpResults,
+          sentQueries,
+          earlierCalls: mcpCalls.filter((call) => call.serverId === entry.serverId && call.tool === entry.tool).map(({ sent, listed, matched, counts }) => ({ sent, listed, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) })),
+        });
+      },
       references: (serverId) => {
         const own = mcpResults.filter((item) => item.serverId === serverId);
         return {
@@ -681,6 +815,8 @@ export async function runAgenticChat(
       },
     } : undefined;
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params, mcpHooks);
+    // Every query writer call counts against the compact budget, whatever the server did with its query.
+    if (compact && writerRan) attempts += 1;
     toolTrace.push(execution.trace);
     if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
     const mcpSource = execution.trace.mcpSource;
@@ -740,10 +876,13 @@ export async function runAgenticChat(
     // webSearch configured the tool only errors, and that must never
     // bypass the tenant-evidence guard.
     if (action.tool === "web_search" && input.tools.webSearch) webSearchAttempts += 1;
-    if (action.tool === 'query_cache') {
+    if (action.tool === 'query_cache' || action.tool === 'count_cached') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
       if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
-      else {
+      // Only a read of a refreshed cache is evidence: a retry that found nothing cached (no refreshed snapshot, or
+      // "cached": false) leaves the failed lookup pending.
+      else if ((execution.result as { cached?: unknown; snapshot?: { refreshedAt?: string } } | undefined)?.cached !== false
+        && Boolean((execution.result as { snapshot?: { refreshedAt?: string } } | undefined)?.snapshot?.refreshedAt)) {
         invalidQueries.delete(resource); invalidQueries.delete('unknown');
         const graphKey = `graph:${pathForResource(resource as GraphCacheResourceKind).path}`;
         const result = execution.result as { availableFields?: string[]; snapshot?: { refreshedAt?: string; lastError?: string } };
@@ -791,13 +930,16 @@ export async function runAgenticChat(
   }
 
   if (invalidQueries.size) return blockedAnswer();
+  // A compact budget spent on repairs falls back with what went wrong last, not as a tool-call limit.
+  const capReason: AgenticFailureReason = compact && iteration < limits.iterations && lastProblem ? lastProblem : "iteration-cap";
   return {
     ok: false,
-    reason: "iteration-cap",
-    fallbackNotice:
-      "Investigative mode reached the tool-call limit before a final answer. Deterministic retrieval was used instead.",
+    reason: capReason === "malformed" || capReason === "thinking-only" ? "malformed-output" : capReason === "no-evidence" ? "no-evidence" : capReason === "unfinished" ? "unfinished-answer" : capReason === "empty-answer" ? "empty-answer" : "iteration-cap",
+    failureReason: capReason,
+    fallbackNotice: noticeFor(capReason,
+      "Investigative mode reached the tool-call limit before a final answer. Deterministic retrieval was used instead."),
     toolTrace,
-    iterations: MAX_AGENTIC_ITERATIONS,
+    iterations: compact ? iteration : MAX_AGENTIC_ITERATIONS,
     ...(responseModel ? { model: responseModel } : {}),
   };
 }
@@ -892,10 +1034,10 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
       const fields = [...new Set([...(pathForResource(resource).select ?? []), ...input.tools.store.graphCacheFields(input.tenant.id, resource)])];
       return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fenceTenantData(fields.slice(0, 24), "cache:fields")}.`;
     }),
-    'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For a count, request limit:1 and select:["id"], then use totalCount from the filtered query, not the number of returned rows. A list is capped; say so when more rows match.',
+    'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For every count, total or breakdown (per OS, per state), call count_cached with the filter and groupBy and state its totalCount and groups; never count returned rows yourself. With list:true it also returns the matching rows by name when at most 50 match. A query_cache list is capped; say so when more rows match.',
 
     !docsOnly && input.plannedResources.includes('managedDevices')
-      ? 'managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'
+      ? 'managedDevices is the Intune device inventory and the source for device counts, compliance and OS. entraDevices are directory device objects; use them only when the admin asks about Entra or directory devices, and never mix the two lists in one answer. managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'
       : '',
     !docsOnly && input.plannedResources.some(resource => ['mobileApps', 'deviceCompliancePolicies', 'deviceConfigurations', 'managedAppPolicies', 'iosManagedAppProtections', 'androidManagedAppProtections', 'mobileAppConfigurations', 'deviceEnrollmentConfigurations', 'namedLocations'].includes(resource))
       ? 'Cache field @odata.type identifies the Graph subtype for typed collections such as mobileApps and Intune policies (for example #microsoft.graph.macOSPkgApp and #microsoft.graph.macOSCompliancePolicy). For a subtype or platform count, use query_cache with a filter such as {"field":"@odata.type","op":"contains","value":"macOS"}, select:["id"], limit:1, and use totalCount.'
@@ -1064,7 +1206,8 @@ function declaredKind(record: Record<string, unknown>): DeclaredKind {
   return kind === "docs" || kind === "tenant" || kind === "mixed" ? { questionKind: kind, sources } : { sources };
 }
 
-function extractLastJsonObject(text: string):
+/** The loop's own reading of a reply's JSON (whole reply, last fenced block, or last balanced object). */
+export function extractLastJsonObject(text: string):
   | { found: false }
   | { found: true; valid: true; value: unknown }
   | { found: true; valid: false; reason: string } {
@@ -1206,6 +1349,7 @@ function isToolName(value: string, mcp: McpChatContext | undefined, splashtop?: 
   return (
     value === "list_cached_resources" ||
     value === "query_cache" ||
+    value === "count_cached" ||
     value === "find_graph_endpoint" ||
     value === "graph_get" ||
     value === "refresh_resource" ||

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
 import { ModelScanGate } from "./setup/FirstRunScan";
+import { LocalResetNotice } from "./setup/LocalReset";
 import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { IconChat, IconWarning } from "./components/icons";
@@ -54,6 +55,9 @@ export default function App() {
   }
 
   return (
+    <>
+    {/* Outside the gate, so it also shows over the first-run screens. */}
+    <LocalResetNotice />
     <ModelScanGate>
       <AppShell>
         <Suspense fallback={<RouteFallback />}>
@@ -102,6 +106,7 @@ export default function App() {
         </Suspense>
       </AppShell>
     </ModelScanGate>
+    </>
   );
 }
 

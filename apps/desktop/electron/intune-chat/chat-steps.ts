@@ -415,6 +415,7 @@ export function mcpSentText(params: unknown): string {
 const TOOL_STEP: Record<string, { active: string; done: string; failed: string; origin: "device" | "graph" }> = {
   list_cached_resources: { active: "Checking the cache inventory", done: "Checked the cache inventory", failed: "Could not read the cache inventory", origin: "device" },
   query_cache: { active: "Querying cached data", done: "Queried cached data", failed: "Cache query failed", origin: "device" },
+  count_cached: { active: "Counting cached data", done: "Counted cached data", failed: "Cache count failed", origin: "device" },
   find_graph_endpoint: { active: "Looking up Graph endpoints", done: "Looked up Graph endpoints", failed: "Endpoint lookup failed", origin: "device" },
   graph_get: { active: "Reading Microsoft Graph", done: "Read Microsoft Graph", failed: "Graph read failed", origin: "graph" },
   refresh_resource: { active: "Refreshing tenant data", done: "Refreshed tenant data", failed: "Refresh failed", origin: "graph" },
@@ -532,7 +533,11 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" };
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent"; ends?: true }
+  /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
+  | { kind: "context-limit" }
+  /** The request did not reach the model: the loop ends with provider-unavailable. */
+  | { kind: "unreachable" };
 
 export interface ModelStepHooks {
   start(): void;
@@ -560,6 +565,8 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
   empty: "Reply was an empty answer",
   documentation: "Answered before the local docs passages arrived",
   excerpts: "Answered from search excerpts",
+  budget: "Lookup skipped: no model call left",
+  "budget-spent": "Tool skipped: no model call left",
 };
 
 /** A resource label inside a sentence: product names keep their capital, other labels read as plain words. */
@@ -571,10 +578,11 @@ function midSentenceLabel(label: string): string {
 export function toolDecision(tool: IntuneChatInvestigationToolName, params: unknown, mcp: McpChatTool | undefined): string {
   if (isMcpChatToolName(tool)) return `Chose to ask ${mcp?.serverName ?? "an MCP server"}`;
   if (isSplashtopReadTool(tool)) return `Chose to read Splashtop ${splashtopToolLabel(tool)}`;
-  if (tool === "query_cache") {
+  if (tool === "query_cache" || tool === "count_cached") {
+    const verb = tool === "count_cached" ? "count" : "query";
     const label = resourceLabel(params);
-    if (!label) return "Chose to query cached data";
-    return `Chose to query cached ${midSentenceLabel(label)}`;
+    if (!label) return `Chose to ${verb} cached data`;
+    return `Chose to ${verb} cached ${midSentenceLabel(label)}`;
   }
   return DECISION[tool] ?? "Chose a tool";
 }
@@ -610,9 +618,14 @@ export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp:
       if (!current) return;
       const title = outcome.kind === "final" ? "Wrote the answer"
         : outcome.kind === "tool" ? toolDecision(outcome.tool, outcome.params, mcp?.tools.find((tool) => tool.name === outcome.tool))
-          : REPAIR[outcome.reason];
+          : outcome.kind === "context-limit" ? "Prompt did not fit the model's context window"
+            : outcome.kind === "unreachable" ? "Could not reach the model"
+              : REPAIR[outcome.reason];
       const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
-        : outcome.kind === "repair" ? `${name} · ${outcome.reason === "excerpts" ? "asked the model to read the best match first" : "asked the model to try again"}` : name;
+        : outcome.kind === "repair" ? `${name} · ${outcome.ends ? "the tool loop ended here" : outcome.reason === "excerpts" ? "asked the model to read the best match first" : outcome.reason === "budget" ? "asked the model to answer now" : outcome.reason === "budget-spent" ? "the tool was not run; the tool loop ended here" : "asked the model to try again"}`
+          // The loop step says only that the loop ended; the cached-data answer step after it reports its own outcome.
+          : outcome.kind === "context-limit" ? `${name} · the tool loop ended here`
+            : outcome.kind === "unreachable" ? `${name} · the request did not connect` : name;
       steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });
       current = undefined;
     },

@@ -22,6 +22,7 @@ import type {
   SandboxBrokerRequest,
   SandboxBrokerResponse,
 } from "@openadminos/agent-sdk";
+import { ContextTooSmallError } from "@openadminos/agent-sdk";
 
 import { agentTemplateToRegistrySummary } from "./agent-template.js";
 import {
@@ -220,6 +221,13 @@ async function runScriptAgent(
         }
 
         if (sandboxResult.exitCode !== 0) {
+          // A script that ended on a refused model request (its error names
+          // the refusal) fails with the typed reason, not its stack trace.
+          // A script that caught the refusal and failed later keeps its error.
+          const tooLarge = broker.getContextFailure();
+          if (tooLarge && endedOnSizeRefusal(sandboxResult.stderr)) {
+            throw new ContextTooSmallError(tooLarge);
+          }
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
           // The script sees only the message of a Graph denial. When it exits
           // on that denial, the typed error is kept as the cause so the run
@@ -394,6 +402,26 @@ function resolveEntrypoint(agentDir: string, entrypoint: string): string {
     throw new Error(`Script entrypoint must stay inside the agent directory.`);
   }
   return resolvedEntrypoint;
+}
+
+/**
+ * Whether the script ended on the size refusal. Node prints an uncaught
+ * exception after the source line and a caret ("^"); the first line after
+ * the last caret is what the script threw, whether an Error ("Error:
+ * llm.complete: ...") or a plain string. Without a caret (the script exited
+ * on its own), the last error header counts. A refusal the script logged
+ * earlier and then moved past does not count.
+ */
+export function endedOnSizeRefusal(stderr: string): boolean {
+  const lines = stderr.split("\n");
+  let caret = -1;
+  lines.forEach((line, index) => {
+    if (/^\s*\^+\s*$/.test(line)) caret = index;
+  });
+  const terminal = caret >= 0
+    ? lines.slice(caret + 1).find((line) => line.trim().length > 0) ?? ""
+    : [...stderr.matchAll(/^(?:Uncaught )?[A-Za-z]*Error\b[^\n]*$/gm)].at(-1)?.[0] ?? "";
+  return /context-too-small|tokens of context/i.test(terminal);
 }
 
 async function readScriptResult(

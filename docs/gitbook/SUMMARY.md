@@ -4,6 +4,7 @@
 
 - [Overview](README.md)
 - [Installation](getting-started/installation.md)
+- [Uninstall and reset](getting-started/uninstall-and-reset.md)
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
 - [Organizations and Connections](getting-started/organizations.md)

@@ -573,6 +573,93 @@ deterministic counts/findings. If the prompt still exceeds the on-device
 context window, the provider fails with explicit recovery copy instead of a
 generic model error.
 
+#### Prompt size preflight for agent runs (2026-11-19)
+
+Every LLM call in an agent run is size-checked before anything is sent.
+`RunLlmApi.contextWindow(model)` is an optional provider capability; a
+provider that cannot report a window leaves it out, and its requests are
+never blocked. Hosted providers (Claude Code, Codex, Copilot, Gemini, Azure
+OpenAI) report none. Ollama reports it from `/api/show` in
+`ollama-context.ts`. A `num_ctx` pinned in the Modelfile is the model
+author's choice and what the first request gets, so it is the limit:
+OpenAdmin 8B pins 16,384, the size its rope scaling was trained at. A model
+without a pinned `num_ctx` is limited by its architecture `context_length`,
+because the adapter raises `num_ctx` on an overflow up to that maximum
+(PR #211). Such a model's first send already carries an explicit `num_ctx`
+covering the estimated request (a power of two, never below the size it is
+loaded with), because Ollama loads it at its own default, reloads it there
+after an eviction, and an older Ollama shortens a longer prompt without an
+error. A caller that does not raise `num_ctx` gets the size Ollama loaded the
+model with (`/api/ps`) instead. Agent runs also set
+`LlmOptions.enforceContextWindow`: if the run's own lookup missed a pin (Ollama
+briefly unavailable) and the adapter's lookup finds it, the adapter refuses
+with the same `ContextTooSmallError` instead of sending, and an overflow retry
+on an agent run never asks for more than the pin (when Ollama counts more than
+the estimate, the run fails with the typed reason, `sentToProvider: true`,
+whose message says the model refused the request or stopped partway). An
+agent run sends a `num_ctx` only when a lookup established whether the model
+is pinned: the answer carried the parameters or the Modelfile (whose
+`PARAMETER num_ctx` lines Ollama always includes). After a failed or partial
+lookup it sends none, so a pin applies, and an overflow fails with the typed
+reason at the size Ollama ran it with. Chat keeps a size that worked when a
+lookup fails. Chat leaves it unset,
+so #211's raise still serves a larger request there. A kept `num_ctx` belongs
+to the model revision the lookup that chose it saw (`/api/show`
+`modified_at`), even when the request finishes after the model was created
+again; a model created again under the same name starts from its own settings. LM Studio reports none for now because its
+context fields could not be verified.
+
+The runtime's `estimateTokens` counts letters, digits, mixed ids,
+punctuation and line breaks separately. Calibrated against OpenAdmin 8B
+(Mistral tokenizer) and gpt-oss 20B, it overestimates by 3% to 43% and never
+underestimates, so it refuses early rather than late. `checkPromptFit`
+compares system text, prompt and answer budget (`maxTokens`, else 1,024
+tokens) with the window. A request that does not fit fails with a
+`ContextTooSmallError`; the run record carries `failureReason`
+(`code: "context-too-small"`, prompt, answer, needed and limit tokens, model)
+so the run failure playbook and the provider switch flow act on numbers, not
+on message text. The message names the size needed, the limit, that nothing
+was sent, and the ways out: a larger local model, a hosted provider, or a
+narrower scope.
+
+Agent prompts carry summaries, not inventories. The runtime's
+`compact-conditional-access` transform turns each Conditional Access policy
+into one short record (scope as counts or `All`, built-in role names,
+conditions, grant and session controls), and `group-by-age` can keep names
+only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
+follow-up change; with it, 100 policies of the test fixture need about
+15,500 estimated tokens with an 1,100 token answer and fit a 16k local model,
+and up to 107 fit by the estimate. Grouped
+records reach prompts only as counts (`count-by-field` steps), and breakdowns
+by high-cardinality fields keep their largest buckets (the `top` setting of
+`count-by-field`, which moves them under `top` with `otherValues` and
+`otherCount` beside them so no tenant value collides with the summary). Bundled
+agents use settings, not the `counts` and `top(n)` filters, because an older
+app ignores an unknown setting and still runs the agent with every bucket,
+while an unknown filter stops the run.
+The self-training overlay wrapper names its text as `RunLlmApi.systemSuffix`,
+so the run's single check counts it as prompt and keeps the model's real
+limit. The typed reason survives write revalidation (as
+the error's `cause`) and sandboxed script agents (the broker answers
+`context-too-small` and the script run fails with the typed error).
+
+A bundled manifest that needs a runtime feature older apps do not have ships
+in two steps, because released apps fetch registry manifests from main and
+take the registry entry's `minAppVersion` even for a copy already installed.
+First the runtime ships while the registry still serves the old manifest.
+Then the manifest follows with `minAppVersion` set to the first published
+build that has the runtime, normally a nightly such as
+`0.7.3-nightly.<stamp>`, so no build without it can accept the manifest.
+Nightlies compare as their release under `compareSemver`; `appVersionSatisfies`
+reads a nightly minimum exactly (earlier nightlies of that release refused,
+later ones and the stable release accepted), and released apps refuse it with
+`compareSemver` too. A 0.7.2 app that has the agent installed then shows it as
+needing an app update. From this release on, an installed agent's own
+manifest decides whether it runs, and the registry entry only decides whether
+its update can be installed (`updateAvailable.supported`). Agents that can be
+bounded with steps every app version has (`count-by-field`, and its `top`
+setting, which older apps ignore) keep their old minimum and ship at once.
+
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
 Desktop CLI provider discovery appends known install folders to the child PATH
@@ -2529,6 +2616,218 @@ summarized in chunks before a final summary. Local embeddings can be added later
 for free-text policy retrieval, but the first implementation should work without
 embedding infrastructure.
 
+#### Model fit: when the local model cannot do a request (2026-11-19)
+
+Decided by the maintainer on 2026-11-19: Chat may run a request with a hosted
+provider when the local model is a poor fit for it, but only after a notice
+inside Chat that says what happens and where data goes, and an explicit accept.
+Never silently and never preselected. This keeps the admin in the loop and
+helps with cost. Design: mockup 36 (`docs/mockups/36-model-fit.html`; 35 is
+taken by the personal agent mockup in PR #207).
+
+Signals. Only a model on this device gets the offer: a local provider, and not
+a remote-backed or Ollama Cloud model, whose prompt already left the device.
+Its locality is confirmed when the request fails (the same fresh check), not
+from a provider list read earlier. For runs the host records the fit issue on
+the run (`RunRecord.modelFit`) when it fails, after that check, and the run page
+offers only from it.
+- The prompt does not fit the context window. Today this is the provider's own
+  error: the Ollama adapter's "context size too small" message with the tokens
+  needed and the limit (PR #211 and later), including the form where Ollama could
+not load the model with the larger context for lack of memory, the LM Studio
+adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 400 ("request (N tokens) exceeds
+  the available context size (L tokens)"), llama.cpp's
+  `exceed_context_size_error` (LM Studio, Lemonade) and its "Context size has been exceeded" wording, which Lemonade passes through, Apple Foundation's
+  context error, and the agent runtime's own prompt fit message ("This request
+  needs about N tokens of context (P for the prompt and A for the answer), but
+  <model> accepts L") when only that text survives in a stored run error. The
+  loop's `failureDetail` gives a cached-data fallback its numbers. On a local
+  model in auto mode a context overflow no longer fails the turn (PR #215): the
+  loop ends with `failureReason: "context-too-small"` and Chat answers from
+  cached data, and that answer carries the offer ("Ask this again with"). A
+  `thinking-only` loop failure does the same; repeated malformed or unfinished
+  loop answers give the repeated-failure offer once the failure memory takes the
+  model off the loop. The issue names the model the turn ran on, the adapter's
+  own default when the provider list names none. A typed runtime failure, where `kind`, `code` or `reason`
+  carries `context-too-small` with needed and limit numbers, on the error, on
+  its `failure` record or through `cause`, is read by its shape, and a run's
+  typed `failureReason` comes before its error text, so the runtime's prompt
+  fit check slots in without a second estimator.
+- The investigation failed on this local model often enough that Chat stops
+  trying it (the in-memory repeated-failure counter); the answer still comes
+  from cached data and carries the offer. When the investigation loop reports
+  a finer `failureReason` with its fallback (`context-too-small` or
+  `thinking-only`, from the local model accuracy work), that reason is used.
+- A thinking-only answer that ran out of budget, once the runtime reports it as
+  its own typed reason (`thinking-only`). There is no text guessing for it.
+
+The notice replaces the generic error above the composer. It says why in
+plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
+8B is set to 16,384."), that nothing goes to another provider unless the admin chooses one, and lists choices as
+separate buttons with none focused or highlighted: each configured and ready
+hosted provider with its production location label (`providerDataLocation`)
+and a cost note that says where the cost lands (the app knows no plan or
+price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
+Ollama, LM Studio or Lemonade server outside this device is not offered and
+the host refuses it, because its location is not stated and its adapter
+follows redirects; up to two installed local models with a larger parameter count in
+their name, marked as on this device and not checked against the request
+size; Split the question (a hint, and the question back in an empty
+composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
+sent. Narrow the question ... then send again." Providers the managed policy
+does not allow are not in the provider list, so they are never offered; when
+the policy allows no hosted provider the notice says so, and with none ready
+it links to Settings, Providers.
+
+Accept step. A hosted choice opens the hosted send confirmation in a
+per-request form: it names the provider, where data goes with the detail
+line, the model, what is sent, what stays and the cost; it says the next
+message goes to the local model again; it shows the exact question that is
+sent, has no remember box, and Enter does not send, only the Send button
+does. Editing the composer or the attachments while it is open closes it
+unsent with a line that says so. Approval is per request in v1: a
+remembered "do not ask again" for that provider never covers it.
+A local choice sends at once, since nothing leaves the device, but only
+after a fresh check that the model runs here: the host reads Ollama's
+`/api/tags` again (model metadata only; nothing is loaded) and refuses a
+model that is no longer listed or is now remote-backed, or when the list
+cannot be read; for LM Studio and Lemonade it classifies the address they
+are reached at, and refuses one outside this device (Lemonade's address can
+be set to another machine, so its local choice is bound to that address too). That check runs again
+before every model call of the request, not only once. The Ollama adapter's
+own context retry inside one call goes to the same address and model name and
+is not checked again; a hook there is a follow-up for the adapter
+(packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
+(`getProviderDestination`: its address, or the Azure OpenAI resource and
+deployment) when its accept step opens, and the host refuses the send if the destination
+changed since. The check and the binding come from one read of the
+destination, and the binding is checked again on the address the adapter is
+built with. A lookup for an earlier choice is dropped when the admin picks
+another provider. A model fit acceptance (`modelFitOfferId`)
+is refused on an ordinary send and on the non-streaming send. Right before
+the offer is claimed, the host reads the active organization and model again.
+
+Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
+answer that may be run again carries a host-issued, single-use `offerId`,
+bound to its conversation, organization, the exact question, its workspace
+selection and the provider and model active at the time; offers live in
+memory for 15 minutes. The
+renderer sends `modelOverride` (`offerId`, chosen provider and model) on
+`SendIntuneChatMessageInput`. The service refuses it unless the offer exists
+for this conversation (not deleted), organization and question, the same
+provider and model are still active, the chosen provider is listed and ready,
+lists the model and is not the model that failed, a model on this device is
+not remote-backed (Ollama marks those with `remote_host` or `remote_model` in
+`/api/tags`, kept as `remoteModels` on the provider; an Ollama Cloud name,
+`name:tag-cloud` or `name:cloud`, counts too), and a hosted one comes with a
+`hostedProviderConsent` for that offer (`modelFitOfferId`), acknowledged after
+the offer was made, for that model, and not a remembered one. Choices also
+follow a managed model lock. The usual consent check (age, tenant, model,
+workspace selection) and `buildLlm`'s policy check then apply as for any
+hosted send, the consent is audited, and the offer is claimed once the
+request is cleared to send: the claim is synchronous and re-reads the
+conversation, so of two concurrent sends only one gets it. A larger local model tried for one request that fails too
+gets a new offer that still names the active model as the one it stands in
+for. The override changes nothing persistent: the next send uses the active
+provider. Nova and the non-streaming send refuse an override. Masking from the
+data policy (PR #209 onward) applies to this send like any hosted send, since
+it goes through the same model choke point; no masking exists on main yet. The
+renderer shows an offer only in its own conversation and withdraws it when the
+organization or the active model changes.
+
+Apple Foundation reports the prompt's own tokens and the model's total; the
+helper also reserves room for the answer, so a prompt below the total reads
+"uses about N of the M tokens <model> supports, which leaves too little room
+for an answer."
+
+A failed answer keeps its reason in history: after a reload or a switch of
+conversation, its bubble shows the notice's title and why line, without the
+choices, which belong to the live request only.
+
+While the accepted request runs, its turn says "Sending to <location label>
+for this request only."
+
+After. The stored answer carries `switchedFrom` (the provider and model it
+replaced, why, and whether the provider that took it was on this device when
+it was sent, so later settings cannot relabel it) and shows "Answered by <location label> for this request
+only. Chat is back on <model>." The last sentence shows only while Chat still
+uses the model it left; read later, after the admin changed the provider or
+model, the line ends at "for this request only." A failed answer carries `modelFit` with the
+reason and numbers, kept in the answer metadata.
+
+Agent runs. A run that failed on a local provider with a context failure shows
+the same notice on the run page ("Run again with"). Choosing a provider opens
+the run review with that provider and model, which is the run's accept step:
+it names where prompts go and says "<model> could not fit the last run, so
+this run uses <provider>. This run only: the agent keeps its model for later
+runs." Start run starts the agent with `providerId` and `model` for that run
+only, pinned to the organization the review showed (`tenantId`), or with
+`expectNoTenant` when it showed none, so an organization switch before the
+host admits the run refuses it instead of running elsewhere. A failed dry run
+stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
+host makes the same fresh check before it admits the run, and the run record
+keeps it so every later phase (plan, replan after the diff, apply) checks
+again before it builds the model and before every model call. Every fit rerun passes
+`bindProviderEndpoint`: the run is bound to where its provider was reached at
+admission (Ollama or LM Studio address, Azure OpenAI resource and
+deployment), and a later phase built for another endpoint fails with nothing
+sent. The run review takes the destination fingerprint when it opens and
+Start passes it (`expectedProviderDestination`); Start stays disabled until
+it is read, a failed read says so in the review, and a change refuses the
+start. A refused model fit start is not retried from the same review (no Try
+again): where the provider is reached may have changed to a place the review
+does not show, so the review says to close it and open the run again. Start is
+disabled while a start is being admitted, so one review never queues two runs.
+The setup picker for a model fit rerun lists only providers the run host
+admits for it (no self-hosted server outside this device, and no connected
+hosted provider without a model the run could name), and setup does not treat
+such a provider as ready for it. Start passes the provider and model the review showed, never one the
+host resolves again. A model the choice named that the provider no longer
+lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
+provider picked there stays on that run: setup does not change the active
+provider for a model fit rerun or for Run for real of a model fit dry run, and
+checks the picked provider in full the way selecting it does. A run resumed
+from setup opens only its own review, and setup moves on from a provider
+picked for one run only once its full check is done. A hosted provider that
+reports no model, or only a CLI default placeholder such as Gemini's
+`gemini-default`, or only the model a managed policy lock put in its empty
+list (`modelsFromPolicy`: allowed, not reported), is not offered. A hosted
+choice names its pinned or default model when the provider lists it, else the
+first model the provider lists (a CLI's configured default can be one it does
+not list); Chat, the run page, the run review and the Chat host use that same
+rule. For a hosted provider that cannot be offered, the review does not start, Try again waits
+for the same thing as Start, and the host refuses a hosted model fit rerun (or
+Run for real of one) unless it names a model the provider lists now, since the
+approval names one model. Run for real of a model fit dry run goes only where
+its dry run planned; a different endpoint after setup refuses it. Every model
+call of a model fit request or rerun is refused when it names another model
+than the reviewed one, and an on-device rerun needs a model named. An open
+accept step closes unsent, with a line saying why, when its provider stops
+being a choice (the offer stays) or when the organization or model changes
+(the offer goes and focus returns to the composer). A retry the host refuses
+before the send starts shows its choices again, once, since the refusal says
+to choose again; a refusal that ends the offer (expired, used, another
+question, the model changed) says "Send the question again." and its choices
+do not come back. A prompt that did not fit a local model whose size cannot be
+read from its name (Apple Foundation, a custom alias) is offered the sized
+models on this device. A multi-tenant review
+withdraws an open offer, and a new offer replaces earlier ones for the same
+conversation.
+An Azure OpenAI model fit request is refused when the deployment configured
+now is not the one the admin reviewed.
+Run for real of a model fit dry run keeps the on-device requirement and the
+endpoint binding, and so does Run again of a model fit rerun. A model fit request in Chat is bound the same way for its
+own duration, and its answer names where it went only once a model request
+was sent. A write agent still stops at the diff and its typed confirmation. Team
+runs keep their own review in Agent Team.
+
+Open questions (TODO(ugur) in code): a "remember for this conversation"
+option; reading each local model's context length so only models that can
+take the request are offered; whether hosted rows should show a cost estimate;
+whether provider detection should read Ollama's `remote_host` and label Ollama
+Cloud models everywhere (today an active cloud model on a loopback Ollama is
+treated as local outside this offer).
+
 #### Agents as skills
 
 Installed agents expose routing metadata derived from their manifests: name,
@@ -2612,6 +2911,331 @@ show a designed bridge-unavailable diagnostic state instead of silently failing
 or logging noisy console warnings. That state
 is for renderer-only development; tenant-connected testing belongs in the
 Electron window.
+
+### Reset OpenAdminOS and uninstall (2026-11-19)
+
+On macOS and Linux removing the app does not remove its data, so a
+reinstall restored tenant access with no sign-in (tester finding, 18 Nov,
+macOS). Settings > Data has
+**Reset OpenAdminOS**: a product modal with the data folder, what is removed and
+what stays (the enterprise application and admin consent in each tenant, the IT
+`policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
+in the main process. The impact list scrolls and the buttons stay in view at
+the smallest window height; a refusal from the main process is shown in full.
+Mockup: `docs/mockups/34-local-reset.html`.
+
+- **Two phases.** The request refuses while a confirmed write run is applying
+  (also a cancelled one, or one whose organization was disconnected, while
+  its apply has not settled; tracked in memory, not in run history), while
+  any other run is running or queued, or a cancelled or disconnected run's
+  work has not settled (a run can send through a connector after its
+  approval), while a confirmation, a run start, a Nova send or a report
+  delivery pass is in flight. After the request no run starts, Nova sends
+  nothing more and deliveries are skipped. From the request
+  on, runs (including gateway, Splashtop and rollback plans), Nova sends,
+  WhatsApp test sends and report deliveries are refused by the reset flag,
+  which a refused request lifts; a schedule that meets it waits and records
+  no failure. Only after the marker is written are connector approvals
+  declined ("Nothing was sent") and every organization closed the way
+  Disconnect closes one, so a refused request never declines an approval or
+  stops work; the shutdown waits for leased work within its bound, and from then on refuses new confirmations
+  until the restart. It writes `local-reset-pending.json` into the data folder
+  first; the rename is the commit point (if it fails, nothing changed and the
+  modal says so; a failed folder flush after it is only logged). It then turns off the OS
+  scheduler and the menu bar login item (installed builds), stops the gateway
+  and MCP servers and drains every organization's work with a bounded wait
+  (the SQLite databases stay open until the process exits), and relaunches.
+- **No sign-out before the restart** (decided in review round 22; the brief
+  listed it as a phase 1 step). Signing out rewrites the token caches in
+  place, and that rewrite cannot be bound to the folder the reset was
+  accepted for: a folder swapped in between the check and the write would
+  have its caches rewritten. The token files are removed by the launch wipe
+  before anything can read them, and from the marker on no organization
+  starts new work, so the sign-ins are not used again either way. From the
+  start of the checks until the restart, a missing `state.json` is never
+  created (the normal first launch rule is off; reads fall back to the state
+  the process last knew), and closing and draining organizations uses that
+  in-memory state, not the file. From the marker's rename (before its
+  folder flush is awaited) every state write is refused when it runs, and
+  again before its own rename and each Windows retry of it ("Nothing was saved"), a write queued before
+  that included, before any audit record: an atomic write would put this
+  process's state over whatever folder is at the path now. Before the
+  marker writes go on as usual, so a refused reset loses nothing. The
+  SQLite stores write through handles opened on the original files. The restart puts the sandbox flag in the
+  environment back to how the launch found it, so the setting removed with
+  `state.json` does not come back as the next launch's default.
+- **Linux binds the marker to the device too** (review round 26). A Btrfs
+  snapshot restored as the home keeps every folder's inode and birth time,
+  so on Linux the device number must also match; a mismatch, for example a
+  Btrfs device number that changed with a reboot while a reset was
+  incomplete, stops it with nothing removed and the usual way out (remove
+  the marker, reset again).
+- **Accepted limit: a write already running when the reset commits**
+  (raised in review round 26, declined; the reviewer withdrew it in round
+  27). A state or token cache write that
+  started before the reset request, if the data folder is replaced within
+  the milliseconds it runs, lands in the replacement (a state write checks
+  the commit again right before its rename, so the window is that rename;
+  a token cache write keeps its full duration). That exposure is the
+  running app's own, with or without a reset; draining writes before the
+  marker would only move the window to writes started before the drain.
+  What the reset guarantees: nothing it does, and no state write that
+  starts after the marker, reaches a folder swapped in.
+- **Accepted limit: a folder replaced during one removal** (raised in review
+  round 23, declined). The folder's identity is checked before every
+  top-level removal and before every write, but a recursive removal and the
+  marker's file creation resolve the path again while they run, and Node has
+  no removal relative to an open folder handle. A process that replaces the
+  data folder within those milliseconds could have one top level entry
+  (which can be a whole folder tree) removed from the replacement. Only a process of the same account can do that, and it
+  could remove those files itself; a restore that puts an OpenAdminOS
+  profile back at the OpenAdminOS data path loses at most that one entry of
+  a profile the admin asked to reset. Closing the window entirely would need
+  native code; the per-entry check keeps it to one entry. Accepted by the
+  reviewers in round 24.
+- **Wipe at launch.** At the top of the main script, after the single-instance
+  lock and before `whenReady`, so before Chromium reads Local State (the Windows
+  safeStorage key) and before any store, session or safeStorage use: every entry
+  of the data folder except `policy.json`, the marker and Chromium's lock files.
+  The audit anchor and pending files go after everything else, the database
+  included, so a database that could not be removed keeps its anchor. An
+  entry that cannot be removed keeps the entries named after it (a locked
+  `openadminos.db` keeps its `-wal` and `-shm`), so the next try finds an
+  intact database; everything else still goes. On Windows an entry holding
+  a read-only file with more than one hard link stays too, and is listed: a
+  hard link shares its attributes, and removing a read-only file clears the
+  attribute first, which would make a backup's copy writable (a folder that
+  cannot be listed stays too, since its contents cannot be checked). The
+  check can take seconds on redirected storage, so the data folder and the
+  entry are checked again right after it, and the wipe stops if either was
+  replaced meanwhile (an entry without inode or birth time counts as
+  replaced). Cache folders outside the data folder get the same checks, as
+  a warning: each one's identity is taken before its link, mount and
+  hard-link checks and compared after the last, right before the removal.
+  The data folder itself is checked again before every step outside it
+  (inside the scheduler step right before the LaunchAgent bootout, the plist
+  removal and the task deletion; each Keychain deletion attempt; the
+  preferences; each cache folder), and the reset stops there, incomplete,
+  if it was replaced or holds anything but the kept files again (its
+  identity is checked before and after it is listed): a profile
+  restored meanwhile, as a new folder or file by file into the same one,
+  keeps its Keychain key, and the files that came back are listed. The same
+  check runs once more after the last step, before the cleanup is recorded
+  as done, so files that came back during it make the next try repeat all
+  of it. A restore that lands between the last check and the `security`
+  command itself remains (accepted, the same single operation limit). A
+  cache folder's identity is compared last, after this check and the Linux
+  mount check, right before its removal. From the commit on, the audit
+  log's side files (anchor and pending file, written by path) are not
+  written again, also not when it closes, and no expired rows are pruned
+  (a prune must move the anchor with them); events kept only in memory go
+  with the log the reset removes. A refused reset unfreezes them. The
+  Microsoft token caches are held the same way from the commit: no write,
+  no clear, and a read returns an empty cache without opening the file (a
+  read that cannot decrypt would otherwise delete it), so a sign-in
+  refresh that was waiting on the network when the reset started never
+  writes or deletes a token file afterwards. The commit also seals the data
+  folder for the rest of the process: every secret store (provider and
+  connector secrets, Splashtop tokens, the Nova key, the token caches)
+  neither reads a file (a decrypt failure would delete it), nor writes nor
+  removes one, and each checks the seal again right before a write or a
+  delete that follows an await. Every WhatsApp Web client of the process
+  (also one a delivery created) stops at the commit and opens no socket
+  again; its credential and key writes and its auth folder removals check
+  the stop too. The other writers of the data folder check the seal right
+  before their last write, rename or removal: the registry cache, downloaded
+  agent manifests (no rollback once sealed), agent uninstall, the
+  documentation index promotion and the saved window state. Work that
+  reaches a network service and then writes there (WhatsApp Web status,
+  login, disconnect, groups; Splashtop connect, test, rotate, disconnect;
+  registry refresh; agent install, update, uninstall; documentation index
+  install) is refused once a reset has started, and one under way holds the
+  reset like a connector send; the background registry refresh skips while
+  a reset is requested. Agent draft saves and self-training approvals,
+  rejections and resets are gated the same way. A documentation index
+  download is refused once a reset has started but does not hold one: the
+  commit aborts it, and it stops by itself after 30 minutes.
+- **Data folder guard** (review round 36). Beneath the writers' own checks,
+  the commit wraps every path based change through Node's file system API
+  in the main process (writes, appends, folders, removals, renames, copies,
+  links, mode and time changes, opens for writing, write streams, in their
+  promise, callback and sync forms, synced into ES module imports so that
+  dependencies such as Baileys are covered): any path inside the data
+  folder, as written or as the system resolves it through links, is refused
+  with "OpenAdminOS is resetting and restarts in a moment. Nothing was
+  saved." (`EROFS`; a write stream fails with that error), except the
+  reset's own marker and its temporary files directly in the folder (by
+  exact name and temporary file pattern), so the request can still add its
+  warnings. No new hard link to a file inside can be made; a hard link that
+  already exists outside the folder reaches the file without the guard
+  seeing it (accepted, nothing in the app writes through one). A refused write nobody awaited is
+  logged while the seal holds. Work that writes on its own (index downloads,
+  WhatsApp Web) stops before the guard is installed. A writer that captured
+  file system functions at load is not seen: electron-updater is the one
+  known, so the updater stops for good at the commit, a channel switch does
+  not start it again, and only a check already running can still write its
+  staging id, which holds no tenant data. Changes through a
+  handle opened earlier (SQLite, Chromium's own storage) are not paths and
+  are left as they are; the process exits right after the shutdown. A
+  refused reset lifts the guard. In the running app, the scheduler and the
+  login item are turned off only while the data folder is still the one
+  being reset; otherwise they stay on, with a warning; the retry of the
+  login item after ready at the next launch runs only while the folder is
+  still the one the wipe emptied and holds no `state.json`. The restart of
+  this app's own Linux AppImage (`APPIMAGE`, with the running executable
+  inside `APPDIR` as written or resolved) goes through a detached shell
+  that starts the AppImage file once the old process has exited: the
+  mount it runs from goes away with the old process, and Electron's
+  relaunch helper runs with no_new_privs, under which the new AppImage
+  could not mount itself. In extract-and-run the shell also waits for the
+  AppImage runtime, the parent, which removes the extracted copy; a
+  mounted runtime replaced itself with the app, so the parent there is the
+  launcher and is not waited for. Each wait lasts a minute at most. When `APPDIR` is not
+  a mount (extract-and-run, without working FUSE; the runtime strips that
+  flag), the new process gets `APPIMAGE_EXTRACT_AND_RUN=1`. An AppImage
+  that can no longer be started is logged, and the reset runs at the next
+  launch. WhatsApp Web clients leave the connected
+  and QR states when they stop, so a client resumed after a refused reset
+  reconnects. The shutdown before the restart leaves the SQLite databases open:
+  closing checkpoints the write-ahead log and deletes it by path; the
+  process exit releases the handles and the next launch removes the files.
+  On Linux the mount table is read again before every removal in the data
+  folder and right before a cache folder's removal, so a bind mount added
+  under either while the wipe runs is never removed through. On Windows the
+  task's owner is looked up first and its definition read again before the
+  delete, which runs only when that definition is unchanged and the data
+  folder passes its check after that read; schtasks cannot delete on a
+  condition, so another account replacing the shared task in the moment
+  between that read and the delete remains (accepted; the per-user task
+  name follow-up closes it). The guide's
+  PowerShell script leaves files whose `LinkType` is `HardLink` for the same
+  reason. Then,
+  installed builds only: the Keychain item by exact service
+  `OpenAdminOS Safe Storage` and account `OpenAdminOS`, searched only in the
+  login keychain (`~/Library/Keychains/login.keychain-db`, where safeStorage
+  creates it), so an item of that name in a keychain imported from another
+  Mac is left alone; then each other keychain in the user's search list is
+  looked up on its own (attributes only), and each one holding an item of
+  that name gets its own warning with its path, for an admin whose default
+  keychain is not the login keychain (the login keychain is recognized by
+  file identity, however the list spells it), the LaunchAgent or
+  scheduled task (checked to be gone afterwards), the electron-updater cache
+  `@openadminosdesktop-updater`, and on macOS the Squirrel ShipIt cache, the
+  bundle's Caches, HTTPStorages and saved state, and `defaults delete
+  com.openadminos.desktop`. The marker records when that cleanup ran and goes
+  last, so an interrupted wipe resumes at the next launch without repeating
+  the Keychain step. External commands are bounded at 5 seconds each, below
+  Chromium's wait for a second launch, except the Windows task list (15
+  seconds), which reads every task; a wipe killed by a second launch resumes
+  from the marker.
+- **Marker bound to its folder.** The data folder's identity (device, inode
+  and birth time) is taken when the request starts, before any check awaits;
+  both marker writes go only to that same folder. At launch
+  the wipe runs only when the folder still has that inode and birth time
+  (on macOS and Windows the device number is not compared, since a reboot
+  or remount can change it, except where no birth time is known; on Linux
+  it must always match too, see "Linux binds the marker to the device too" above): a copy restored or roamed to
+  another device carries the marker but not the identity, so it stops with
+  nothing removed and asks for a fresh reset there. A birth time equal to
+  the change time counts as unknown (Node reports the change time where
+  statx is blocked), and a file system with neither inode nor birth time
+  gets no marker at all. The launch right after a reset does not download
+  the embedding model into the local runtime's store. The post-reset notice is kept in memory for that
+  launch only; quitting before reading it loses its warnings (the log keeps
+  them).
+- **Folders above** the data folder or a cache are not checked (decided in
+  review round 18, after round 17 had added it): whatever `~/Library`,
+  `~/.config` or `%APPDATA%` resolve to, the OpenAdminOS folder at its real
+  location is the one the app has used, and only its contents go, so a link
+  or mount above it does not widen what is removed; checking them refused
+  resets for people who link `~/.config` with a dotfile manager.
+- **Links.** A data folder that is itself a link is refused at the request
+  and never emptied at launch (it may point at a shared folder). The wipe
+  removes links inside the folder without following them, token caches
+  that are links or hard links included. The folder counts as a link when its path has `.` or `..` segments,
+  when its real location is not its real parent plus its own name (so
+  `link/` is caught too; compared by device and inode, so letter case does
+  not matter; each marker write checks again, and the launch wipe checks
+  the folder's identity and that it is not a link before every removal and
+  write, the marker's temporary files included, and stops if it was swapped
+  for another), when it or any folder inside it is on another device (a
+  mounted volume or disk image; a folder that cannot be read counts too),
+  or, on Linux, when a mount sits at or inside it (a bind mount; an
+  unreadable mount table counts too). Cache folders outside the data folder
+  are skipped with a warning on the same checks, on every platform. A
+  `policy.json` that is a link at all, a folder or anything other than a
+  plain file at that name, stops the
+  reset at the request and at launch: a chain of links can always be built
+  that a check cannot follow the way the system does, so the reset does not
+  try to vouch for one. Only a plain marker file with a single
+  link starts a wipe: anything else at that path (a link, a shared file, a
+  folder) leaves the reset incomplete and nothing is removed. The reset-incomplete window runs from a fresh temporary
+  profile without saved window state, removed on every way out (Quit, Try
+  again, closing the window, process exit), so
+  it never writes into the folder it could not reset; if that profile cannot
+  be created, a native notice lists what is not finished and the launch
+  stops, since no window can show yet (on Linux through zenity or kdialog).
+  Chromium's own single-instance lock files are created in the data folder
+  as on every launch of that profile; nothing else is written there.
+- **Marker writes** go through a new temporary file with a random name,
+  created exclusively (`wx`), so a link planted in a restored profile is never
+  followed; the temporary file is removed when the rename fails.
+- **Scheduler wakes.** A background scheduler launch never runs or resumes a
+  reset: while a marker is pending, read before the lock and again under it,
+  it exits at once without taking the lock (on macOS it is the
+  LaunchAgent's own job, which the reset unloads) and the pre-lock scheduler
+  repair is skipped. A request made from a window that a scheduler-started
+  process shows does not unload its own LaunchAgent; the launch that wipes
+  removes it. That process restarts through a detached shell outside the
+  LaunchAgent's process group, which waits for it to exit and runs `open` on
+  the app bundle, because launchd ends the group, Electron's relaunch helper
+  included, with the job. On Windows the task name is the same for every
+  account, so the reset removes the task only when its program lies under
+  this account's profile (the default per-user install) and the account it
+  runs as (`<Principal><UserId>`) is this one by name or SID (`whoami
+  /user`); otherwise, also for a copy installed for all users or when either
+  side is unknown, it leaves the task with a warning. Presence is read from
+  the full task list, so a Task Scheduler error counts as unknown, never as
+  absent. A per-user task name is a follow-up.
+  The LaunchAgent is unloaded by its exact service
+  label, never by path (a path can name other jobs), and only a plain file
+  at the plist path is deleted. Removal is checked afterwards (`launchctl print` exit 113, a
+  `schtasks /Query` that no longer finds the task), with every command bounded.
+- **Kept names** are matched without regard to letter case, because macOS and
+  Windows volumes read `Policy.json` through the path `policy.json`.
+- **Failures.** A data folder entry that cannot be removed keeps the marker and
+  opens **Reset did not finish** instead of the app (the paths with reasons,
+  Try again relaunches, Show data folder, Quit); a background wake just exits.
+  Leftovers outside the data folder that fail are warnings on the notice after
+  the reset and are not retried, because a later retry could delete the new
+  Keychain key. After a completed reset the app opens at first run with a
+  dismissible notice.
+- **Development builds** reset `OPENADMINOS_USER_DATA_DIR` when set, otherwise
+  the default folder the installed app also uses (the modal names it). They use
+  Chromium's mock keychain on macOS, so they never touch the Keychain item, and
+  never touch the installed app's scheduler, login item or caches. The marker
+  records which build asked (`build`): a development build leaves an installed
+  build's reset alone (Reset did not finish, open the installed app), and an
+  installed build finishes a development build's reset in the data folder only,
+  with a warning. A marker that is not a complete reset request (version 1,
+  a valid request time and a known build) never starts a wipe: the launch
+  stops with nothing removed and says how to keep or reset the data.
+- **Linux** keeps the safeStorage key in the desktop keyring; the reset does
+  not remove keyring entries (the docs say how).
+- **Windows uninstaller** (maintainer decision, 2026-11-23).
+  `nsis.deleteAppDataOnUninstall` is `true`: uninstalling removes the
+  uninstalling account's `%APPDATA%\OpenAdminOS`, including an IT
+  `policy.json` placed there, which IT must deploy again after a reinstall.
+  In electron-builder 26.15 this applies to assisted installers too and never
+  to an update (the installer runs the old uninstaller with `--updated`); for
+  an all-users install the uninstaller switches to the current account for
+  this step, so it removes only that account's Roaming folder
+  (`OpenAdminOS`, and `@openadminos\desktop` for the package name). The
+  machine-wide policy (`%ProgramData%\OpenAdminOS\policy.json`) and other
+  accounts' data are not touched. It does not remove the updater cache or the
+  `OpenAdminOS Scheduler` task; Reset OpenAdminOS does. On macOS and Linux
+  removing the app removes only the app, and the guide says so. User docs:
+  Basics > Uninstall and reset.
 
 ### Code signing
 
@@ -3882,3 +4506,194 @@ Decided with the user after a docs question ("What does the Microsoft Learn say 
   - *Chat titles.* The first answer of a new chat may return `title` in its final JSON: plain text on one line, at most 60 characters, no links, no write intent, no tenant values (checked like `next`). It names the chat in the sidebar and header unless the chat was renamed meanwhile; otherwise, and on the deterministic path, the chat keeps the trimmed question. The title is asked for only on that first answer and costs no extra model call.
   - *Hosted disclosure.* The status strip pill is unchanged. The sentence under the composer ("Prompts and tenant data go to ... while this model is selected. MCP queries are written from your current question only, ...") shows in full on the first message of a conversation and whenever the provider, model or MCP hosts differ from what the conversation last sent with (kept per viewer in local storage, falling back to the provider and model of the latest answer). Otherwise a shield icon in the composer carries the same sentence as its tooltip and accessible description and opens it in full on click. Hard constraint 1 is unchanged: the strip always says where data goes.
   - *Other.* Scroll to latest sits in its own row above the composer, outside the scrolling conversation. Each numbered step in an answer has a copy button (plain text, without citation numbers), shown on hover and keyboard focus.
+
+### Local model accuracy in Chat (2026-11-19)
+
+Tester findings on 2026-11-18 with the local OpenAdmin 8B model: device counts
+read from sample rows (3 noncompliant instead of 6), no per OS split, unmanaged
+Entra devices listed as Intune devices, follow-ups planned from scratch, and auto
+mode spending up to about 22 model calls before a fallback whose notice blamed
+the format. Decisions:
+
+- Code does the counting. `count_cached {resource, where?, filters?, groupBy?,
+  list?}` counts every cached row in SQL under the filters, with one breakdown
+  per groupBy field, and returns the matching rows when at most 50 match. The
+  loop prompt sends every count and breakdown to it.
+- Device questions in a closed list of sentence shapes are computed in code:
+  a count of Intune devices (optionally of one OS, of one compliance state, or
+  synced or not synced in the last N days, this week, this month or today)
+  with optional clauses for a per OS or per compliance state split, one
+  subset to list ("and which are not compliant", "and how many are Windows")
+  or "list them"; a list of devices by compliance state or by sync window; the
+  follow-ups "only Windows", "only the compliant ones", "which of those are
+  Windows", "which of those are not compliant", "which of those synced this
+  month" and "what about macOS"; and "why is <device> not compliant". Each
+  shape is read as a whole sentence. Any other question, including one with a
+  word, number, "or", negation or clause outside its shape, goes to the
+  planner as before. An open reading of the words was tried first and kept
+  computing answers to other questions (a dropped "not", "or" read as "and",
+  "Windows 11" read as Windows, independent clauses read as a subset), so the
+  list is closed and grows only by adding a tested shape. Only "devices" (or
+  "Macs") names the inventory, since "computers" would also count phones;
+  "iOS" is Intune's iOS/iPadOS platform, and "iPadOS", "iPad" and "iPhone"
+  questions go to the planner, because whether an iPad reports
+  operatingSystem "iOS" or "iPadOS" is not documented and could not be checked
+  on a tenant (2026-11-20, the Lokka tenant has no iPad); a sync window must
+  be one day to ten years, times compare as times, and "today", "this week"
+  and "this month" start in this device's time zone; a later sentence with
+  its own subject is its own question and goes to the planner; "list their
+  names" together with a subset asks for two lists and goes to the planner;
+  "what about macOS" asks the stored question again with macOS swapped in or
+  added in the same shape, with a relative sync window ("today", "in the last
+  7 days") read again at the time of the switch from the question that set
+  it, also after a further switch or narrowing (its split, subset, count or list), replacing the OS
+  in the set and the subset alike, and a split that was over a follow-up's
+  subset is not rebuilt; a split asked after the subset clause could mean
+  either and goes to the planner; a turn with attached workspace context goes
+  to the planner, and no direct answer from the cache stands in for it, since
+  code reads none of its instructions; once a model wrote an answer in a
+  chat, its memory may hold a standing instruction ("for the rest of this
+  chat, exclude WIN-"), so the chat's later questions go to the model, and the
+  older direct cache answers (compliance, encryption, app platform counts) are
+  left to the model too, in both send paths; a write request refused in chat
+  carries no model name, since code wrote it; a plain
+  or tenant-wide "how many devices" can mean Intune or Entra devices and goes
+  to the planner, so a count is computed only when its counted clause names
+  Intune, managed devices, a compliance state or a sync window (a later
+  clause about compliance does not qualify it); devices with no reported sync
+  time are said, not silently left out of a sync window; a device Intune
+  reports as never synced (0001-01-01) reads "no sync reported"; dates are
+  shown on this device's calendar; when the cache is partial, an unfiltered
+  count leads with the total Graph reported (or says "at least" the cached
+  count) and filtered counts and splits say they cover the cached part only;
+  a device lookup is
+  resolved again by name in the snapshot that answers; Entra device questions
+  always go to the planner. The deterministic
+  answer pack carries the result as an authoritative `computedResult` (exact
+  counts, the full filtered list, plain fact lines) and no sample rows for
+  that resource, only for a tenant or mixed question whose resource the tenant
+  grants. "Not compliant" is Intune's `noncompliant` state, as the direct
+  evidence answers count it; grace period is its own state. A failed latest
+  refresh is said in the computed answer. `count_cached` on a resource that
+  was never refreshed returns no count.
+- Intune is the device inventory. Device, OS, sync and compliance wording plans
+  `managedDevices` only; `entraDevices` joins for Entra, directory, join,
+  registration, stale-device cleanup, duplicate and deleted-record wording.
+- Row samples use structured filters for the OS and compliance state a question
+  names, and question words are no longer ANDed as text matches. A "why"
+  question gets no field filter, since its state and any OS word are the
+  premise or part of a device name ("why is Windows-Lab not compliant"), so
+  the named device stays in the samples; every other question keeps both, and
+  any cached device the question names by its whole name goes first in the
+  samples, with or without filters ("is Windows-Lab compliant" about a Mac,
+  "why is 上海总部 not compliant"), so no later cap drops it; it is marked
+  `namedInQuestion`, so it is not read as a row that matched the filters.
+- Follow-ups: the structured result of the last answer is stored per
+  conversation (`chat_result_context`: resource, filters, label, total and up
+  to 500 matched row ids; deleted with the conversation) and a follow-up such
+  as "only Windows" or "which of those synced this month" narrows those rows
+  by id: a device added by a later refresh is not part of the previous answer,
+  a device whose values changed stays in it, is listed with its current
+  values and is counted as no longer matching, one that left the cache is said
+  to be gone, and every requested narrowing, also a repeated one, applies to
+  the current values. In a two-clause question each filter belongs to its
+  clause: the first clause is the counted set, the second the listed subset. A different value on a field already filtered after a switch lead
+  ("what about macOS" after Windows) asks the same question of a fresh set.
+  "Which of those are compliant now?" names the previous rows, so it is read
+  on them by id with their current values even though the previous answer
+  filtered on compliance; "only the compliant ones" does not and goes to the
+  planner, and so does a later "what about macOS?", which would need both
+  compliance values, also after a further narrowing such as "only Windows".
+  What ran shows the filters of a follow-up, not the row ids. A device
+  lookup stores no follow-up context, and a stopped turn clears the context. When the previous answer matched more
+  than 500 rows, no rows were kept and "of those" goes to the planner. Any other answer clears the context, and
+  follow-up planning reads write intent from the current question only. Short
+  follow-ups are planned with the previous question as context. The context is
+  stored only when the visible answer came from the computed result (code, or
+  a model writing from the pack), never from a loop answer that read the data
+  its own way.
+- Questions the data cannot answer: "why is <device> not compliant" names the
+  device's cached state (the device is found by its exact cached name,
+  ignoring case, so "PC1" and "Front Desk" match and "my laptop" does not;
+  the whole name is tried first, so "Device Lab" is never answered as "Lab";
+  the name as asked is resolved again in the snapshot that answers, and when
+  a refresh made it mean another device, or none, the planner answers; the
+  name keeps its own spacing and punctuation, so "Front  Desk" is not "Front
+  Desk" and "Alice’s iPhone" is not "Alice's iPhone"; letters of any script
+  count and case is folded with Unicode rules, so "Élodie’s iPhone" matches
+  as typed in any case),
+  says the failing rule is not in the cached data, and
+  gives the last sync as the lead, with nothing invented. Only a failing state
+  (noncompliant, conflict, error) and grace period get that guidance. A
+  compliant device gets its premise corrected ("is compliant in this snapshot,
+  so no compliance rule is failing for it here") and no failed-rule or lead
+  wording; a grace period device is worded as an unmet setting; any other
+  state says the snapshot does not establish a failure. The last sync is
+  named as a lead only when it is at least 7 days old. A failed latest
+  refresh is said first. A name two cached
+  records share goes to the planner, so code never picks one. The device name
+  is resolved against the cache at question time; a device first seen by this
+  turn's refresh is answered by the planner path.
+- A local model never writes the answer to a question code has computed (a
+  count, breakdown, filtered list, follow-up or device lookup): code renders
+  the facts with no model call, in auto and deterministic mode, and What ran
+  shows the cache read. Checking a small model's prose against the facts kept
+  missing contradictions ("4 are not compliant" next to the right list, an
+  invented reason next to the right sync date), so the prose is not written.
+  Always investigative mode keeps the model's loop, and a hosted model writes
+  from the authoritative pack as before.
+- Auto mode, local model, Chat: a compact loop budget (four iterations, one
+  repair for malformed, empty, unfinished or evidence-free replies, no repair
+  turn for a missing question kind, at most four model calls before the
+  fallback; the short query-writing call of an MCP tool counts like any other
+  model call, so the tool loop never makes more than four calls (the
+  fallback's own cached-data answer is one more call after it); a lookup that
+  would leave no call for the answer is not run and the model is told to
+  answer from what it has; a repair that asks for a missing source, or for the
+  full article behind search excerpts, runs only when its request, its query
+  writer and the answer still fit, otherwise the answer is kept and says the
+  source was not consulted or that it rests on the excerpts; a late local
+  docs index with no call left is not searched and the answer is kept as
+  written; a tool requested on the fourth call is not run, since no call is
+  left to use its result. Counting the writer without these rules pushed
+  ordinary Microsoft Learn answers into the fallback). After a failed compact
+  loop the cached-data fallback is one model call with no promise retries;
+  a "tool" naming a Chat tool anywhere in the reply (before or after prose,
+  next to a JSON example, cut short) makes it a request; a whole-reply object
+  is read as the loop reads it (final with an answer or content text is the
+  answer); a final answer object after prose is the answer; any other JSON
+  example inside a prose answer stays prose; when the reply is empty, only
+  promises work or is a request, the message fails with
+  "The local model did not finish an answer ..." instead of showing it. The
+  "Answered from cached data instead" notice is set only once that answer
+  exists, so a provider that refuses every call leaves no such notice on the
+  failed message. A local model the failure memory took off the tool loop
+  gets the same one-call, checked fallback; a model too small for tool use
+  never ran the loop and keeps the normal fallback with its promise retries. Stop pressed while the providers
+  are still being read ends
+  in the designed cancelled answer, not an abort error. A second
+  progress-only reply falls back as `unfinished` instead of being kept, unless
+  a lookup in the turn failed: then, as for an empty answer, the turn says no
+  verified count is available instead of falling back. Only a read of a
+  refreshed cache clears a failed lookup; a retry that finds the resource not
+  cached keeps it pending. A rejected `count_cached` call blocks a zero answer as a
+  rejected `query_cache` does. A context overflow falls back instead of failing
+  the message and returns the provider's error as `failureDetail`.
+  Always investigative mode and hosted providers keep the established budget,
+  prompts and notices.
+- The loop returns `failureReason`: `malformed`, `thinking-only` (a reply with
+  no text), `context-too-small`, `iteration-cap`, `no-evidence`,
+  `empty-answer`, `unfinished` or `provider-unavailable`. Local fallbacks say
+  what happened in plain words, for example "The local model did not finish
+  its plan. Answered from cached data instead." The per-model failure memory
+  (two failures, in memory until restart) now says what the model did on each
+  failed turn since its last success ("did not fit its context window twice")
+  instead of blaming the format. A local model's context overflow counts
+  towards the two failures, since it says the model does not fit Chat; a
+  hosted one does not, since it says more about the question. A local model
+  that cannot be reached (connection refused, server not running) ends the
+  loop as `provider-unavailable` with the error as `failureDetail`, is not
+  counted against the model, and the fallback then shows the provider's
+  designed error. `count_cached`
+  and `query_cache` refuse an `in` list of more than 20 values instead of
+  cutting it, so a count is never stated as exact over a cut list.

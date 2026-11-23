@@ -8,7 +8,7 @@ descriptor:
   id: tenant-change-audit
   name: Tenant change audit
   description: Reviews recent directory audit entries by activity, category, result, actor, and target context to flag changes worth checking.
-  version: 1.1.1
+  version: 1.2.0
   minAppVersion: 0.6.3
   author:
     name: OpenAdminOS
@@ -54,6 +54,15 @@ skills:
       source: "{{ load_audits.output }}"
       field: activityDisplayName
 
+  - id: by_activity_top
+    format: transform
+    label: Count entries by activity, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_audits.output }}"
+      field: activityDisplayName
+      top: 25
+
   - id: by_category
     format: transform
     label: Count entries by category
@@ -78,6 +87,15 @@ skills:
       kind: count-by-field
       source: "{{ load_audits.output }}"
       field: initiatedBy.user.userPrincipalName
+
+  - id: by_actor_top
+    format: transform
+    label: Count entries by actor, largest buckets
+    settings:
+      kind: count-by-field
+      source: "{{ load_audits.output }}"
+      field: initiatedBy.user.userPrincipalName
+      top: 25
 
   - id: recent_sample
     format: transform
@@ -104,10 +122,10 @@ skills:
       prompt: |-
         Last {{ load_audits.output | size }} directory audit entries.
 
-        By activity: {{ by_activity.output }}
+        By activity: {{ by_activity_top.output }}
         By category: {{ by_category.output }}
         By result: {{ by_result.output }}
-        By actor: {{ by_actor.output }}
+        By actor: {{ by_actor_top.output }}
         Recent sample: {{ recent_sample.output | boundedJson(6000) }}
         State the sample included/omitted record counts. The aggregates describe
         the fetched batch; detailed findings apply only to included records.

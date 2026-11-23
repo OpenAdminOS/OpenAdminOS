@@ -39,7 +39,18 @@ import { withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant
 export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
   withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 import { accumulateRunUsage } from "./run-usage.js";
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { contextTooSmallFromError, graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { assertPromptFits, resolveContextWindow } from "./prompt-fit.js";
+export {
+  assertPromptFits,
+  checkPromptFit,
+  DEFAULT_ANSWER_RESERVE_TOKENS,
+  estimateTokens,
+  resolveContextWindow,
+  type PromptFit,
+  type PromptFitInput,
+} from "./prompt-fit.js";
+export { parseOllamaLoadedContext, parseOllamaShow, readOllamaContextWindow } from "./ollama-context.js";
 
 import { createOllamaLlm, noopLlm, reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
@@ -867,9 +878,22 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
     }
   };
 
+  // One lookup per model and run: map steps call the model many times.
+  const windows = new Map<string, Promise<number | undefined>>();
+  const contextWindow = (model?: string) => {
+    const key = model ?? "";
+    let window = windows.get(key);
+    if (!window) {
+      window = resolveContextWindow(base, model);
+      windows.set(key, window);
+    }
+    return window;
+  };
+
   return {
     available: base.available,
     defaultModel: base.defaultModel,
+    contextWindow,
     async complete(options) {
       guardAvailable();
       let last: LlmStreamChunk | undefined;
@@ -889,6 +913,21 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
       guardAvailable();
       signal?.throwIfAborted();
       options = { ...options, system: withTenantDataInstructions(options.system), signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal };
+      // Check the size before anything is sent. A model whose window is
+      // unknown (every hosted provider) is never blocked here.
+      const model = options.model ?? runModel ?? base.defaultModel;
+      const window = await contextWindow(model);
+      signal?.throwIfAborted();
+      assertPromptFits({
+        // An adapter's own suffix (the self-training overlay) is sent too.
+        system: [options.system, base.systemSuffix].filter(Boolean).join("\n\n"),
+        prompt: options.prompt,
+        ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+        ...(window !== undefined ? { contextWindow: window } : {}),
+        ...(model ? { model } : {}),
+      });
+      // The adapter refuses too if it learns a limit this check could not see.
+      options = { ...options, enforceContextWindow: true };
       const stepId = hooks.getCurrentStepId();
       let usageRecorded = false;
       const reset = () => {
@@ -949,6 +988,7 @@ async function failPhase(
   const finishedAt = new Date().toISOString();
   const message = error instanceof Error ? error.message : String(error);
   const accessDenial = graphAccessDenialFromError(error);
+  const failureReason = contextTooSmallFromError(error);
   const failed: RunRecord = {
     ...working,
     status: "failed",
@@ -956,6 +996,7 @@ async function failPhase(
     summary: `${input.agent.name} failed: ${message}`,
     error: message,
     ...(accessDenial ? { accessDenial } : {}),
+    ...(failureReason ? { failureReason } : {}),
     graphDenialChecked: true,
     ...(reasoningWithoutAnswerInChain(error) ? { failureCause: "reasoning-without-answer" as const } : {}),
     logs: [
@@ -1278,6 +1319,27 @@ export function compareSemver(a: string, b: string): number {
     if (l < r) return -1;
   }
   return 0;
+}
+
+const NIGHTLY_VERSION = /^(\d+\.\d+\.\d+)-nightly\.(\d+)$/;
+
+/**
+ * Whether an app version meets an agent's minAppVersion. A plain minimum
+ * keeps the compareSemver rule, where a nightly previews its release. A
+ * nightly minimum, such as 0.7.3-nightly.20261120040000, names the first
+ * nightly with the runtime features the manifest uses: an earlier nightly of
+ * that release does not meet it, a later one does, and the stable release
+ * always does. Released apps read the same minimum with compareSemver, which
+ * also refuses the earlier nightlies.
+ */
+export function appVersionSatisfies(appVersion: string, minAppVersion: string): boolean {
+  const min = NIGHTLY_VERSION.exec(minAppVersion.trim());
+  if (!min) return compareSemver(appVersion, minAppVersion) >= 0;
+  const app = NIGHTLY_VERSION.exec(appVersion.trim());
+  const release = compareSemver(app ? app[1]! : appVersion, min[1]!);
+  if (release !== 0) return release > 0;
+  if (!app) return true;
+  return BigInt(app[2]!) >= BigInt(min[2]!);
 }
 
 function resolveAgentDirectory(agent: AgentSummary | RegistryAgentSummary): string {

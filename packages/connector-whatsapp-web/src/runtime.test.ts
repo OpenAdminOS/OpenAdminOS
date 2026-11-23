@@ -64,3 +64,54 @@ describe("WhatsApp Web runtime helpers", () => {
     );
   });
 });
+
+describe("WhatsApp Web clients while OpenAdminOS resets", () => {
+  it("opens no socket and writes or deletes no auth file once stopped, until resumed", async () => {
+    const { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { getWhatsAppWebClient, resumeWhatsAppWebClients, stopAllWhatsAppWebClients } = await import("./runtime.js");
+    const dir = mkdtempSync(join(tmpdir(), "openadminos-whatsapp-stop-"));
+    const authDir = join(dir, "auth");
+    try {
+      // A restored profile's session at the auth path.
+      mkdirSync(authDir, { recursive: true });
+      writeFileSync(join(authDir, "creds.json"), "restored creds");
+      stopAllWhatsAppWebClients();
+      const client = getWhatsAppWebClient({ authDir });
+      // A status read no longer restores the session in the background.
+      assert.notEqual(client.getStatus().state, "connected");
+      await assert.rejects(client.startLogin(), /stopped while OpenAdminOS resets/);
+      await assert.rejects(client.disconnect(), /stopped while OpenAdminOS resets/);
+      const health = await client.checkHealth(100);
+      assert.equal(health.healthy, false);
+      assert.equal(readFileSync(join(authDir, "creds.json"), "utf8"), "restored creds");
+    } finally {
+      resumeWhatsAppWebClients();
+      getWhatsAppWebClient({ authDir }).dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves no stopped client claiming a live connection, so a resumed one reconnects", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { getWhatsAppWebClient, resumeWhatsAppWebClients, stopAllWhatsAppWebClients } = await import("./runtime.js");
+    const dir = mkdtempSync(join(tmpdir(), "openadminos-whatsapp-resume-"));
+    const authDir = join(dir, "auth");
+    try {
+      const client = getWhatsAppWebClient({ authDir });
+      // As if linked and connected before the reset.
+      (client as unknown as { status: { state: string; message: string } }).status = { state: "connected", message: "Linked." };
+      stopAllWhatsAppWebClients();
+      assert.notEqual(client.getStatus().state, "connected");
+      resumeWhatsAppWebClients();
+      assert.equal(client.getStatus().state, "not-linked");
+    } finally {
+      resumeWhatsAppWebClients();
+      getWhatsAppWebClient({ authDir }).dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

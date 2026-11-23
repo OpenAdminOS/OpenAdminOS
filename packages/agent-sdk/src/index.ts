@@ -51,6 +51,19 @@ export interface ProviderSummary {
   modelLabels?: Record<string, string>;
   /** Models the provider offers that this account cannot use. Shown greyed out with the reason; never in `models`. */
   unavailableModels?: UnavailableModel[];
+  /**
+   * Ollama: listed models whose prompts the server sends to another host
+   * (`remote_host` or `remote_model` in /api/tags), such as Ollama Cloud
+   * models and remote-backed aliases. Model fit never offers them as a
+   * model on this device.
+   */
+  remoteModels?: string[];
+  /**
+   * The provider reported no models and its one model comes from the managed
+   * policy (the CLI picks its model, so the policy model is passed to it).
+   * Model fit does not treat it as a model the provider reported.
+   */
+  modelsFromPolicy?: true;
   cli?: {
     binaryPath?: string;
     version?: string;
@@ -157,8 +170,10 @@ export type AgentMode = "read" | "write";
 
 export * from "./write-limits.js";
 export * from "./graph-access.js";
+export * from "./context-fit.js";
 import type { WriteLimits } from "./write-limits.js";
 import type { GraphAccessDenial } from "./graph-access.js";
+import type { RunFailureReason } from "./context-fit.js";
 import type {
   ConnectSplashtopInput,
   PrepareSplashtopChangeInput,
@@ -400,6 +415,8 @@ export interface AgentUpdateInfo {
   manifestSha256: string;
   /** Minimum OpenAdminOS version required by the registry entry. */
   minAppVersion?: string;
+  /** Whether this app version meets `minAppVersion`, computed by the host. */
+  supported?: boolean;
 }
 
 export interface AgentCompatibility {
@@ -713,6 +730,26 @@ export interface StartRunOptions {
    * connected tenant.
    */
   tenantId?: string;
+  /**
+   * The admin reviewed this run with no organization active: refuse it if
+   * one became active before admission, instead of running there. Not
+   * combined with `tenantId`.
+   */
+  expectNoTenant?: boolean;
+  /**
+   * A model fit rerun on a model on this device: the host checks again that
+   * the model runs here before admitting the run, and refuses it otherwise.
+   */
+  requireOnDeviceModel?: boolean;
+  /**
+   * A model fit rerun: the run is bound to where its provider is reached at
+   * admission (Ollama or LM Studio address, Azure OpenAI resource and
+   * deployment), so a settings change while its diff is open cannot send a
+   * later phase elsewhere.
+   */
+  bindProviderEndpoint?: boolean;
+  /** `getProviderDestination` as the run review saw it; with `bindProviderEndpoint`, a changed destination refuses the start. */
+  expectedProviderDestination?: string;
   /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
@@ -1055,6 +1092,18 @@ export interface RunRecord {
   error?: string;
   steps: RunStepRecord[];
   accessDenial?: GraphAccessDenial;
+  /** Model fit rerun on a model on this device: every phase checks again that it runs here before building the model. */
+  requireOnDeviceModel?: true;
+  /**
+   * The run failed because the model on this device could not do it, as the
+   * host classified the failure and confirmed, when it failed, that the model
+   * ran on this device. The run page offers other providers only from this.
+   */
+  modelFit?: ModelFitIssue;
+  /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
+  providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" };
+  /** Machine readable reason for a failed run, such as `context-too-small`. */
+  failureReason?: RunFailureReason;
   /**
    * True on a failure classified from its typed error, with or without a
    * Graph denial. Its message is then never read for Graph advice; only
@@ -1463,6 +1512,66 @@ export interface IntuneChatMessage {
    * not-connected card from the service registry.
    */
   notConnected?: IntuneChatNotConnected;
+  /**
+   * The local model could not do this request (SPEC.md, Model fit). Chat
+   * offers the configured alternatives; nothing is sent elsewhere until the
+   * admin chooses one and accepts.
+   */
+  modelFit?: ModelFitIssue;
+  /**
+   * This answer came from a provider the admin chose for this request only,
+   * after the local model could not do it. Names the model it replaced.
+   */
+  switchedFrom?: {
+    providerId: ProviderId;
+    model?: string;
+    reason: ModelFitReason;
+    /** Whether the provider that took the request was on this device when it was sent; the answer is labelled from this, not from later settings. */
+    toOnDevice?: boolean;
+  };
+}
+
+/**
+ * Why the local model is a poor fit for a request: the prompt does not fit
+ * its context window, the investigation failed on it repeatedly, or it spent
+ * its whole answer budget on reasoning.
+ */
+export type ModelFitReason = "context-too-small" | "repeated-failure" | "thinking-only";
+
+export interface ModelFitIssue {
+  reason: ModelFitReason;
+  /** The local provider and model that could not do the request. */
+  providerId: ProviderId;
+  model?: string;
+  /** Tokens the request needed, when the provider or the fit check said. */
+  neededTokens?: number;
+  /** Tokens the model could take, when known. */
+  limitTokens?: number;
+  /** The limit is the most the model supports, not the size it was loaded with. */
+  limitIsModelMax?: true;
+  /** The limit is the size the server tried and could not load, usually for lack of memory. */
+  limitIsMemory?: true;
+  /**
+   * Host-issued and single use: the one request this issue may be run again
+   * for, bound to its conversation, organization, question and the active
+   * model. Absent when the request cannot be offered again (Nova, a run).
+   */
+  offerId?: string;
+}
+
+/**
+ * One request answered by another provider or model than the active one,
+ * after the local model could not do it. Never persisted as a setting: the
+ * next send uses the active provider again. A hosted provider also needs a
+ * fresh `hostedProviderConsent` for it that is not a remembered one.
+ */
+export interface ChatModelOverride {
+  /** The host's offer from the failed answer (`ModelFitIssue.offerId`); used once. */
+  offerId: string;
+  providerId: ProviderId;
+  model?: string;
+  /** `getProviderDestination` as the accept step saw it; the host refuses a hosted send to another destination. */
+  destination?: string;
 }
 
 /**
@@ -1527,6 +1636,7 @@ export interface IntuneChatDocumentationSource {
 export type IntuneChatInvestigationToolName =
   | "list_cached_resources"
   | "query_cache"
+  | "count_cached"
   | "find_graph_endpoint"
   | "graph_get"
   | "refresh_resource"
@@ -2541,6 +2651,38 @@ export interface SetGraphCacheRefreshScheduleInput {
   intervalMinutes?: number;
 }
 
+/** What the Reset OpenAdminOS dialog shows before anything is removed. */
+export interface LocalResetInfo {
+  /** The data folder the reset empties. */
+  dataFolder: string;
+  /** Installed builds also remove the Keychain item, caches and the scheduler; development builds do not. */
+  packaged: boolean;
+  platform: "macos" | "windows" | "linux";
+  /** An IT policy file sits in the data folder and stays. */
+  policyFilePresent: boolean;
+}
+
+/** One item a reset could not remove, with the reason in plain words. */
+export interface LocalResetProblem {
+  item: string;
+  reason: string;
+}
+
+/**
+ * The outcome of the wipe at launch. `incomplete` means some of the data
+ * folder is still there: the app does not open until the reset finishes.
+ */
+export interface LocalResetReport {
+  status: "completed" | "incomplete";
+  requestedAt?: string;
+  finishedAt: string;
+  dataFolder: string;
+  /** Data folder entries that are still there. */
+  failed: LocalResetProblem[];
+  /** Items outside the data folder that could not be removed. Reported once and not retried. */
+  warnings: LocalResetProblem[];
+}
+
 export interface LocalDataSummary {
   sqliteBytes: number;
   chatConversationCount: number;
@@ -2577,6 +2719,8 @@ export type HostedProviderChatConsent =
       acknowledgedAt: string;
       remember?: boolean;
       workspaceContext?: HostedProviderWorkspaceContextConsent;
+      /** The model fit offer this acknowledgement accepts; an override needs it (ChatModelOverride). */
+      modelFitOfferId?: string;
     }
   | {
       tenantId?: undefined;
@@ -2588,6 +2732,8 @@ export type HostedProviderChatConsent =
       acknowledgedAt: string;
       remember?: boolean;
       workspaceContext?: undefined;
+      /** The model fit offer this acknowledgement accepts; an override needs it (ChatModelOverride). */
+      modelFitOfferId?: string;
     };
 
 export type TenantScope =
@@ -2955,6 +3101,14 @@ export interface SendIntuneChatMessageInput {
    * active conversation tenant before adding it to the model prompt.
    */
   workspaceContext?: WorkspacePromptContextInput;
+  /**
+   * Run this one request with another configured provider or a larger local
+   * model, after the local model could not do it. The host checks that the
+   * active provider is the local one named, that the chosen provider is
+   * listed and ready, and, for a hosted one, that the admin accepted it for
+   * this request.
+   */
+  modelOverride?: ChatModelOverride;
 }
 
 export interface SendIntuneChatMessageResult {
@@ -3427,6 +3581,12 @@ export interface OpenAdminOSApi {
    * blocked on the device needs no hosted confirmation.
    */
   previewIntuneChatSend?(input: { content: string }): Promise<{ reachesModel: boolean }>;
+  /**
+   * An opaque fingerprint of where a provider is reached now (its address,
+   * or the Azure OpenAI resource and deployment). A model fit review takes it
+   * when it opens; the host refuses the send or run if it changed since.
+   */
+  getProviderDestination?(providerId: ProviderId): Promise<string>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
@@ -3544,6 +3704,25 @@ export interface OpenAdminOSApi {
   getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
   clearIntuneChatHistory(): Promise<LocalDataSummary>;
   clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  /** Reset OpenAdminOS: what the dialog shows. */
+  getLocalResetInfo?(): Promise<LocalResetInfo>;
+  /**
+   * Reset OpenAdminOS: checks the typed phrase, closes every organization to
+   * new work, turns off background work and restarts the app, which empties
+   * the data folder, token caches included, before anything else runs. The
+   * sign-ins stay in the token caches until that launch. Rejects, with
+   * nothing removed, when the reset cannot start.
+   */
+  resetOpenAdminOS?(confirmation: string): Promise<void>;
+  /** The outcome of a reset that ran at this launch, until it is dismissed. */
+  getLocalResetReport?(): Promise<LocalResetReport | null>;
+  dismissLocalResetReport?(): Promise<void>;
+  /** Reset did not finish: restart and try the remaining items again. */
+  retryLocalReset?(): Promise<void>;
+  /** Reset did not finish: open the data folder in Finder or Explorer. */
+  showLocalResetDataFolder?(): Promise<void>;
+  /** Reset did not finish: quit without opening the app. */
+  quitAfterIncompleteReset?(): Promise<void>;
   getRunHistoryRetentionSettings(): Promise<RunHistoryRetentionSettings>;
   setRunHistoryRetentionSettings(
     input: SetRunHistoryRetentionSettingsInput,
@@ -4490,6 +4669,13 @@ export interface LlmOptions {
    * stops. Providers should abort network/process work promptly when set.
    */
   signal?: AbortSignal;
+  /**
+   * Set by agent runs, which check the size before sending: a provider that
+   * learns a context limit the request exceeds (for example a Modelfile pin
+   * the run's own lookup missed) refuses with a ContextTooSmallError instead
+   * of sending. Chat leaves it unset, so a provider may raise its context.
+   */
+  enforceContextWindow?: boolean;
 }
 
 export interface LlmTokenUsage {
@@ -4538,6 +4724,17 @@ export interface RunLlmApi {
    */
   complete(options: LlmOptions): Promise<LlmCompletion>;
   stream(options: LlmOptions): AsyncIterable<LlmStreamChunk>;
+  /**
+   * The context window in tokens that a request to `model` gets, when the
+   * provider can report it. `undefined` means unknown, and callers then send
+   * the request without a size check. Hosted providers leave this out.
+   */
+  contextWindow?(model?: string): Promise<number | undefined>;
+  /**
+   * Text this adapter appends to every system prompt, after a blank line
+   * (for example approved self-training instructions). Size checks count it.
+   */
+  readonly systemSuffix?: string;
 }
 
 export type SandboxBrokerRequest =

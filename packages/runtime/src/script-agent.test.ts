@@ -17,6 +17,7 @@ import { describe, it } from "node:test";
 
 import {
   ConnectorScopeError,
+  ContextTooSmallError,
   GraphAccessDeniedError,
   graphAccessDenialFromError,
   type RunContext,
@@ -29,7 +30,9 @@ import {
   parseAgentTemplate,
 } from "./agent-template.js";
 import { reasoningWithoutAnswerInChain } from "./llm-ollama.js";
-import { scriptAgentTemplateToModule } from "./script-agent.js";
+import { endedOnSizeRefusal, scriptAgentTemplateToModule } from "./script-agent.js";
+import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
+
 /**
  * Stderr as Node writes it for an uncaught exception with this header and
  * message, and the exit record the run's hook writes for it.
@@ -38,8 +41,6 @@ const uncaught = (input: SandboxRunInput, text: string) => {
   writeFileSync(input.env!.OPENADMINOS_EXIT_RECORD!, JSON.stringify({ message: text.replace(/^[A-Za-z]*Error: /, "") }));
   return `file:///agent.mjs:1\nthrow error;\n^\n\n${text}\n    at main (file:///agent.mjs:1:1)\n\nNode.js v22.0.0`;
 };
-
-import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
 
 describe("script-backed MXC agents", () => {
   it("runs a read agent through the sandbox runner and host broker", async () => {
@@ -246,6 +247,145 @@ definition:
       assert.ok(error instanceof Error);
       assert.equal(graphAccessDenialFromError(error)?.cause, testCase.cause, JSON.stringify({ ...testCase, denials: undefined }));
     }
+  });
+
+  it("fails a script whose model request did not fit with the typed reason", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-fit-"));
+    const agentDir = path.join(tempRoot, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(0);\n");
+    const failure = { code: "context-too-small" as const, promptTokens: 20_000, answerTokens: 100, neededTokens: 20_100, limitTokens: 16_384, model: "test-model" };
+    let brokerAnswer: SandboxBrokerResponse | undefined;
+    const runner: SandboxRunner = {
+      id: "mxc",
+      probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+      run: async (input) => {
+        brokerAnswer = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, {
+          id: "llm-1", method: "llm.complete", params: { prompt: "Summarize.", maxTokens: 100 },
+        } satisfies SandboxBrokerRequest);
+        // The script does not handle the refusal and exits with its message.
+        const message = brokerAnswer && !brokerAnswer.ok ? brokerAnswer.error.message : "";
+        return { exitCode: 1, signal: null, stdout: "", stderr: `Error: ${message}\n    at main (agent.mjs:1:1)` };
+      },
+    };
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => { throw new ContextTooSmallError(failure); } };
+    const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+    await assert.rejects(() => module.run(ctx), (error: unknown) => {
+      assert.ok(error instanceof ContextTooSmallError);
+      assert.deepEqual(error.failure, failure);
+      return true;
+    });
+    assert.equal(brokerAnswer?.ok, false);
+    assert.equal(brokerAnswer && !brokerAnswer.ok ? brokerAnswer.error.code : undefined, "context-too-small");
+    assert.deepEqual(brokerAnswer && !brokerAnswer.ok ? brokerAnswer.error.detail : undefined, failure);
+  });
+
+  it("does not blame a recovered size refusal for a later failure", async () => {
+    const { createSandboxBroker } = await import("./sandbox-broker.js");
+    const failure = { code: "context-too-small" as const, promptTokens: 2, answerTokens: 1, neededTokens: 3, limitTokens: 2 };
+    let calls = 0;
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => {
+      calls += 1;
+      if (calls === 1) throw new ContextTooSmallError(failure);
+      return { text: "ok", model: "test-model" };
+    } };
+    const broker = createSandboxBroker({ agent: { slug: "script-auditor", mode: "read", scopes: [], graphOperations: [], connectors: [] }, ctx });
+    await broker.handle({ id: "a", method: "llm.complete", params: { prompt: "big" } });
+    assert.deepEqual(broker.getContextFailure(), failure);
+    await broker.handle({ id: "b", method: "llm.complete", params: { prompt: "small" } });
+    assert.equal(broker.getContextFailure(), undefined);
+    calls = 0;
+    const refused = await broker.handle({ id: "c", method: "llm.complete", params: { prompt: "big again" } });
+    assert.equal(refused.ok, false);
+    assert.deepEqual(broker.getContextFailure(), failure);
+    const denied = await broker.handle({ id: "d", method: "graph.request", params: { method: "GET", path: "/not/declared" } });
+    assert.equal(denied.ok, false);
+    assert.equal(broker.getContextFailure(), undefined);
+  });
+
+  it("keeps a script's own error when it caught a size refusal and failed later", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-caught-"));
+    const agentDir = path.join(tempRoot, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(0);\n");
+    const failure = { code: "context-too-small" as const, promptTokens: 2, answerTokens: 1, neededTokens: 3, limitTokens: 2 };
+    const runner: SandboxRunner = {
+      id: "mxc",
+      probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+      run: async (input) => {
+        await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "big" } } satisfies SandboxBrokerRequest);
+        return { exitCode: 1, signal: null, stdout: "", stderr: "TypeError: Cannot read properties of undefined (reading 'value')" };
+      },
+    };
+    const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+    const ctx = fakeRunContext();
+    ctx.llm = { ...ctx.llm, complete: async () => { throw new ContextTooSmallError(failure); } };
+    const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+    await assert.rejects(() => module.run(ctx), (error: unknown) => {
+      assert.equal(error instanceof ContextTooSmallError, false);
+      assert.match((error as Error).message, /TypeError/);
+      return true;
+    });
+  });
+
+  it("reads only the error the script ended on", () => {
+    const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
+    assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
+    assert.equal(endedOnSizeRefusal(`${refusal}\nfalling back to local counts\nTypeError: Cannot read properties of undefined (reading 'value')\n    at main (agent.mjs:9:1)`), false);
+    assert.equal(endedOnSizeRefusal("TypeError: x is not a function"), false);
+    // Node's output for an uncaught throw: the source line, a caret, then what was thrown.
+    const thrown = (value: string) => `file:///work/agent.mjs:9\n  throw ${value};\n  ^\n\n${value}\n(Use \`node --trace-uncaught ...\` to show where the exception was thrown)`;
+    assert.equal(endedOnSizeRefusal(`${refusal}\n${thrown("fallback failed")}`), false, "a string thrown after a logged refusal");
+    assert.equal(endedOnSizeRefusal(`file:///work/agent.mjs:4\n  const llm = await brokerRequest(...);\n  ^\n\n${refusal}\n    at main (agent.mjs:4:1)`), true);
   });
 
   it("keeps a brokered model reply with reasoning and no answer the script exited on as the cause", async () => {

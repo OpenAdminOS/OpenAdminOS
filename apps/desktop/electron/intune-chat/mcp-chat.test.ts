@@ -679,6 +679,90 @@ const fetchTool: McpChatTool = {
 const callFetch = JSON.stringify({ tool: fetchTool.name, params: { url: "https://learn.microsoft.com/x" } });
 
 describe("The MCP query writer boundary", () => {
+  it("does not run the query writer when the compact budget has no call left for it", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const cacheRead = JSON.stringify({ tool: "list_cached_resources", params: {} });
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([cacheRead, cacheRead, cacheRead, callDocs("intune compliance grace period")], prompts, writerPrompts, ["not json"]), mcpContext(calls)),
+        budget: "compact",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(prompts.length, 4);
+      assert.equal(writerPrompts.length, 0, "the fourth reply's MCP call would have been the fifth model call");
+    });
+  });
+
+  it("counts a failed query writer call against a local model's compact budget", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      // The answering model asks for the docs tool every turn; the writer never returns usable params.
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period")], prompts, writerPrompts, ["not json"]), mcpContext(calls)),
+        budget: "compact",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(calls.length, 0, "nothing was sent");
+      // Answering calls and failed writer calls together stay within four model calls.
+      assert.ok(prompts.length + writerPrompts.length <= 4, `${prompts.length} answering and ${writerPrompts.length} writer calls`);
+    });
+  });
+
+  it("counts a writer call whose request failed at the host, after it was sent, against the compact budget", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const failing: McpChatContext = { ...mcpContext(calls), async call(tool, args) { calls.push({ tool: tool.tool, args }); throw new Error("The server returned HTTP 503."); } };
+      // The writer always produces a valid query; the host fails every request after it was sent.
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period")], prompts, writerPrompts), failing),
+        budget: "compact",
+      });
+      assert.equal(result.ok, false);
+      assert.ok(calls.length > 0, "the query was sent");
+      assert.ok(prompts.length + writerPrompts.length <= 4, `${prompts.length} answering and ${writerPrompts.length} writer calls`);
+    });
+  });
+
+  it("keeps answered lookups and the answer within four model calls, and leaves the last call for the answer", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const answered = JSON.stringify({ results: [{ title: "Compliance policies", contentUrl: "https://learn.microsoft.com/intune/protect/device-compliance-get-started", content: "Grace period." }] });
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period"), callDocs("intune compliance grace period settings"), '{"final":true,"answer":"Grace period keeps devices compliant for the configured days [1]."}'], prompts, writerPrompts), mcpContext(calls, answered)),
+        budget: "compact",
+        questionKind: "docs",
+      });
+      assert.equal(result.ok, true, "the second lookup is skipped so the last call writes the answer");
+      assert.equal(writerPrompts.length, 1);
+      assert.equal(prompts.length + writerPrompts.length, 4);
+      assert.match(prompts.at(-1)!.prompt, /No model call is left for another lookup/);
+    });
+  });
+
+  it("falls back within four model calls when answered lookups are followed by malformed replies", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const answered = JSON.stringify({ results: [{ title: "Compliance policies", contentUrl: "https://learn.microsoft.com/intune/protect/device-compliance-get-started", content: "Grace period." }] });
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("intune compliance grace period"), callDocs("intune grace period settings"), '```json\n{"tool": "query_ca\n```', '```json\n{"tool": "query_ca\n```'], prompts, writerPrompts), mcpContext(calls, answered)),
+        budget: "compact",
+        questionKind: "docs",
+      });
+      assert.equal(result.ok, false);
+      assert.ok(prompts.length + writerPrompts.length <= 4, `${prompts.length} answering and ${writerPrompts.length} writer calls`);
+    });
+  });
+
   it("tells the answering model the query is written from the current question only", async () => {
     await withStore(async (store) => {
       const prompts: Array<{ system?: string; prompt: string }> = [];
@@ -911,6 +995,18 @@ describe("The MCP query writer boundary", () => {
         assert.deepEqual(outcomes, ["tool", "excerpts", "tool", "final"]);
         assert.match(prompts[2]!.prompt, READ_FIRST);
         assert.match(prompts[0]!.system!, /request that tool for the best match before you answer/);
+      });
+    });
+
+    it("keeps the cited answer on the compact budget when the full read does not fit, and says it rests on excerpts", async () => {
+      await withStore(async (store) => {
+        const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+        const prompts: Array<{ system?: string; prompt: string }> = [];
+        const result = await run(store, "how do I upload my first app?", [callSearch, final, callArticle, final], calls, prompts, { budget: "compact" });
+        assert.equal(result.ok, true);
+        if (result.ok) assert.equal(result.answer, "Open Catalog, then Add Package [1].\n\nThis answer is based on search excerpts; the full article was not read.");
+        assert.deepEqual(calls.map((call) => call.tool), ["search_articles"]);
+        assert.equal(prompts.length, 2, "the search request and the answer; the writer call makes three");
       });
     });
 

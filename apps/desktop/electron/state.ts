@@ -44,6 +44,7 @@ import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
   auditGraphWritesFetch,
+  appVersionSatisfies,
   compareSemver,
   createGraphAdapter,
   type GraphWriteAuditSink,
@@ -55,6 +56,8 @@ import {
   createAppleFoundationLlm,
   createLmStudioLlm,
   createLemonadeLlm,
+  classifyLemonadeEndpoint,
+  resolveLemonadeEndpoint,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
   GRAPH_DEFAULT_SCOPE,
@@ -277,6 +280,8 @@ import {
 import {
   WHATSAPP_WEB_CONNECTOR_ID,
   getWhatsAppWebClient,
+  resumeWhatsAppWebClients,
+  stopAllWhatsAppWebClients,
   type WhatsAppWebClient,
 } from "@openadminos/connector-whatsapp-web";
 
@@ -363,7 +368,9 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
+import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
+import { LOCAL_RESET_MARKER_FILES } from "./local-reset.js";
+import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -403,6 +410,7 @@ import {
   checkLmStudio,
   checkOllama,
   isProviderId,
+  ollamaModelIsOnDevice,
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
@@ -1782,6 +1790,8 @@ function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes:
 
 /** How long Disconnect waits for an organization's work to stop before cleanup goes on. */
 const TENANT_DRAIN_MS = 15_000;
+/** A documentation index download stops after this long, so a stalled one ends. */
+const INDEX_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
 function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -1790,6 +1800,8 @@ function errorText(cause: unknown): string {
 /** What a model build is bound to: where a provider is reached, as novaProviderEndpoint reads it. */
 export interface ProviderEndpointBinding {
   endpoint: string | undefined;
+  /** A model fit binding also covers Lemonade's address (modelFitProviderEndpoint); a Nova binding keeps its own scope. */
+  scope?: "model-fit";
 }
 
 /** A bound model build found its provider configured for another endpoint; nothing was sent. */
@@ -1817,6 +1829,33 @@ function novaProviderEndpoint(providerId: ProviderId, persisted?: Pick<Persisted
     return azure ? `${azure.endpoint.trim().replace(/\/$/, "")}#${azure.deployment.trim()}` : "azure-openai:unset";
   }
   return undefined;
+}
+
+/**
+ * Where a provider is reached, for a model fit binding: Nova's endpoint plus
+ * Lemonade's address, which can be set outside this device and so makes it a
+ * hosted choice. Nova follow-ups keep novaProviderEndpoint, so their saved
+ * bindings do not change meaning.
+ */
+function modelFitProviderEndpoint(providerId: ProviderId, persisted?: Pick<PersistedState, "providerConfigs">): string | undefined {
+  if (providerId === "lemonade") return resolveLemonadeEndpoint().replace(/\/$/, "");
+  return novaProviderEndpoint(providerId, persisted);
+}
+
+/**
+ * A model fit retry on a model on this device is sent only after a fresh
+ * check that it runs here. Ollama can list remote-backed models next to local
+ * ones, so it is read again; LM Studio serves loaded model files, Lemonade
+ * reads its list on every request and refuses cloud models, and Apple
+ * Foundation runs only on this Mac.
+ */
+// LM Studio and Lemonade are checked on the address they are reached at now,
+// so a change to one outside this device stops the next call too.
+async function verifyOnDeviceModel(providerId: ProviderId, model: string | undefined): Promise<boolean> {
+  if (providerId === "ollama") return model ? ollamaModelIsOnDevice(model) : false;
+  if (providerId === "lm-studio") return classifyLmStudioEndpoint(resolveLmStudioEndpoint()).isLocal;
+  if (providerId === "lemonade") return classifyLemonadeEndpoint(resolveLemonadeEndpoint()).isLocal;
+  return providerId === "apple-foundation";
 }
 
 export class AppStateStore {
@@ -1946,8 +1985,9 @@ export class AppStateStore {
   constructor(options: AppStateStoreOptions | string, legacyTokenStore?: TokenCacheStorage) {
     if (typeof options === "string") {
       this.filePath = options;
-      this.tokenStore =
-        legacyTokenStore ?? new SafeStorageTokenCacheStore(`${options}.tokens.bin`);
+      this.tokenStore = this.heldAfterLocalReset(
+        legacyTokenStore ?? new SafeStorageTokenCacheStore(`${options}.tokens.bin`),
+      );
       this.openBrowser = async () => undefined;
       this.userAgentsDir = undefined;
       this.onRunFinished = undefined;
@@ -1977,7 +2017,7 @@ export class AppStateStore {
       this.auditLog = new AuditLogStore(":memory:");
     } else {
       this.filePath = options.filePath;
-      this.tokenStore = options.tokenStore;
+      this.tokenStore = this.heldAfterLocalReset(options.tokenStore);
       this.openBrowser = options.openBrowser ?? (async () => undefined);
       this.userAgentsDir = options.userAgentsDir;
       this.onRunFinished = options.onRunFinished;
@@ -1986,8 +2026,11 @@ export class AppStateStore {
         typeof options.statsApiUrl === "string"
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
-      this.tokenStoreFor = options.tokenStoreFor;
-      this.legacyTokenStoresFor = options.legacyTokenStoresFor;
+      const tokenStoreFor = options.tokenStoreFor;
+      const legacyTokenStoresFor = options.legacyTokenStoresFor;
+      this.tokenStoreFor = tokenStoreFor && ((partition) => this.heldAfterLocalReset(tokenStoreFor(partition)));
+      this.legacyTokenStoresFor =
+        legacyTokenStoresFor && ((partition) => legacyTokenStoresFor(partition).map((store) => this.heldAfterLocalReset(store)));
       // No default: usage telemetry stays inert until a collector URL is
       // configured for the build AND the user opts in. // TODO(ugur):
       // decide where the usage collector is hosted and set it here.
@@ -2073,6 +2116,8 @@ export class AppStateStore {
       resolveTenant: (persisted, tenantId) =>
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
+      verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      providerTarget: (providerId) => host.providerTarget(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes) =>
@@ -2157,9 +2202,11 @@ export class AppStateStore {
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
+      verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      providerTarget: (providerId) => host.providerTarget(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
-      buildLlm: (providerId, model) => host.buildLlm(providerId, model),
+      buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
@@ -2189,8 +2236,15 @@ export class AppStateStore {
       },
       executeReadTool: (tenantId, name, input) =>
         this.chatService.executeReadTool(tenantId, name, input),
-      queueExternalProposal: (input) =>
-        this.runService.startExternalProposalRun(input),
+      queueExternalProposal: async (input) => {
+        if (this.localResetStarted) throw new LocalResetInProgressError();
+        this.localResetWorkInFlight += 1;
+        try {
+          return await this.runService.startExternalProposalRun(input);
+        } finally {
+          this.localResetWorkInFlight -= 1;
+        }
+      },
       getRun: (runId) => this.runService.getRun(runId),
       recordAudit: (event) =>
         this.appendAuditEvents([{
@@ -2342,6 +2396,210 @@ export class AppStateStore {
     this.intelligenceStore?.close();
     this.novaStoresInstance?.db.close();
     this.auditLog.close();
+  }
+
+  /** Set once Reset OpenAdminOS has started: no confirmed change starts before the restart. */
+  private localResetStarted = false;
+  /** Confirmations accepted but not yet recorded as an applying run. */
+  private confirmationsInFlight = 0;
+  /** Run starts, Nova sends and report delivery passes under way. */
+  private localResetWorkInFlight = 0;
+
+  /**
+   * Checks that no confirmed change is applying and, when none is, stops new
+   * confirmations until the restart. Undo with `cancelLocalReset` when the
+   * reset does not go ahead.
+   */
+  async beginLocalReset(): Promise<string | undefined> {
+    // Set first, so no confirmation starts while the runs are read; one that
+    // already started is counted and waited for by the admin, not cut off.
+    this.localResetStarted = true;
+    const blocker = this.confirmationsInFlight > 0
+      ? "A change is being confirmed. Wait for it to finish, then reset. Nothing was removed."
+      : this.localResetWorkInFlight > 0
+        ? "A run is starting, or a message, report, download or connection is still under way. Wait for it to finish, then reset. Nothing was removed."
+        : (await this.localResetBlocker()) ?? (await this.localResetRunningBlocker());
+    if (blocker) this.localResetStarted = false;
+    return blocker;
+  }
+
+  cancelLocalReset(): void {
+    this.localResetStarted = false;
+    this.localResetCommitted = false;
+    this.auditLog.unfreezeSideFiles();
+    unsealDataFolder();
+    resumeWhatsAppWebClients();
+    // A request refused after its checks (the marker could not be written)
+    // gives every organization its work back, as an undone Disconnect does.
+    if (this.localResetClosedTenants.length > 0) {
+      for (const id of this.localResetClosedTenants) this.tenantLifecycle.abortClose(id);
+      this.localResetClosedTenants = [];
+    }
+  }
+
+  /**
+   * Reset OpenAdminOS waits while a confirmed change is being applied, so a
+   * restart never cuts an apply off halfway.
+   */
+  async localResetBlocker(): Promise<string | undefined> {
+    const persisted = await this.read();
+    const applying = persisted.runs.find((run) => run.status === "running" && run.confirmedAt);
+    if (!applying) {
+      // A cancelled apply can still be settling a request it already sent,
+      // and a disconnected organization's apply can outlive its record.
+      return this.runService.hasActiveApply()
+        ? "A confirmed change is still finishing. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed."
+        : undefined;
+    }
+    const name = persisted.installedAgents.find((agent) => agent.slug === applying.agentSlug)?.name ?? "A write run";
+    return `${name} is applying a confirmed change. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed.`;
+  }
+
+  /**
+   * Any run still going, read-only ones included: a run can send through a
+   * connector (a Teams post, for example) after its own approval, and a
+   * restart would leave unknown whether that send arrived.
+   */
+  async localResetRunningBlocker(): Promise<string | undefined> {
+    const persisted = await this.read();
+    const running = persisted.runs.find((run) => run.status === "running" || run.status === "queued");
+    if (!running) {
+      // A cancelled run, or one whose organization was disconnected, can
+      // still be finishing a send it already made.
+      return this.runService.hasActiveDrive()
+        ? "A run is still finishing. Wait a moment, then reset. Nothing was removed."
+        : undefined;
+    }
+    const name = persisted.installedAgents.find((agent) => agent.slug === running.agentSlug)?.name ?? "A run";
+    return `${name} is still running. Wait for it to finish, or cancel it in Runs, then reset. Nothing was removed.`;
+  }
+
+  /**
+   * Reset OpenAdminOS, once its marker is written: every organization stops
+   * taking new work, the way Disconnect closes one. Work already running
+   * gets its signal; the shutdown before the restart waits for it.
+   */
+  /**
+   * The reset's marker is in place (called right after its rename): from
+   * here no state write reaches the file, since the folder at the data path
+   * may no longer be the one the marker was written to, and an atomic write
+   * would put this process's state over whatever is there now.
+   */
+  markLocalResetCommitted(): void {
+    this.localResetCommitted = true;
+    this.auditLog.freezeSideFiles();
+    // The work that writes on its own stops first, so a guard that failed
+    // to install would still leave nothing running.
+    for (const download of this.indexDownloads) download.abort();
+    // WhatsApp Web clients write and delete their auth files by path on
+    // their own (credential and key updates, a logged out session, a QR
+    // refresh): every client of the process stops now, also one a delivery
+    // created, and none opens a socket again.
+    stopAllWhatsAppWebClients();
+    this.whatsappWebClientInstance?.dispose();
+    // The known writers skip quietly, and every other change by path inside
+    // the data folder through Node's file system API is refused.
+    sealDataFolder(this.userDataPath, { allowNames: LOCAL_RESET_MARKER_FILES });
+  }
+
+  /**
+   * Work that reaches a network service and then writes files in the data
+   * folder by path (WhatsApp Web and Splashtop credentials, the registry
+   * cache, agent manifests, the documentation index): refused once a reset
+   * has started, and while it runs the reset waits for it, as for a
+   * connector send.
+   */
+  private async localResetGatedWork<T>(work: () => Promise<T>): Promise<T> {
+    if (this.localResetStarted) {
+      throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was changed.");
+    }
+    this.localResetWorkInFlight += 1;
+    try {
+      return await work();
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
+  }
+
+  async closeAllTenantWork(): Promise<void> {
+    this.markLocalResetCommitted();
+    for (const tenantId of this.localResetTenantIds()) {
+      if (this.tenantLifecycle.phase(tenantId) !== "open") continue;
+      this.tenantLifecycle.close(tenantId);
+      this.localResetClosedTenants.push(tenantId);
+    }
+  }
+
+  /**
+   * The organizations a reset closes and drains, from the state this process
+   * last read or wrote, never from the file, so closing them does not touch
+   * the data folder. The checks before the marker read the state, so the
+   * snapshot holds them all.
+   */
+  private localResetTenantIds(): string[] {
+    return (this.lastReadSnapshot?.tenants ?? []).map((tenant) => tenant.id);
+  }
+
+  /**
+   * A token cache that, once the reset is committed, is neither written nor
+   * cleared nor read from disk: the files are written and deleted by path,
+   * and the folder at that path may no longer be the one being reset. A
+   * Microsoft sign-in refresh that was waiting on the network when the
+   * reset started therefore never writes or deletes a cache afterwards (a
+   * read that cannot decrypt would otherwise delete the file).
+   */
+  private heldAfterLocalReset(store: TokenCacheStorage): TokenCacheStorage {
+    return {
+      read: async () => (this.localResetCommitted ? "" : store.read()),
+      write: async (serialized) => {
+        if (this.localResetCommitted) {
+          throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+        }
+        return store.write(serialized);
+      },
+      ...(store.clear
+        ? {
+            clear: async () => {
+              if (!this.localResetCommitted) await store.clear!();
+            },
+          }
+        : {}),
+    };
+  }
+
+  /** Set once the reset's marker is written; every state write is refused from then on. */
+  private localResetCommitted = false;
+
+  /** Organizations a reset request closed, so a refused request can reopen them. */
+  private localResetClosedTenants: string[] = [];
+
+  /**
+   * Stops background services and closes the databases before a restart,
+   * waiting at most `boundMs` for leased work, the gateway and MCP servers,
+   * so the next launch can delete the files.
+   */
+  async shutdown(boundMs: number): Promise<void> {
+    this.whatsappWebClientInstance?.dispose();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const tenantIds = this.localResetTenantIds();
+      await Promise.race([
+        Promise.allSettled([
+          this.gatewayService.stop(),
+          this.mcpHost.closeAll(),
+          // Leased work of every organization (sends, deliveries, runs) settles first.
+          ...tenantIds.map((id) => this.tenantLifecycle.drain(id, boundMs)),
+        ]),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, boundMs); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    // The SQLite databases are not closed: closing checkpoints the
+    // write-ahead log and deletes it by path, which could reach a profile
+    // restored at the data path meanwhile. The process exits next, which
+    // releases the handles without touching any file, and the launch that
+    // finishes the reset removes the databases and their side files.
   }
 
   private agentUpdatesRoot(): string | undefined {
@@ -2596,17 +2854,21 @@ export class AppStateStore {
   }
 
   async connectSplashtop(input: ConnectSplashtopInput): Promise<SplashtopConnectionSummary> {
-    this.requireActiveOrganization(await this.read(), input.organizationId);
-    return this.splashtop.connect(input);
+    return this.localResetGatedWork(async () => {
+      this.requireActiveOrganization(await this.read(), input.organizationId);
+      return this.splashtop.connect(input);
+    });
   }
 
   async testSplashtop(organizationId: string): Promise<SplashtopConnectionSummary> {
-    return this.splashtop.test(organizationId);
+    return this.localResetGatedWork(() => this.splashtop.test(organizationId));
   }
 
   async rotateSplashtopToken(input: RotateSplashtopTokenInput): Promise<SplashtopConnectionSummary> {
-    this.requireActiveOrganization(await this.read(), input.organizationId);
-    return this.splashtop.rotate(input);
+    return this.localResetGatedWork(async () => {
+      this.requireActiveOrganization(await this.read(), input.organizationId);
+      return this.splashtop.rotate(input);
+    });
   }
 
   /**
@@ -2615,6 +2877,10 @@ export class AppStateStore {
    * runs, no new apply can pick up the token.
    */
   async disconnectSplashtop(organizationId: string): Promise<void> {
+    return this.localResetGatedWork(() => this.disconnectSplashtopNow(organizationId));
+  }
+
+  private async disconnectSplashtopNow(organizationId: string): Promise<void> {
     this.splashtopDisconnecting.set(organizationId, (this.splashtopDisconnecting.get(organizationId) ?? 0) + 1);
     try {
       await this.runService.stopSplashtopApplies(
@@ -2642,6 +2908,8 @@ export class AppStateStore {
    * it at the typed confirmation gate. Nothing is applied here.
    */
   async prepareSplashtopChange(input: PrepareSplashtopChangeInput): Promise<RunRecord> {
+    // Before any Splashtop read, and again before the plan is saved.
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     const persisted = await this.read();
     this.requireActiveOrganization(persisted, input.organizationId);
     const request = validateSplashtopChangeRequest(input);
@@ -2652,6 +2920,7 @@ export class AppStateStore {
       { api: binding.api, teamId: binding.record.teamId, teamLabel: SplashtopService.teamLabel(binding) },
       request,
     );
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     return this.runService.startSplashtopChangeRun({
       tenantId,
       organizationId: binding.organization.id,
@@ -2924,6 +3193,31 @@ export class AppStateStore {
     sourceDir?: string;
     baseUrl?: string;
   }): Promise<RetrievalStatus> {
+    // Refused once a reset has started, but not counted: a download of a few
+    // hundred megabytes must not hold a reset back. The commit aborts it, and
+    // the sealed data folder refuses whatever it would still write.
+    if (this.localResetStarted) {
+      throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was changed.");
+    }
+    const controller = new AbortController();
+    this.indexDownloads.add(controller);
+    try {
+      return await this.installRetrievalIndexNow(input, AbortSignal.any([controller.signal, AbortSignal.timeout(INDEX_DOWNLOAD_TIMEOUT_MS)]));
+    } finally {
+      this.indexDownloads.delete(controller);
+    }
+  }
+
+  /** Documentation index downloads under way, so the reset commit can stop them. */
+  private readonly indexDownloads = new Set<AbortController>();
+
+  private async installRetrievalIndexNow(
+    input: {
+      sourceDir?: string;
+      baseUrl?: string;
+    },
+    signal: AbortSignal,
+  ): Promise<RetrievalStatus> {
     if (!this.userDataPath) {
       throw new Error("Installing a documentation index needs a configured userData directory.");
     }
@@ -2936,6 +3230,7 @@ export class AppStateStore {
       await downloadIndex({
         baseUrl: input.baseUrl ?? DEFAULT_INDEX_BASE_URL,
         targetDir,
+        signal,
       });
     }
     this.retrievalIndexInstance?.reset();
@@ -3166,6 +3461,10 @@ export class AppStateStore {
    * Safe to call multiple times (e.g., on manual refresh).
    */
   async initRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+    return this.localResetGatedWork(() => this.initRegistryNow());
+  }
+
+  private async initRegistryNow(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     if (!this.userDataPath) {
       // No userData path, fall back to filesystem only (tests / legacy ctor).
       return { error: null, fromCache: false, cachedAt: null };
@@ -4708,7 +5007,10 @@ export class AppStateStore {
   }
 
   async startBaselineRollback(input: StartBaselineRollbackInput): Promise<RunRecord> {
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     const built = await this.driftService.buildBaselineRollbackPlan(input);
+    // A reset may have started while the plan was built.
+    if (this.localResetStarted) throw new LocalResetInProgressError();
     return this.runService.startRollbackRun({
       tenantId: built.tenantId,
       baselineId: built.baselineId,
@@ -5084,17 +5386,17 @@ export class AppStateStore {
   }
 
   async approveSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion> {
-    return this.chatService.approveSelfTrainingSuggestion(id);
+    return this.localResetGatedWork(() => this.chatService.approveSelfTrainingSuggestion(id));
   }
 
   async rejectSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion> {
-    return this.chatService.rejectSelfTrainingSuggestion(id);
+    return this.localResetGatedWork(() => this.chatService.rejectSelfTrainingSuggestion(id));
   }
 
   async resetSelfTrainingSuggestions(
     input: ResetSelfTrainingInput,
   ): Promise<SelfTrainingSuggestion[]> {
-    return this.chatService.resetSelfTrainingSuggestions(input);
+    return this.localResetGatedWork(() => this.chatService.resetSelfTrainingSuggestions(input));
   }
 
   async listWorkspaces(tenantId?: string): Promise<WorkspaceSummary[]> {
@@ -5610,6 +5912,18 @@ export class AppStateStore {
 
   /** Called only after Nova consumes a one-use, session-scoped visual approval. */
   async sendNovaConnector(input: Parameters<import("./nova-actions.js").NovaActionHost["send"]>[0]): Promise<unknown> {
+    // Once Reset OpenAdminOS has started nothing more is sent; a send under
+    // way holds the reset until it has its answer.
+    if (this.localResetStarted) throw new Error("OpenAdminOS is resetting. Nothing more was sent.");
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.sendNovaConnectorNow(input);
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
+  }
+
+  private async sendNovaConnectorNow(input: Parameters<import("./nova-actions.js").NovaActionHost["send"]>[0]): Promise<unknown> {
     const persisted = await this.read();
     input.signal.throwIfAborted();
     if (persisted.activeTenantId !== input.tenantId) throw new Error("Tenant changed. Prepare the message again.");
@@ -5680,35 +5994,51 @@ export class AppStateStore {
   }
 
   async getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> {
-    return this.whatsAppWebClient().restoreSession(1_500);
+    return this.localResetGatedWork(() => this.whatsAppWebClient().restoreSession(1_500));
   }
 
   async startWhatsAppWebLogin(): Promise<WhatsAppWebStatus> {
-    const status = await this.whatsAppWebClient().startLogin();
-    await this.persistConnectorTestStatus(
-      WHATSAPP_WEB_CONNECTOR_ID,
-      whatsappWebStatusToConnectorStatus(status),
-      status.message,
-    );
-    return status;
+    return this.localResetGatedWork(async () => {
+      const status = await this.whatsAppWebClient().startLogin();
+      await this.persistConnectorTestStatus(
+        WHATSAPP_WEB_CONNECTOR_ID,
+        whatsappWebStatusToConnectorStatus(status),
+        status.message,
+      );
+      return status;
+    });
   }
 
   async disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
-    const status = await this.whatsAppWebClient().disconnect();
-    await this.persistConnectorTestStatus(
-      WHATSAPP_WEB_CONNECTOR_ID,
-      whatsappWebStatusToConnectorStatus(status),
-      status.message,
-    );
-    await this.clearWhatsAppTargetsAfterDisconnect();
-    return status;
+    return this.localResetGatedWork(async () => {
+      const status = await this.whatsAppWebClient().disconnect();
+      await this.persistConnectorTestStatus(
+        WHATSAPP_WEB_CONNECTOR_ID,
+        whatsappWebStatusToConnectorStatus(status),
+        status.message,
+      );
+      await this.clearWhatsAppTargetsAfterDisconnect();
+      return status;
+    });
   }
 
   async listWhatsAppWebGroups(): Promise<WhatsAppWebGroupRef[]> {
-    return this.whatsAppWebClient().listGroups();
+    return this.localResetGatedWork(() => this.whatsAppWebClient().listGroups());
   }
 
   async sendWhatsAppWebTestMessage(to: string): Promise<WhatsAppWebSendResult> {
+    // Like every connector send: refused once a reset has started, and a
+    // send under way holds the reset until it has its answer.
+    if (this.localResetStarted) throw new Error("OpenAdminOS is resetting. Nothing was sent.");
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.sendWhatsAppWebTestMessageNow(to);
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
+  }
+
+  private async sendWhatsAppWebTestMessageNow(to: string): Promise<WhatsAppWebSendResult> {
     const result = await this.whatsAppWebClient().sendMessage({
       to,
       text: `OpenAdminOS test notification\n\nSent ${new Date().toISOString()}.`,
@@ -6337,6 +6667,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * agent (the user gets a clear error and can rename their draft).
    */
   async saveAgentDraft(yamlSource: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.saveAgentDraftNow(yamlSource));
+  }
+
+  private async saveAgentDraftNow(yamlSource: string): Promise<AppState> {
     if (typeof yamlSource !== "string" || yamlSource.trim().length === 0) {
       throw new Error("saveAgentDraft: yamlSource must be a non-empty string.");
     }
@@ -6367,6 +6701,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async updateUserAgentDraft(slug: string, yamlSource: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.updateUserAgentDraftNow(slug, yamlSource));
+  }
+
+  private async updateUserAgentDraftNow(slug: string, yamlSource: string): Promise<AppState> {
     if (!this.userAgentsDir) {
       throw new Error("updateUserAgentDraft: user-agents directory is not configured.");
     }
@@ -6578,6 +6916,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async uninstallAgent(slug: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.uninstallAgentNow(slug));
+  }
+
+  private async uninstallAgentNow(slug: string): Promise<AppState> {
     let userAuthoredDir: string | undefined;
     let downloadedManifestDir: string | undefined;
 
@@ -6613,14 +6955,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
     });
 
-    if (userAuthoredDir) {
+    if (userAuthoredDir && !dataFolderSealed()) {
       try {
         await rm(userAuthoredDir, { recursive: true, force: true });
       } catch (error) {
         console.error("[uninstall] failed to remove user-authored dir", error);
       }
     }
-    if (downloadedManifestDir) {
+    if (downloadedManifestDir && !dataFolderSealed()) {
       try {
         await rm(downloadedManifestDir, { recursive: true, force: true });
       } catch (error) {
@@ -6640,6 +6982,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async installAgent(agentId: string): Promise<AppState> {
+    return this.localResetGatedWork(() => this.installAgentNow(agentId));
+  }
+
+  private async installAgentNow(agentId: string): Promise<AppState> {
     let installedSlug: string | undefined;
     let installIdForReport: string | undefined;
     const initialCandidate = this.listRegistryAgents().find(
@@ -6739,13 +7085,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     return installed.map((agent) => {
       const candidate = bySlug.get(agent.slug) ?? bySlug.get(agent.id);
+      // Whether the installed copy runs depends on the installed manifest.
+      // A newer registry entry that needs a newer app only gates its update.
       const compatibleAgent = withAgentCompatibility(
         {
           ...agent,
           minAppVersion:
-            candidate?.minAppVersion ??
             agent.minAppVersion ??
-            agent.provenance?.minAppVersion,
+            agent.provenance?.minAppVersion ??
+            candidate?.minAppVersion,
         },
         this.appVersion,
       );
@@ -6760,6 +7108,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           manifestUrl: candidate.manifestUrl,
           manifestSha256: candidate.manifestSha256,
           minAppVersion: candidate.minAppVersion,
+          supported: appVersionSatisfies(this.appVersion, candidate.minAppVersion || "0.1.0"),
         },
       };
     });
@@ -6796,6 +7145,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async updateAgent(
+    slug: string,
+    options?: { confirmTrustChanges?: boolean },
+  ): Promise<AppState> {
+    return this.localResetGatedWork(() => this.updateAgentNow(slug, options));
+  }
+
+  private async updateAgentNow(
     slug: string,
     options?: { confirmTrustChanges?: boolean },
   ): Promise<AppState> {
@@ -6868,6 +7224,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         scopes: target.scopes,
         writeLimits: parsedManifest.descriptor.writeLimits,
         author: target.author,
+        // The installed manifest decides whether the agent runs here.
+        ...(target.minAppVersion ? { minAppVersion: target.minAppVersion } : {}),
         ...(hasRemainingSettings ? { settings: prunedSettings } : {}),
         provenance: buildAgentProvenance({
           agent: target,
@@ -7015,6 +7373,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       throw new Error("Agent manifest storage is unavailable.");
     }
     const agentDir = join(updatesRoot, slug);
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     await mkdir(agentDir, { recursive: true, mode: 0o700 });
     const finalPath = join(agentDir, "manifest.yaml");
     const tmpPath = `${finalPath}.${randomUUID()}.tmp`;
@@ -7028,12 +7387,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const normalized = manifestText.endsWith("\n")
       ? manifestText
       : `${manifestText}\n`;
+    if (dataFolderSealed()) throw new DataFolderSealedError();
     await writeFile(tmpPath, normalized, { encoding: "utf8", mode: 0o600 });
     try {
-      await atomicRename(tmpPath, finalPath);
+      await atomicRename(tmpPath, finalPath, {
+        beforeAttempt: () => {
+          if (dataFolderSealed()) throw new DataFolderSealedError();
+        },
+      });
       try {
         await commitState();
       } catch (stateError) {
+        // A reset sealed the folder meanwhile: nothing more is written there.
+        if (dataFolderSealed()) throw stateError;
         if (previousManifest === undefined) {
           await rm(finalPath, { force: true });
         } else {
@@ -7380,7 +7746,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
   }
 
-  /** Where a provider is reached now; see novaProviderEndpoint. */
+  /** An opaque fingerprint of where a provider is reached now, for a model fit review to compare later. */
+  async providerDestination(providerId: ProviderId): Promise<string> {
+    return (await this.providerTarget(providerId)).destination;
+  }
+
+  /** Where a provider is reached and its fingerprint, from one read, so a check and a binding cannot disagree. */
+  async providerTarget(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }> {
+    const endpoint = modelFitProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
+    return { endpoint, destination: createHash("sha256").update(`${providerId}\0${endpoint ?? ""}`).digest("hex").slice(0, 32) };
+  }
+
   async novaProviderEndpoint(providerId: ProviderId): Promise<string | undefined> {
     return novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined);
   }
@@ -7463,8 +7839,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * sent anywhere. Also expires proposed notes past their review window.
    */
   async fireDueNovaFollowUps(): Promise<void> {
-    if (this.novaFollowUpsFiring) return;
+    if (this.novaFollowUpsFiring || this.localResetStarted) return;
     this.novaFollowUpsFiring = true;
+    this.localResetWorkInFlight += 1;
     try {
       // Follow-ups run only inside these passes, one after another, so at
       // the start of one no follow-up of this session is running: a row
@@ -7489,6 +7866,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         console.warn("[nova] follow-ups could not be checked", errorText(error));
     } finally {
       this.novaFollowUpsFiring = false;
+      this.localResetWorkInFlight -= 1;
     }
   }
 
@@ -8826,7 +9204,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     options: StartRunOptions = {},
     boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
-    return this.runService.startRun(agentSlug, options, boundary);
+    if (this.localResetStarted) throw new LocalResetInProgressError();
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.runService.startRun(agentSlug, options, boundary);
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
   }
 
   async confirmRun(
@@ -8834,7 +9218,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     phrase: string,
     boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
-    return this.runService.confirmRun(runId, phrase, boundary);
+    if (this.localResetStarted) {
+      throw new Error("OpenAdminOS is resetting and restarts in a moment. Nothing was applied.");
+    }
+    this.confirmationsInFlight += 1;
+    try {
+      return await this.runService.confirmRun(runId, phrase, boundary);
+    } finally {
+      this.confirmationsInFlight -= 1;
+    }
   }
 
   async rejectRun(runId: string): Promise<RunRecord> {
@@ -8863,7 +9255,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const requireBound = (endpoint: string | undefined) => {
       if (binding && (endpoint ?? undefined) !== (binding.endpoint ?? undefined)) throw new ProviderEndpointChangedError();
     };
-    if (binding) requireBound(novaProviderEndpoint(providerId, providerId === "azure-openai" ? await this.read() : undefined));
+    if (binding) {
+      const persistedForEndpoint = providerId === "azure-openai" ? await this.read() : undefined;
+      requireBound(binding.scope === "model-fit" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
+      // An Azure OpenAI request goes to the configured deployment, so a model fit request for the
+      // deployment the admin reviewed is refused when another one is configured now.
+      if (binding.scope === "model-fit" && persistedForEndpoint && model !== undefined && model.trim() !== this.azureOpenAIConfigFromState(persistedForEndpoint).deployment.trim()) {
+        throw new ProviderEndpointChangedError();
+      }
+    }
     if (this.llmFactory) {
       // Test seam only: it returns before the in-branch endpoint comparison
       // below, so only the check above applies to it. Production adapters
@@ -8905,6 +9305,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       return createLmStudioLlm(options);
     }
     if (providerId === "lemonade") {
+      // A model fit binding is checked on the address the adapter is built with.
+      if (binding?.scope === "model-fit") {
+        const endpoint = resolveLemonadeEndpoint();
+        requireBound(endpoint.replace(/\/$/, ""));
+        return createLemonadeLlm({ endpoint, ...(defaultModel ? { defaultModel } : {}) });
+      }
       return createLemonadeLlm(defaultModel ? { defaultModel } : {});
     }
     if (providerId === "anthropic") {
@@ -8924,6 +9330,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         return noopLlm;
       }
       requireBound(`${options.endpoint.trim().replace(/\/$/, "")}#${options.deployment.trim()}`);
+      if (binding?.scope === "model-fit" && model !== undefined && model.trim() !== options.deployment.trim()) throw new ProviderEndpointChangedError();
       return createAzureOpenAiLlm(options);
     }
     return noopLlm;
@@ -9125,7 +9532,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async processPendingRunDeliveries(): Promise<void> {
-    return this.runDeliveryService.processPendingRunDeliveries();
+    // No report goes out once Reset OpenAdminOS has started; a delivery pass
+    // under way holds the reset until it ends.
+    if (this.localResetStarted) return;
+    this.localResetWorkInFlight += 1;
+    try {
+      return await this.runDeliveryService.processPendingRunDeliveries();
+    } finally {
+      this.localResetWorkInFlight -= 1;
+    }
   }
 
   private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
@@ -9179,6 +9594,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     try {
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT" && this.localResetStarted) {
+        // A reset is being checked or is under way: a missing state file is
+        // never created, since the folder there now may be one a restore or
+        // another process put in place of the profile being reset. The
+        // reset's own checks work from the state this process last knew.
+        return this.lastReadSnapshot ?? { ...structuredClone(defaultState), firstRunScan: "pending" };
+      }
       if (isNodeError(error) && error.code === "ENOENT") {
         // A fresh install: the first-launch model scan runs once. The
         // bootstrap state is written through the same chain as every other
@@ -9912,6 +10334,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async writeNow(unfiltered: PersistedState, audit: WriteAudit): Promise<void> {
+    // Checked when the write runs, so one already queued when the reset was
+    // committed is refused too, before any audit record is written.
+    if (this.localResetCommitted) {
+      throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+    }
     // The persistence choke point of the state file: a write may remove
     // anything, but never adds or changes a record of a tenant that is
     // being disconnected, or one written by work of an older generation.
@@ -9967,7 +10394,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       // Flushed through the handle that wrote it: Windows needs write access to flush.
       await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
-      await atomicRename(tmpPath, this.filePath);
+      // Checked again before the rename and before every Windows retry of
+      // it: a write already under way when the reset was committed does not
+      // replace the file either.
+      await atomicRename(tmpPath, this.filePath, {
+        beforeAttempt: () => {
+          if (this.localResetCommitted) {
+            throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was saved.");
+          }
+        },
+      });
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
       this.recordAuditLogSafely(state);

@@ -72,7 +72,7 @@ interface MessageRow {
 }
 
 /** Answer fields stored together: the question kind, steps, citation targets, follow-ups and prompt provenance. */
-type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected">;
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected" | "modelFit" | "switchedFrom">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -2302,12 +2302,21 @@ export class IntelligenceSqliteStore {
     resources: GraphCacheResourceKind[];
     searchTerms: string[];
     limitPerResource: number;
+    /** Field filters per resource, applied before the text match and its fallback. */
+    filters?: Partial<Record<GraphCacheResourceKind, GraphCacheQueryPredicate[]>>;
   }): Record<GraphCacheResourceKind, unknown[]> {
     const out = {} as Record<GraphCacheResourceKind, unknown[]>;
     for (const resource of input.resources) {
       const terms = input.searchTerms.filter((term) => term.length >= 3);
-      const where: string[] = ["tenant_id = ?", "resource = ?"];
-      const args: (string | number)[] = [input.tenantId, resource];
+      const base: string[] = ["tenant_id = ?", "resource = ?"];
+      const baseArgs: (string | number)[] = [input.tenantId, resource];
+      for (const predicate of input.filters?.[resource] ?? []) {
+        const built = buildGraphCachePredicateSql(predicate);
+        base.push(built.sql);
+        baseArgs.push(...built.args);
+      }
+      const where = [...base];
+      const args = [...baseArgs];
       for (const term of terms.slice(0, 5)) {
         where.push("search_text LIKE ?");
         args.push(`%${term}%`);
@@ -2327,11 +2336,11 @@ export class IntelligenceSqliteStore {
           .prepare(
             `SELECT raw_json
              FROM graph_resources
-             WHERE tenant_id = ? AND resource = ?
+             WHERE ${base.join(" AND ")}
              ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
              LIMIT ?`,
           )
-          .all(input.tenantId, resource, input.limitPerResource) as unknown as ResourceRow[];
+          .all(...baseArgs, input.limitPerResource) as unknown as ResourceRow[];
         parsed = fallback.map((row) => readJson<unknown>(row.raw_json, {}));
       }
       out[resource] = parsed;
@@ -2454,11 +2463,134 @@ export class IntelligenceSqliteStore {
     };
   }
 
+  /**
+   * Exact counts under filters, computed in SQL over every cached row of
+   * one resource. `groupBy` fields are each counted separately within the
+   * filtered set. `ids` restricts the count to earlier matched rows, so a
+   * follow-up narrows the previous result instead of starting over. With
+   * `listLimit`, the matching rows are returned too, at most that many.
+   */
+  countGraphCache(input: {
+    tenantId: string;
+    resource: GraphCacheResourceKind;
+    filters?: GraphCacheQueryPredicate[];
+    groupBy?: string[];
+    ids?: string[];
+    listLimit?: number;
+  }): { total: number; groups: Record<string, Record<string, number>>; rows?: unknown[] } {
+    const where: string[] = ["tenant_id = ?", "resource = ?"];
+    const args: Array<string | number> = [input.tenantId, input.resource];
+    for (const predicate of input.filters ?? []) {
+      const built = buildGraphCachePredicateSql(predicate);
+      where.push(built.sql);
+      args.push(...built.args);
+    }
+    if (input.ids) {
+      where.push("graph_id IN (SELECT value FROM json_each(?))");
+      args.push(JSON.stringify(input.ids));
+    }
+    const clause = where.join(" AND ");
+    const total = (this.db
+      .prepare(`SELECT COUNT(*) AS total FROM graph_resources WHERE ${clause}`)
+      .get(...args) as unknown as { total: number } | undefined)?.total ?? 0;
+    const groups: Record<string, Record<string, number>> = {};
+    for (const field of input.groupBy ?? []) {
+      const expression = graphCacheFieldSql(field);
+      // JSON booleans read back as 1 and 0; the bucket keeps true and false.
+      const bucketSql = expression.startsWith("json_extract(")
+        ? `CASE json_type(${expression.slice("json_extract(".length, -1)}) WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' ELSE CAST(${expression} AS TEXT) END`
+        : `CAST(${expression} AS TEXT)`;
+      const buckets = this.db
+        .prepare(`SELECT COALESCE(${bucketSql}, 'not reported') AS bucket, COUNT(*) AS count FROM graph_resources WHERE ${clause} GROUP BY bucket ORDER BY count DESC, bucket ASC`)
+        .all(...args) as unknown as Array<{ bucket: string; count: number }>;
+      groups[field] = Object.fromEntries(buckets.map((entry) => [entry.bucket, entry.count]));
+    }
+    if (input.listLimit === undefined) return { total, groups };
+    const rows = this.db
+      .prepare(`SELECT raw_json FROM graph_resources WHERE ${clause} ORDER BY lower(COALESCE(display_name, graph_id)) ASC LIMIT ?`)
+      .all(...args, Math.max(0, Math.floor(input.listLimit))) as unknown as ResourceRow[];
+    return { total, groups, rows: rows.map((row) => readJson<unknown>(row.raw_json, {})) };
+  }
+
+  /**
+   * Cached rows whose display name appears in a text as a whole word, ignoring case: the devices a question
+   * names, kept in its sample rows whatever filters the question's words set. Names shorter than three
+   * characters never match on their own. SQL keeps ASCII names that occur in the text (its lower() folds ASCII
+   * only) and every name with other characters; the case-insensitive match is then done here with full Unicode
+   * folding, so "Élodie’s iPhone" is found as typed in any case without reading every device name.
+   */
+  findGraphRowsNamedIn(input: { tenantId: string; resource: GraphCacheResourceKind; text: string; limit: number }): Array<{ id: string; name: string }> {
+    const text = foldName(input.text);
+    const rows = this.db
+      .prepare(`SELECT graph_id, display_name FROM graph_resources
+        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) BETWEEN 3 AND ?
+          AND (instr(lower(?), lower(display_name)) > 0 OR display_name GLOB '*[^ -~]*')`)
+      // A name stored decomposed ("E" plus a combining accent) is longer than it reads: the bound is the text's
+      // decomposed length.
+      .all(input.tenantId, input.resource, [...text.normalize("NFD")].length, input.text) as unknown as Array<{ graph_id: string; display_name: string }>;
+    const wordChar = /[\p{L}\p{M}\p{N}-]/u;
+    return rows
+      .filter((row) => {
+        // A name must stand as its own word: "PC-1" is not found inside "PC-12".
+        const name = foldName(row.display_name);
+        for (let index = text.indexOf(name); index >= 0; index = text.indexOf(name, index + 1)) {
+          const before = text[index - 1];
+          const after = text[index + name.length];
+          if ((!before || !wordChar.test(before)) && (!after || !wordChar.test(after))) return true;
+        }
+        return false;
+      })
+      .sort((a, b) => b.display_name.length - a.display_name.length || a.display_name.localeCompare(b.display_name))
+      .slice(0, Math.max(1, Math.floor(input.limit)))
+      .map((row) => ({ id: row.graph_id, name: row.display_name }));
+  }
+
+  /**
+   * Cached rows whose display name is exactly this name, ignoring case with full Unicode folding (SQLite's
+   * lower() folds ASCII only); more than one means the name is shared. Spacing and punctuation must match.
+   */
+  findGraphRowsNamed(input: { tenantId: string; resource: GraphCacheResourceKind; name: string; limit: number }): Array<{ id: string; name: string }> {
+    const wanted = foldName(input.name);
+    const rows = this.db
+      .prepare(`SELECT graph_id, display_name FROM graph_resources
+        WHERE tenant_id = ? AND resource = ? AND display_name IS NOT NULL AND length(display_name) BETWEEN ? AND ?
+        ORDER BY display_name ASC`)
+      // The length only narrows the scan; a name stored decomposed is longer than it reads, so the bound has room.
+      .all(input.tenantId, input.resource, Math.ceil([...input.name.normalize("NFC")].length / 2), [...input.name.normalize("NFD")].length * 2) as unknown as Array<{ graph_id: string; display_name: string }>;
+    return rows
+      .filter((row) => foldName(row.display_name) === wanted)
+      .slice(0, Math.max(1, Math.floor(input.limit)))
+      .map((row) => ({ id: row.graph_id, name: row.display_name }));
+  }
+
+  /** The structured result of the last tenant answer in a conversation, for follow-ups. */
+  getChatResultContext(conversationId: string): unknown {
+    const row = this.db
+      .prepare(`SELECT result_json FROM chat_result_context WHERE conversation_id = ?`)
+      .get(conversationId) as { result_json: string } | undefined;
+    return row ? readJson<unknown>(row.result_json, undefined) : undefined;
+  }
+
+  setChatResultContext(conversationId: string, result: unknown, now: string): void {
+    this.assertConversationWritable(conversationId, "chat result");
+    if (result === undefined) {
+      this.db.prepare(`DELETE FROM chat_result_context WHERE conversation_id = ?`).run(conversationId);
+      return;
+    }
+    this.db
+      .prepare(`INSERT INTO chat_result_context (conversation_id, result_json, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(conversation_id) DO UPDATE SET result_json = excluded.result_json, updated_at = excluded.updated_at`)
+      .run(conversationId, JSON.stringify(result), now);
+  }
+
   readManagedDevicesLastSyncBefore(input: {
     tenantId: string;
     thresholdIso: string;
     limit: number;
+    /** Field filters the question names, such as its OS, applied before the limit. */
+    filters?: GraphCacheQueryPredicate[];
   }): unknown[] {
+    const extra = (input.filters ?? []).map((predicate) => buildGraphCachePredicateSql(predicate));
     const rows = this.db
       .prepare(
         `SELECT raw_json
@@ -2466,11 +2598,12 @@ export class IntelligenceSqliteStore {
          WHERE tenant_id = ?
            AND resource = 'managedDevices'
            AND last_seen_at IS NOT NULL
-           AND last_seen_at < ?
+           AND julianday(last_seen_at) < julianday(?)
+           ${extra.map((built) => `AND ${built.sql}`).join(" ")}
          ORDER BY last_seen_at ASC
          LIMIT ?`,
       )
-      .all(input.tenantId, input.thresholdIso, input.limit) as unknown as ResourceRow[];
+      .all(input.tenantId, input.thresholdIso, ...extra.flatMap((built) => built.args), input.limit) as unknown as ResourceRow[];
     return rows.map((row) => readJson<unknown>(row.raw_json, {}));
   }
 
@@ -3561,6 +3694,12 @@ export class IntelligenceSqliteStore {
         PRIMARY KEY (conversation_id, value)
       );
 
+      CREATE TABLE IF NOT EXISTS chat_result_context (
+        conversation_id TEXT PRIMARY KEY REFERENCES chat_conversations(id) ON DELETE CASCADE,
+        result_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS graph_resources (
         tenant_id TEXT NOT NULL,
         resource TEXT NOT NULL,
@@ -4152,6 +4291,11 @@ function readMessage(row: MessageRow): IntuneChatMessage {
   };
 }
 
+function withoutOfferId(issue: NonNullable<IntuneChatMessage["modelFit"]>): NonNullable<IntuneChatMessage["modelFit"]> {
+  const { offerId: _offerId, ...rest } = issue;
+  return rest;
+}
+
 function answerMetaJson(message: IntuneChatMessage): string | null {
   const meta: AnswerMeta = {
     ...(message.questionKind ? { questionKind: message.questionKind } : {}),
@@ -4162,6 +4306,9 @@ function answerMetaJson(message: IntuneChatMessage): string | null {
     ...(message.tenantContext ? { tenantContext: true } : {}),
     ...(message.privatePrompt ? { privatePrompt: true } : {}),
     ...(message.notConnected ? { notConnected: message.notConnected } : {}),
+    // The offer id is in memory only and single use; a stored answer keeps the reason, not the offer.
+    ...(message.modelFit ? { modelFit: withoutOfferId(message.modelFit) } : {}),
+    ...(message.switchedFrom ? { switchedFrom: message.switchedFrom } : {}),
   };
   return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
 }
@@ -4525,6 +4672,7 @@ function isInvestigationToolName(value: unknown): value is IntuneChatInvestigati
   return (
     value === "list_cached_resources" ||
     value === "query_cache" ||
+    value === "count_cached" ||
     value === "graph_get" ||
     value === "refresh_resource" ||
     value === "web_search" ||
@@ -4542,6 +4690,11 @@ function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
 } {
   const field = graphCacheFieldSql(predicate.field);
   const value = predicate.value;
+  // Timestamps are compared as times, not text: "12:00:00Z" sorts after "12:00:00.500Z" as text though it is earlier.
+  if (["lt", "lte", "gt", "gte"].includes(predicate.op) && typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+    const op = { lt: "<", lte: "<=", gt: ">", gte: ">=" }[predicate.op as "lt" | "lte" | "gt" | "gte"];
+    return { sql: `julianday(${field}) ${op} julianday(?)`, args: [value] };
+  }
   switch (predicate.op) {
     case "eq":
       return value === null ? { sql: `${field} IS NULL`, args: [] } : { sql: `${field} = ?`, args: [sqlScalar(value)] };
@@ -4569,7 +4722,9 @@ function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
       if (!Array.isArray(value)) {
         throw new Error("query_cache predicate 'in' requires an array value.");
       }
-      const values = value.slice(0, 20).map(sqlScalar);
+      // A longer list is refused, never cut: a count over a cut list would be stated as exact.
+      if (value.length > 20) throw new Error("query_cache predicate 'in' takes at most 20 values.");
+      const values = value.map(sqlScalar);
       if (values.length === 0) return { sql: "1 = 0", args: [] };
       return {
         sql: `${field} IN (${values.map(() => "?").join(", ")})`,
@@ -4679,4 +4834,9 @@ function randomSyntheticId(value: unknown): string {
     hash = (hash * 31 + json.charCodeAt(i)) >>> 0;
   }
   return `row-${hash.toString(16)}`;
+}
+
+/** A display name compared ignoring case: Unicode lower case of its composed form. Spacing and punctuation stay. */
+function foldName(name: string): string {
+  return name.normalize("NFC").toLowerCase();
 }

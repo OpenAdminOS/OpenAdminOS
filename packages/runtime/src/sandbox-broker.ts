@@ -11,7 +11,7 @@ import type {
   WritePlan,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, graphAccessDenialFromError, WritePlanLimitError } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, contextTooSmallFromError, graphAccessDenialFromError, WritePlanLimitError, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { isReasoningWithoutAnswerError } from "./llm-ollama.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
@@ -38,12 +38,19 @@ export interface SandboxBroker {
    */
   graphDenialFor(scriptOutput: string): Error | undefined;
   /**
+   * A model request refused because it did not fit the context window, when
+   * that refusal answered the script's last brokered request (log calls
+   * aside). The caller still checks that the script ended on it.
+   */
+  getContextFailure(): ContextTooSmallFailure | undefined;
+  /**
    * The typed model failure (a reply with reasoning and no answer) behind a
    * script failure, from the error the script's own process recorded it ended
-   * with: the failure of the broker request id that error (or its cause
-   * chain) carries; without an id, the newest failure whose message is
-   * exactly that error's message, or the "<method>: <message>" the bundled
-   * scripts throw. Only a reply with reasoning and no answer is returned.
+   * with: a failure of the broker request id that error (or its cause chain)
+   * carries whose message the error carrying the id has; without an id, a
+   * failure whose message is exactly that error's message, or the
+   * "<method>: <message>" the bundled scripts throw. Returned only when every
+   * such failure is a reply with reasoning and no answer.
    */
   llmFailureFor(endedWith: ScriptExitRecord): Error | undefined;
 }
@@ -66,6 +73,7 @@ type BrokerErrorCode =
   | "invalid_request"
   | "policy_denied"
   | "not_available"
+  | "context-too-small"
   | "host_error";
 
 class SandboxBrokerError extends Error {
@@ -132,6 +140,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
       }
     },
     getWritePlan: () => writePlan,
+    getContextFailure: () => contextTooSmallFromError(lastFailure),
     graphDenialFor: (scriptOutput) =>
       lastFailure instanceof Error && graphAccessDenialFromError(lastFailure) && scriptOutput.includes(lastFailure.message)
         ? lastFailure
@@ -594,6 +603,10 @@ function ok(id: string, result?: unknown): SandboxBrokerResponse {
 }
 
 function failure(id: string, error: unknown): SandboxBrokerResponse {
+  const tooLarge = contextTooSmallFromError(error);
+  if (tooLarge) {
+    return { id, ok: false, error: { message: error instanceof Error ? error.message : String(error), code: "context-too-small", detail: tooLarge } };
+  }
   if (error instanceof WritePlanLimitError) {
     return { id, ok: false, error: { message: error.message, code: "policy_denied" } };
   }

@@ -119,6 +119,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:send-intune-chat-message", input),
   previewIntuneChatSend: (input: { content: string }) =>
     ipcRenderer.invoke("openadminos:preview-intune-chat-send", input),
+  getProviderDestination: (providerId: ProviderId) =>
+    ipcRenderer.invoke("openadminos:get-provider-destination", providerId),
   streamIntuneChatMessage: (input, onEvent, options) => {
     const streamId = options?.streamId ?? crypto.randomUUID();
     let cleanedUp = false;
@@ -340,6 +342,14 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:clear-intune-chat-history"),
   clearGraphCache: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:clear-graph-cache", tenantId),
+  getLocalResetInfo: () => ipcRenderer.invoke("openadminos:get-local-reset-info"),
+  resetOpenAdminOS: (confirmation: string) =>
+    ipcRenderer.invoke("openadminos:reset-openadminos", confirmation),
+  getLocalResetReport: () => ipcRenderer.invoke("openadminos:get-local-reset-report"),
+  dismissLocalResetReport: () => ipcRenderer.invoke("openadminos:dismiss-local-reset-report"),
+  retryLocalReset: () => ipcRenderer.invoke("openadminos:retry-local-reset"),
+  showLocalResetDataFolder: () => ipcRenderer.invoke("openadminos:show-local-reset-data-folder"),
+  quitAfterIncompleteReset: () => ipcRenderer.invoke("openadminos:quit-after-incomplete-reset"),
   getRunHistoryRetentionSettings: () =>
     ipcRenderer.invoke("openadminos:get-run-history-retention-settings"),
   setRunHistoryRetentionSettings: (input) =>

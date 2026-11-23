@@ -189,6 +189,16 @@ describe("update channel", () => {
     assert.equal(updater.checks, 1);
   });
 
+  it("starts no check again once stopped for a reset, also not on a channel switch", async (t) => {
+    const { updater, controller } = harness(t);
+    controller.configure("stable");
+    controller.stop();
+    controller.configure("nightly");
+    controller.configure("stable");
+    await settle();
+    assert.equal(updater.checks, 0);
+  });
+
   it("does not download what a check for the previous channel found, then checks the new channel", async (t) => {
     const { updater, controller } = harness(t);
     controller.configure("stable");

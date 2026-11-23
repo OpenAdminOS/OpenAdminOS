@@ -1,3 +1,4 @@
+import { isOllamaCloudModel } from "../src/shared/model-fit.js";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -51,6 +52,9 @@ export interface OllamaTagsResponse {
     model?: string;
     digest?: string;
     details?: { family?: string };
+    /** Set for a model whose prompts this server sends to another host (Ollama Cloud, remote aliases). */
+    remote_model?: string;
+    remote_host?: string;
   }>;
 }
 
@@ -95,6 +99,31 @@ async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item:
   });
   await Promise.all(workers);
   return results;
+}
+
+/**
+ * Whether Ollama runs this model on this device right now, from a fresh
+ * /api/tags read (model metadata only; nothing is loaded). False when the
+ * endpoint is outside this device, the model is not listed or is
+ * remote-backed, or the list cannot be read: an on-device retry that cannot
+ * be confirmed is not sent.
+ */
+export async function ollamaModelIsOnDevice(model: string): Promise<boolean> {
+  const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
+  if (!classifyOllamaEndpoint(endpoint).isLocal || isOllamaCloudModel(model)) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+  try {
+    const response = await fetchLocal(`${endpoint}/api/tags`, { signal: controller.signal });
+    if (!response.ok) return false;
+    const payload = (await response.json()) as OllamaTagsResponse;
+    const entry = payload.models?.find((candidate) => candidate.name === model);
+    return Boolean(entry && !entry.remote_host && !entry.remote_model);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
@@ -151,7 +180,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const installed =
       payload.models
         ?.map((model) => ({ ...model, name: model.name ?? model.model }))
-        .filter((model): model is { name: string; digest?: string; details?: { family?: string } } => Boolean(model.name)) ?? [];
+        .filter((model): model is { name: string; digest?: string; details?: { family?: string }; remote_model?: string; remote_host?: string } => Boolean(model.name)) ?? [];
     // The family sets the think value Chat and runs send to each model. The
     // list is read on every check, so a model replaced under the same name,
     // or restored to a digest seen before, never keeps an old family.
@@ -193,6 +222,10 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       }
     }).finally(() => clearTimeout(showTimeout));
     const models = installedModels.filter((_, i) => supported[i]);
+    // A remote-backed model is listed like a local one, but its prompts leave this device.
+    const remoteModels = installed
+      .filter((model) => Boolean(model.remote_host || model.remote_model) && models.includes(model.name))
+      .map((model) => model.name);
     const capabilityWarning = models.length > 0 && redirectedShow
       ? `Some model capabilities could not be verified. ${redirectedShow} Check Ollama's endpoint and refresh providers.`
       : undefined;
@@ -213,6 +246,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       ),
       models,
       defaultModel: models[0],
+      ...(remoteModels.length > 0 ? { remoteModels } : {}),
     };
   } catch (error) {
     // Only a refused connection means Ollama is not running. A timeout, a
