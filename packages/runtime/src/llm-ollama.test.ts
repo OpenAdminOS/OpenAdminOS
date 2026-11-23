@@ -1890,6 +1890,7 @@ describe("Ollama reasoning models", () => {
           res.end(JSON.stringify({ models: listed ? [{ name: "inflight-alias:latest" }] : [] }));
           return;
         }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
         calls += 1;
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         if (calls === 1) {
@@ -2812,6 +2813,74 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("reads the family of a server alias the model list does not name from /api/show", async () => {
+    const thinks: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // Ollama lists the model an alias points to, not the alias.
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [{ name: "gpt-oss:20b", digest: "sha256:oss", details: { family: "gptoss" } }] })); return; }
+        if (req.url === "/api/show") {
+          const { model } = JSON.parse(raw) as { model?: string };
+          if (model === "office-report:latest") { res.end(JSON.stringify({ details: { family: "gptoss" }, model_info: { "general.architecture": "gptoss" } })); return; }
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: "model not found" }));
+          return;
+        }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "office-report:latest" });
+      await llm.complete({ prompt: "p" });
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(thinks, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("keeps reading a lone :local as current Ollama does when every version read of a request fails", async () => {
+    let version: string | undefined = "0.17.7";
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/version") {
+          if (version === undefined) { res.statusCode = 500; res.end(); return; }
+          res.end(JSON.stringify({ version }));
+          return;
+        }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "down-report:local", digest: "sha256:qwen", details: { family: "qwen3" } },
+            { name: "down-report:latest", digest: "sha256:oss", details: { family: "gptoss" } },
+          ] }));
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "down-report:local" });
+      await llm.complete({ prompt: "p" });
+      // Upgraded; the version endpoint is down for this request.
+      version = undefined;
+      await llm.complete({ prompt: "p" });
+      assert.deepEqual(sent, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("starts the chat request's timeout after the model list read", async () => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       req.resume();
@@ -2895,8 +2964,9 @@ describe("Ollama reasoning models", () => {
       let raw = "";
       req.on("data", (part) => (raw += part));
       req.on("end", () => {
-        // An alias the list omits: each read finds it missing.
+        // A name the list omits and Ollama does not know: each read finds it missing.
         if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
         const think = (JSON.parse(raw) as { think?: unknown }).think;
         sent.push(think);
         if (think !== false) {

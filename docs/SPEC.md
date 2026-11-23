@@ -399,13 +399,16 @@ it gets `think: "low"`. The model family that provider detection reads from
 `/api/tags` on every check (`gptoss` or `gpt-oss`) decides, so a copy under
 another name, or a name replaced and restored, gets the right value before its
 first request; the chat path adds no `/api/show` call. Before each request, the
-app reads the model's entry from `/api/tags` (which loads no model), so a model
+app reads the model's entry from `/api/tags` (which loads no model; a name
+it does not list, such as a server alias, is read with `/api/show`, which
+reports the family of the model it points to), so a model
 replaced under the name since the provider check, or between two requests of
 one answer, gets its own family and version; names are compared as Ollama
 resolves them (a `:local` after a tag is dropped; a lone `x:local` is
 `x:latest` on Ollama 0.18 and later, which drop the suffix, and the model
 tagged `local` before that, read from `/api/version` only for such a name
-(a failed read is tried once more),
+(a failed read is tried once more; when both fail, the name is read as
+current Ollama does until a read succeeds),
 before each send and retry, so an upgraded server is followed; a version
 read that started before the newest one applied for the endpoint does not
 decide, and a newer one applied while the list was read does;

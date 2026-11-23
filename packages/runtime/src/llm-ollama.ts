@@ -1087,17 +1087,20 @@ export async function resolveOllamaModel(endpoint: string, model: string, signal
   const version = await ollamaServerVersion(endpoint, signal) ?? (signal?.aborted ? undefined : await ollamaServerVersion(endpoint, signal));
   const key = ollamaEndpointKey(endpoint);
   const applied = ollamaServerVersions.get(key);
-  // A read that started before the newest applied one is outdated: the newer one decides.
-  if (version !== undefined && read > (applied?.read ?? 0)) {
+  // A read that started before the newest applied one is outdated: the newer
+  // one decides. The newest read applies also when it failed, so every later
+  // look at it in this request reads the name as current Ollama does until a
+  // read succeeds.
+  if (read > (applied?.read ?? 0)) {
     ollamaServerVersions.set(key, { read, version });
     return installedModelFor(name, version);
   }
-  return installedModelFor(name, applied && applied.read > read ? applied.version : version);
+  return installedModelFor(name, applied!.version);
 }
 
 /** Version reads in the order they started, and the newest one applied per endpoint. */
 let ollamaVersionReadSeq = 0;
-const ollamaServerVersions = new Map<string, { read: number; version: string }>();
+const ollamaServerVersions = new Map<string, { read: number; version: string | undefined }>();
 
 function ollamaEndpointKey(endpoint: string): string {
   return endpoint.trim().replace(/\/$/, "");
@@ -1138,9 +1141,31 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     if (!Array.isArray(data.models)) return;
     const wanted = ollamaModelName(model);
     if (!recordOllamaModelList(endpoint, data.models, seq)) return;
+    if (data.models.some((candidate) => entryName(candidate) === wanted)) return;
+    // Not listed: a server alias (Ollama lists only the model it points to)
+    // is read with /api/show, which also loads no model and reports the
+    // family of the model the alias resolves to.
+    const showUrl = `${endpoint.trim().replace(/\/$/, "")}/api/show`;
+    const shown = await fetch(showUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: wanted }),
+      signal: controller.signal,
+      redirect: modelServerRedirect(showUrl),
+    }).catch(() => undefined);
+    if (shown?.ok && !isRefusedRedirect(shown, showUrl)) {
+      const details = (await shown.json().catch(() => undefined)) as unknown;
+      // The list read just applied (its number) for the name, unless a newer one has.
+      const key = familyKey(endpoint, model);
+      if (typeof details === "object" && details !== null && (ollamaFamilyReadApplied.get(key) ?? 0) <= seq) {
+        ollamaFamilyReadApplied.set(key, seq);
+        recordFamily(key, details);
+        return;
+      }
+    }
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
-    if (!data.models.some((candidate) => entryName(candidate) === wanted)) forgetOllamaModel(endpoint, model, seq);
+    forgetOllamaModel(endpoint, model, seq);
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {
