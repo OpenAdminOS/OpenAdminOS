@@ -2590,6 +2590,14 @@ describe("IntuneChat timestamp presentation", () => {
     expect(screen.getByText(`1 row · Snapshot refreshed ${dateTime.format(new Date(timestamp))}`)).toBeInTheDocument();
   });
 
+  it("labels an epoch timestamp as stale in the answer tooltip", async () => {
+    renderTimestampChat({
+      getIntuneChatMessages: async () => [{ ...answer, createdAt: "1970-01-01T00:00:00.000Z" }],
+    });
+
+    expect(await screen.findByTitle("Answered Before the last write (stale)")).toBeInTheDocument();
+  });
+
   it("shows the localized sync date without a time in the expanded device table", async () => {
     const user = userEvent.setup();
     const dateOnly = new Intl.DateTimeFormat(locale, dateOptions);

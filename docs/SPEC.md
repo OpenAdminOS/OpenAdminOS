@@ -4617,7 +4617,9 @@ the format. Decisions:
   evidence answers count it; grace period is its own state. A failed latest
   refresh is said in the computed answer. Chat, Nova and the multi-tenant
   dossier show cache refreshes as an absolute date and time. They share
-  Electron's app locale and the device time zone resolved at launch. Device
+  Electron's app locale and the device time zone resolved at launch. Chat
+  labels the epoch marker for data made stale by a write as
+  "Before the last write (stale)". Device
   last-sync dates omit the time and show the year when it differs from the
   current year in that time zone. Chat prompts ask the model to use the
   formatted facts, and Nova formats any remaining ISO timestamps before

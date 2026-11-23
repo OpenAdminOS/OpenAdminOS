@@ -5277,7 +5277,9 @@ function SuggestedAgentsBlock({
 }
 
 function formatDateTime(value: string) {
-  return formatChatDateTime(new Date(value), window.openAdminOS?.chatDateTimeLocale) ?? value;
+  const date = new Date(value);
+  if (date.getTime() === 0) return formatRefreshTime(value);
+  return formatChatDateTime(date, window.openAdminOS?.chatDateTimeLocale) ?? value;
 }
 
 function formatRefreshTime(value: string) {
