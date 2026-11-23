@@ -85,6 +85,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Schedules paused for model destination review show a pause notice with a link to review the schedule.
+
 - Agent Team, Run with, install checks and delivered reports label Ollama Cloud models as hosted. Opt-in usage counts them as hosted.
 - The menu bar shows the selected model and uses the same hosted consent as Chat.
 - Chat asks for separate consent for Ollama Cloud and an off-device Ollama server.

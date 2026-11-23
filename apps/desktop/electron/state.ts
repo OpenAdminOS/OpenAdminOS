@@ -8292,7 +8292,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule");
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
-    const latestFailureMessage = latestWake?.status === "failed"
+    // Destination-review skips were recorded as failed runs without a start time.
+    // Their current review notice comes from the schedule, even after a restart.
+    const skipMessage = latestWake?.error ?? latestWake?.summary;
+    const skippedForReview = !latestWake?.startedAt &&
+      skipMessage?.startsWith("Skipped: ") &&
+      skipMessage.endsWith("Review the schedule to continue.");
+    const latestFailureMessage = latestWake?.status === "failed" && !skippedForReview
       ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial, latestWake.graphDenialChecked === true)
       : undefined;
     return {

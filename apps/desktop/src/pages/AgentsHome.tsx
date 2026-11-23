@@ -579,6 +579,18 @@ export default function AgentsHome() {
           <p role="alert" className="mb-2 text-sm text-[var(--color-danger)]">{SCHEDULE_ORGANIZATION_COPY.backgroundFailed(schedulerError)}</p>
         ) : null}
         {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
+        {scheduledOnly ? state.installedAgents.map((agent) => {
+          const reason = agent.schedule?.lastSkipReason;
+          if (!agent.schedule?.enabled || !reason) return null;
+          return (
+            <div key={agent.slug} role="status" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
+              <span>Schedule paused: {reason.replace(/^Skipped: /, "")}</span>
+              <Button size="sm" variant="secondary" onClick={() => openAgent(agent.slug, "schedule")}>
+                Review schedule
+              </Button>
+            </div>
+          );
+        }) : null}
         {scheduledOnly && state.schedulerStatus?.lastError ? (
           <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             <span>Latest scheduled run failed: {state.schedulerStatus.lastError}</span>
