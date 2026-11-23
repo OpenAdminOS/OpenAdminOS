@@ -9,7 +9,7 @@ import {
   mockProviders,
   renderWithAppState,
 } from "../test/test-utils";
-import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
+import { clearPendingIntent, createPendingIntent, readPendingIntent, writePendingIntent } from "./pending-intent";
 import { OPENADMINOS_APP_CLIENT_ID } from "../shared/openAdminOS";
 
 const INTUNE_PARTS = ["intune.people", "intune.devices", "intune.apps"];
@@ -171,6 +171,119 @@ describe("contextual tenant setup", () => {
       await screen.findByRole("heading", { name: "Pick an LLM provider" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tenant connected" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a provider picked for a model fit rerun on that run, without changing the active provider", async () => {
+    const user = userEvent.setup();
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        model: "claude-sonnet",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    const recheckProvider = vi.fn(async () => undefined);
+    const bridge = makeMockBridge({ recheckProvider }, createMockAppState({ activeProviderId: "ollama" }));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    await user.click(screen.getByRole("button", { name: /Codex/ }));
+    expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
+    expect(readPendingIntent()).toMatchObject({ kind: "agent-run", providerId: "openai" });
+    expect(readPendingIntent()).not.toHaveProperty("model");
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+    // The pick still gets the full check selecting a provider runs.
+    expect(recheckProvider).toHaveBeenCalledWith("openai");
+  });
+
+  it("moves a one-run provider pick on only once its full check is done", async () => {
+    const user = userEvent.setup();
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    const pending: Array<() => void> = [];
+    const recheckProvider = vi.fn(() => new Promise<void>((resolve) => { pending.push(resolve); }));
+    const bridge = makeMockBridge({ recheckProvider }, createMockAppState({ activeProviderId: "ollama" }));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    await user.click(screen.getByRole("button", { name: /Codex/ }));
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("openai"));
+    // Codex shows as connected from the cached result, but setup waits for its check.
+    expect(screen.getByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+    // A second pick while the first check runs: the first one finishing does not move setup on.
+    await user.click(screen.getByRole("button", { name: /Codex/ }));
+    await waitFor(() => expect(recheckProvider).toHaveBeenCalledTimes(2));
+    const reads = vi.mocked(bridge.getAppState).mock.calls.length;
+    pending[0]!();
+    // The first check's refresh has run.
+    await waitFor(() => expect(vi.mocked(bridge.getAppState).mock.calls.length).toBeGreaterThan(reads));
+    expect(screen.getByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+    pending[1]!();
+    expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
+  });
+
+  it("does not offer a self-hosted server outside this device for a model fit rerun", async () => {
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    const providers = mockProviders.map((provider) => (provider.id === "lm-studio" ? { ...provider, isLocal: false, status: "connected" as const } : provider));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "ollama", providers })) });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    expect(screen.queryByRole("button", { name: /LM Studio/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Codex/ })).toBeInTheDocument();
+  });
+
+  it("does not offer a connected hosted provider without a model the run could name for a model fit rerun", async () => {
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "anthropic",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    // Codex reports only a CLI default placeholder.
+    const providers = mockProviders.map((provider) => (provider.id === "openai" ? { ...provider, models: ["gemini-default"], defaultModel: "gemini-default" } : provider));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "ollama", providers })) });
+
+    await screen.findByRole("heading", { name: "Pick an LLM provider" });
+    expect(screen.queryByRole("button", { name: /Codex/ })).toBeNull();
+  });
+
+  it("checks Azure OpenAI at its ready state for a usable model for a model fit rerun", async () => {
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "azure-openai",
+        modelFit: { reason: "context-too-small", providerId: "ollama", model: "llama3.1" },
+        returnTo: "/runs/run-1",
+      }),
+    );
+    // Azure is at "available" (its ready state), but its one model came from a policy lock.
+    const providers = mockProviders.map((provider) => (provider.id === "azure-openai" ? { ...provider, status: "available" as const, models: ["dep"], defaultModel: "dep", modelsFromPolicy: true as const } : provider));
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "ollama", providers })) });
+
+    expect(await screen.findByRole("heading", { name: "Pick an LLM provider" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Azure OpenAI/ })).toBeNull();
   });
 
   it("treats a configured Azure provider at available as ready, matching the host", async () => {

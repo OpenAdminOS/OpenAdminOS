@@ -18,6 +18,7 @@ export const SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS = ["tenants", "connectors"] 
 export const SETTINGS_ITEMS = {
   "chat-investigation-mode": { section: "chat", title: "Chat investigation mode", description: "Choose how single-tenant Chat gathers read-only evidence.", keywords: ["agentic", "deterministic", "tools"] },
   "tenant-cache": { section: "data", title: "Tenant cache", description: "Refresh the local Graph data used by Chat.", keywords: ["graph", "refresh", "rows"] },
+  "local-reset": { section: "data", title: "Reset OpenAdminOS", description: "Remove all local data and sign-ins, then start again at first run.", keywords: ["reset", "wipe", "uninstall", "remove", "sign out", "keychain", "start over"] },
   "periodic-cache-refresh": { section: "data", title: "Periodic cache refresh", description: "Schedule local cache refreshes while signed in.", keywords: ["schedule", "interval"] },
   "local-self-training": { section: "chat", title: "Local self-training", description: "Review local agent suggestions and learning files.", keywords: ["learning", "suggestions"] },
   "nova-voice": { section: "nova", title: "Voice and greeting", description: "Choose the voice provider and the name Nova greets you with.", keywords: ["openai", "local", "whisper", "kokoro", "name"] },

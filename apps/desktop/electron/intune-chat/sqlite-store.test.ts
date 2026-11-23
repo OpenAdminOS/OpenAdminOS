@@ -887,9 +887,10 @@ describe("Intune Chat planner", () => {
         concept.includes("device investigation"),
       ),
     );
+    // "Managed devices" is the Intune inventory; Entra device objects are not planned for it.
     assert.deepEqual(
       suggestions[0]?.matchedResources?.slice(0, 2),
-      ["managedDevices", "entraDevices"],
+      ["managedDevices"],
     );
   });
 

@@ -33,6 +33,8 @@ export {
   WhatsAppWebNotLinkedError,
   WhatsAppWebValidationError,
   getWhatsAppWebClient,
+  resumeWhatsAppWebClients,
+  stopAllWhatsAppWebClients,
 } from "./runtime.js";
 
 declare module "@openadminos/agent-sdk" {

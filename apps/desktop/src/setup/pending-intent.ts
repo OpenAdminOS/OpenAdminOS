@@ -1,6 +1,7 @@
 import {
   GRAPH_CACHE_RESOURCE_KINDS,
   type GraphCacheResourceKind,
+  type ModelFitIssue,
   type ProviderId,
 } from "../shared/openAdminOS";
 
@@ -23,6 +24,10 @@ export type PendingIntent =
       tenantId?: string;
       providerId?: ProviderId;
       model?: string;
+      /** Run with <provider> after a model fit failure: the review keeps its reason and its organization pin. */
+      modelFit?: ModelFitIssue;
+      /** Run again of a model fit rerun keeps its safeguards through setup. */
+      safeguards?: { onDevice: boolean };
       returnTo: string;
       createdAt: string;
     }
@@ -109,12 +114,16 @@ function isPendingIntent(value: unknown): value is PendingIntent {
         (value.dryRun === undefined || typeof value.dryRun === "boolean") &&
         (value.runForRealOfRunId === undefined || isBoundedString(value.runForRealOfRunId, 256)) &&
         (value.retryOfRunId === undefined || isBoundedString(value.retryOfRunId, 256)) &&
+        (value.modelFit === undefined || isModelFitIssue(value.modelFit)) &&
+        (value.safeguards === undefined || (isRecord(value.safeguards) && typeof value.safeguards.onDevice === "boolean" && onlyKnownKeys(value.safeguards, ["onDevice"]))) &&
         onlyKnownKeys(value, [
           "kind",
           "slug",
           "tenantId",
           "providerId",
           "model",
+          "modelFit",
+          "safeguards",
           "retryOfRunId",
           "dryRun",
           "runForRealOfRunId",
@@ -137,6 +146,21 @@ function isPendingIntent(value: unknown): value is PendingIntent {
     default:
       return false;
   }
+}
+
+function isModelFitIssue(value: unknown): value is ModelFitIssue {
+  if (!isRecord(value)) return false;
+  const count = (entry: unknown) => entry === undefined || (typeof entry === "number" && Number.isSafeInteger(entry) && entry > 0);
+  return (
+    (value.reason === "context-too-small" || value.reason === "repeated-failure" || value.reason === "thinking-only") &&
+    isProviderId(value.providerId) &&
+    (value.model === undefined || isBoundedString(value.model, 256)) &&
+    count(value.neededTokens) &&
+    count(value.limitTokens) &&
+    (value.limitIsModelMax === undefined || value.limitIsModelMax === true) &&
+    (value.limitIsMemory === undefined || value.limitIsMemory === true) &&
+    onlyKnownKeys(value, ["reason", "providerId", "model", "neededTokens", "limitTokens", "limitIsModelMax", "limitIsMemory"])
+  );
 }
 
 function isExpired(intent: PendingIntent, now: number): boolean {

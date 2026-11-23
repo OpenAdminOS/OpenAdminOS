@@ -153,7 +153,8 @@ export function applyManagedPolicyToProviders(
       // Not for Lemonade: its list holds only the local chat models it may use, so an
       // unlisted model would be downloaded or sent to a cloud API.
       if ((provider.models.length === 0 && provider.id !== "lemonade") || provider.models.includes(model)) {
-        return { ...provider, models: [model], defaultModel: model };
+        // Marked when the provider itself reported none, so model fit does not count it as reported.
+        return { ...provider, models: [model], defaultModel: model, ...(provider.models.length === 0 ? { modelsFromPolicy: true as const } : {}) };
       }
       const { defaultModel: _unlisted, ...rest } = provider;
       return {

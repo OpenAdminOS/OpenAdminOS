@@ -6,6 +6,7 @@ import {
   requireOsSecureStorage,
   type SafeStorageApi,
 } from "./secret-store.js";
+import { DataFolderSealedError, dataFolderSealed } from "./data-folder-seal.js";
 
 interface ConnectorSecretStoreOptions {
   loadSafeStorage?: () => Promise<SafeStorageApi>;
@@ -33,6 +34,7 @@ export class SafeStorageConnectorSecretStore {
     const safeConnectorId = sanitizePathSegment(connectorId);
     return {
       get: async (key: string) => {
+        if (dataFolderSealed()) return undefined;
         const path = this.pathFor(safeConnectorId, key);
         try {
           const encrypted = await readFile(path);
@@ -45,22 +47,27 @@ export class SafeStorageConnectorSecretStore {
         } catch (error) {
           if (isMissingFile(error)) return undefined;
           if (isSafeStorageDecryptError(error)) {
-            await rm(path, { force: true });
+            // Checked again: the read may have started before the seal.
+            if (!dataFolderSealed()) await rm(path, { force: true });
             return undefined;
           }
           throw error;
         }
       },
       set: async (key: string, value: string) => {
+        if (dataFolderSealed()) throw new DataFolderSealedError();
         const safeStorage = requireOsSecureStorage(
           await this.loadSafeStorage(),
           this.platform,
         );
         const path = this.pathFor(safeConnectorId, key);
+        if (dataFolderSealed()) throw new DataFolderSealedError();
         await mkdir(join(this.rootDir, safeConnectorId), { recursive: true });
+        if (dataFolderSealed()) throw new DataFolderSealedError();
         await writeFile(path, safeStorage.encryptString(value), { mode: 0o600 });
       },
       remove: async (key: string) => {
+        if (dataFolderSealed()) return;
         await rm(this.pathFor(safeConnectorId, key), { force: true });
       },
     };

@@ -5,6 +5,8 @@ import { ActivityFeed } from "../components/ActivityFeed";
 import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
+import { ModelFitNotice } from "../components/ModelFitNotice";
+import { isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
@@ -46,6 +48,7 @@ import {
   providerCatalog,
   resolveOrganizations,
   splashtopRegion,
+  type ModelFitIssue,
   type RunRecord,
   type TenantRecord,
   type WriteAction,
@@ -93,6 +96,8 @@ function RunResultPage({ run }: { run: RunRecord }) {
   const [rerunAfterSwitch, setRerunAfterSwitch] = useState<string | null>(null);
   const pendingRerunRef = useRef<string | null>(null);
   const proceedRerunRef = useRef<(() => void) | null>(null);
+  // Set by Run with <provider> after a model fit failure, for the next rerun only.
+  const rerunOverrideRef = useRef<RerunChoice | null>(null);
   const activeOrganizationId = activeOrganizationOf(state)?.id;
 
   const closeToRuns = () => navigate(`/runs${location.search}`);
@@ -123,6 +128,25 @@ function RunResultPage({ run }: { run: RunRecord }) {
   const requiresTeamReview = Boolean(
     run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
   );
+
+  // The local model could not fit this run: offer what else is configured
+  // (mockup 36, section F). Team runs keep their own review in Agent Team.
+  // The host records the fit issue when the run fails, after confirming its model ran on this
+  // device then; a provider that is not on this device now is not offered from either.
+  const modelFit =
+    run.status === "failed" && !isSystemRun && !run.officeContext && run.modelFit && runProvider && isOnDeviceModel(runProvider, run.model)
+      ? run.modelFit
+      : undefined;
+  // Run again of a model fit rerun keeps its safeguards: the on-device check and the endpoint binding.
+  const ownRerunChoice: RerunChoice = {
+    ...(run.providerId ? { providerId: run.providerId } : {}),
+    ...(run.model ? { model: run.model } : {}),
+    ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
+    ...(run.dryRun && (run.requireOnDeviceModel || run.providerEndpointBinding) ? { dryRun: true } : {}),
+  };
+  const fitChoices = modelFit
+    ? modelFitChoices({ issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy })
+    : undefined;
 
   const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
     navigate(`/agents/${encodeURIComponent(slug)}/confirm`, { state: { runChoice } });
@@ -181,10 +205,10 @@ function RunResultPage({ run }: { run: RunRecord }) {
     // whether or not the original run had an organization. Run for real
     // and Team retries keep their own flows.
     if (run.status !== "planned" && !run.officeContext) {
-      openRerunPreflight(run.agentSlug, {
-        ...(run.providerId ? { providerId: run.providerId } : {}),
-        ...(run.model ? { model: run.model } : {}),
-      });
+      // Run with <provider> reruns on the chosen provider; the preflight is its accept step.
+      const override = rerunOverrideRef.current;
+      rerunOverrideRef.current = null;
+      openRerunPreflight(run.agentSlug, override ?? ownRerunChoice);
       return;
     }
     if (
@@ -197,6 +221,9 @@ function RunResultPage({ run }: { run: RunRecord }) {
           ...(run.tenantId ? { tenantId: run.tenantId } : {}),
           ...(run.providerId ? { providerId: run.providerId } : {}),
           ...(run.model ? { model: run.model } : {}),
+          // Run for real of a model fit dry run keeps its safeguards through setup, so a provider
+          // picked there stays on this run and does not become the active provider.
+          ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
           returnTo: `/runs/${encodeURIComponent(run.id)}`,
         }),
       )
@@ -225,28 +252,32 @@ function RunResultPage({ run }: { run: RunRecord }) {
   // Only an ordinary rerun can move to the active organization; Run for
   // real and Team retries stay with the run's own tenant.
   const ordinaryRerun = run.status !== "planned" && !run.officeContext;
+  // Closing the dialog drops a Run with <provider> choice, so a later Run again uses the run's own provider.
+  const closeCrossOrganization = () => {
+    rerunOverrideRef.current = null;
+    setCrossOrganization(false);
+  };
   const crossOrganizationDialog = (
-    <Modal open={crossOrganization} onClose={() => setCrossOrganization(false)} size="md">
+    <Modal open={crossOrganization} onClose={closeCrossOrganization} size="md">
       <ModalHeader
         title={RERUN_COPY.title(runOrganization?.name)}
         subtitle={displayName}
-        onClose={() => setCrossOrganization(false)}
+        onClose={closeCrossOrganization}
       />
       <div className="space-y-4 p-6">
         <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">
           {RERUN_COPY.body(runOrganization?.name, activeOrganization?.name, ordinaryRerun)}
         </p>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={() => setCrossOrganization(false)}>Cancel</Button>
+          <Button variant="ghost" onClick={closeCrossOrganization}>Cancel</Button>
           {ordinaryRerun && activeOrganization ? (
             <Button
               variant="secondary"
               onClick={() => {
                 setCrossOrganization(false);
-                openRerunPreflight(run.agentSlug, {
-                  ...(run.providerId ? { providerId: run.providerId } : {}),
-                  ...(run.model ? { model: run.model } : {}),
-                });
+                const override = rerunOverrideRef.current;
+                rerunOverrideRef.current = null;
+                openRerunPreflight(run.agentSlug, override ?? ownRerunChoice);
               }}
             >
               {RERUN_COPY.runInActive(activeOrganization.name)}
@@ -263,6 +294,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
                 setRerunAfterSwitch(target);
                 void setActiveOrganization(target).catch((caught) => {
                   pendingRerunRef.current = null;
+                  rerunOverrideRef.current = null;
                   setRerunAfterSwitch(null);
                   toast.error(
                     ORGANIZATION_COPY.switchFailed(
@@ -330,7 +362,28 @@ function RunResultPage({ run }: { run: RunRecord }) {
       isSystemRun={isSystemRun}
       rerunLabel={requiresTeamReview ? "Review in Agent Team" : "Run again"}
       onBack={closeToRuns}
-      onRerun={reRun}
+      onRerun={() => {
+        rerunOverrideRef.current = null;
+        reRun();
+      }}
+      {...(modelFit && fitChoices
+        ? {
+            modelFit: {
+              issue: modelFit,
+              choices: fitChoices,
+              onChoose: (choice: ModelFitChoice) => {
+                rerunOverrideRef.current = {
+                  providerId: choice.providerId,
+                  ...(choice.model ? { model: choice.model } : {}),
+                  modelFit,
+                  ...(run.dryRun ? { dryRun: true } : {}),
+                };
+                reRun();
+              },
+              onOpenProviders: () => navigate("/settings/providers"),
+            },
+          }
+        : {})}
       onCancel={() => cancelRun(run.id)}
       onRetargetCurrent={() => {
         if (!run.officeContext) {
@@ -393,7 +446,15 @@ function RunPage({
   onRerun,
   onCancel,
   onRetargetCurrent,
+  modelFit,
 }: {
+  /** The run failed because the local model could not fit it; its alternatives. */
+  modelFit?: {
+    issue: ModelFitIssue;
+    choices: ModelFitChoices;
+    onChoose: (choice: ModelFitChoice) => void;
+    onOpenProviders: () => void;
+  };
   run: RunRecord;
   displayName: string;
   tenantName: string;
@@ -491,7 +552,17 @@ function RunPage({
             />
           ) : null}
 
-          <RunFailureRemediation run={run} />
+          {/* A run the model fit notice covers gets one recovery: the notice, with the numbers and the choices. */}
+          {modelFit ? null : <RunFailureRemediation run={run} />}
+          {modelFit ? (
+            <ModelFitNotice
+              issue={modelFit.issue}
+              choices={modelFit.choices}
+              surface="run"
+              onChoose={modelFit.onChoose}
+              onOpenProviders={modelFit.onOpenProviders}
+            />
+          ) : null}
           {run.plan && run.plan.actions.length > 0 && run.riskAssessment ? (
             <WritePlanRiskSummary assessment={run.riskAssessment} />
           ) : null}

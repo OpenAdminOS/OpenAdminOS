@@ -64,6 +64,31 @@ let consoleSuppressionInstalled = false;
 
 export const WHATSAPP_WEB_QR_AUTO_REFRESH_MS = QR_AUTO_REFRESH_MS;
 
+/**
+ * Reset OpenAdminOS: once its marker is written, no WhatsApp Web client of
+ * this process opens a socket or writes or deletes an auth file again (the
+ * folder at the auth path may by then hold a restored profile). Every
+ * client stops, including ones a connector build created for a delivery.
+ */
+let stopped = false;
+
+export function stopAllWhatsAppWebClients(): void {
+  stopped = true;
+  for (const client of clients.values()) client.stopForReset();
+}
+
+/** A reset refused after all: clients may open sockets again. */
+export function resumeWhatsAppWebClients(): void {
+  stopped = false;
+}
+
+class WhatsAppWebStoppedError extends Error {
+  constructor() {
+    super("WhatsApp Web is stopped while OpenAdminOS resets.");
+    this.name = "WhatsAppWebStoppedError";
+  }
+}
+
 export function getWhatsAppWebClient(
   options: WhatsAppWebClientOptions,
 ): WhatsAppWebClient {
@@ -252,12 +277,28 @@ export class WhatsAppWebClient {
     } catch {
       // Local removal below is the source of truth for this device.
     }
+    if (stopped) throw new WhatsAppWebStoppedError();
     await rm(this.authDir, { recursive: true, force: true });
     this.setStatus({
       state: "not-linked",
       message: "WhatsApp Web was disconnected on this device.",
     });
     return this.getStatus();
+  }
+
+  /**
+   * Disposes the client and leaves no status that claims a live socket, so
+   * a client resumed after a refused reset reconnects on its next use.
+   */
+  stopForReset(): void {
+    this.dispose();
+    if (this.status.state === "connected" || this.status.state === "qr" || this.status.state === "connecting" || this.status.state === "reconnecting") {
+      this.setStatus(
+        this.hasAuthState()
+          ? { state: "reconnecting", message: "Restoring the saved WhatsApp Web session." }
+          : { state: "not-linked", message: "WhatsApp Web is not linked on this device." },
+      );
+    }
   }
 
   dispose(): void {
@@ -274,6 +315,7 @@ export class WhatsAppWebClient {
   }
 
   private restoreSessionInBackground(): void {
+    if (stopped) return;
     if (!this.hasAuthState()) return;
     if (this.status.state === "connected" || this.status.state === "qr") return;
     if (this.socket || this.opening) return;
@@ -316,6 +358,7 @@ export class WhatsAppWebClient {
   }
 
   private async ensureSocket(): Promise<void> {
+    if (stopped) throw new WhatsAppWebStoppedError();
     if (this.socket && this.status.state !== "logged-out" && this.status.state !== "error") {
       return;
     }
@@ -329,8 +372,14 @@ export class WhatsAppWebClient {
   private async createSocket(): Promise<void> {
     const socketGeneration = this.socketGeneration + 1;
     this.socketGeneration = socketGeneration;
+    // Checked again after every await: a reset stop meanwhile ends the
+    // opening before anything more is written under the auth folder.
+    const halted = () => stopped;
+    if (halted()) throw new WhatsAppWebStoppedError();
     await mkdir(this.authDir, { recursive: true });
+    if (halted()) throw new WhatsAppWebStoppedError();
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    if (halted()) throw new WhatsAppWebStoppedError();
     this.setStatus({
       state: this.hasAuthState() ? "reconnecting" : "connecting",
       message: this.hasAuthState()
@@ -338,10 +387,26 @@ export class WhatsAppWebClient {
         : "Waiting for WhatsApp Web to provide a QR code.",
     });
     const { version } = await fetchLatestBaileysVersion();
+    if (halted()) throw new WhatsAppWebStoppedError();
+    // The signal key files are written through this store: none once stopped.
+    const keys: typeof state.keys = {
+      get: (type, ids) => state.keys.get(type, ids),
+      set: async (data) => {
+        if (stopped) return;
+        await state.keys.set(data);
+      },
+      ...(state.keys.clear
+        ? {
+            clear: async () => {
+              if (!stopped) await state.keys.clear!();
+            },
+          }
+        : {}),
+    };
     const socket = makeWASocket({
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
+        keys: makeCacheableSignalKeyStore(keys, silentLogger),
       },
       browser: ["OpenAdminOS", "Desktop", "0.2.3"],
       logger: silentLogger,
@@ -353,7 +418,7 @@ export class WhatsAppWebClient {
     });
     this.socket = socket;
     socket.ev.on("creds.update", () => {
-      if (this.socketGeneration !== socketGeneration) return;
+      if (stopped || this.socketGeneration !== socketGeneration) return;
       void saveCreds();
     });
     socket.ev.on("connection.update", (update) => {
@@ -381,6 +446,7 @@ export class WhatsAppWebClient {
     } catch {
       // The old socket can already be closed by Baileys.
     }
+    if (stopped) throw new WhatsAppWebStoppedError();
     await rm(this.authDir, { recursive: true, force: true });
     this.setStatus({
       state: "connecting",
@@ -464,6 +530,7 @@ export class WhatsAppWebClient {
         statusCode === POST_PAIRING_RESTART_STATUS ||
         statusCode === CONNECTION_TIMEOUT_STATUS;
       if (statusCode === DisconnectReason.loggedOut) {
+        if (stopped) return;
         await rm(this.authDir, { recursive: true, force: true });
         this.setStatus({
           state: "logged-out",

@@ -37,8 +37,8 @@ used by the desktop host.
 
 ### Device inventory and sync
 
-1. Which managed devices have not synced in the last 7 days? [managedDevices, entraDevices]
-2. Which Windows devices have not synced in the last 30 days? [managedDevices, entraDevices]
+1. Which managed devices have not synced in the last 7 days? [managedDevices]
+2. Which Windows devices have not synced in the last 30 days? [managedDevices]
 3. Which enrolled devices are stale in Intune but still active in Entra? [managedDevices, entraDevices]
 4. Which Entra devices do not have a matching Intune managed device? [managedDevices, entraDevices]
 5. Which Intune devices do not have a matching Entra device object? [managedDevices, entraDevices]

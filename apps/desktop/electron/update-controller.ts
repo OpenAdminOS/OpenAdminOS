@@ -112,6 +112,8 @@ export class UpdateController {
   private state: UpdateState = { status: "idle" };
   private nightly: boolean | null = null;
   private started = false;
+  /** Set by stop(): a stopped controller starts no check and arms no timer again. */
+  private stopped = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private startupTimer: NodeJS.Timeout | null = null;
   // Bumped when the channel changes, so work for the previous channel is recognised.
@@ -211,6 +213,7 @@ export class UpdateController {
    * Throws while an update is being installed, see canChangeChannel().
    */
   configure(channel: UpdateChannel): void {
+    if (this.stopped) return;
     if (!this.canChangeChannel(channel)) throw new Error(CHANNEL_LOCKED_WHILE_INSTALLING);
     const nightly = channel === "nightly";
     const firstStart = !this.started;
@@ -232,6 +235,7 @@ export class UpdateController {
     this.pollTimer = null;
     this.startupTimer = null;
     this.started = false;
+    this.stopped = true;
   }
 
   async check(): Promise<UpdateState> {

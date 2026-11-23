@@ -14,6 +14,15 @@ describe("pending setup intents", () => {
   });
   beforeEach(() => clearPendingIntent());
 
+  it("keeps a model fit reason through setup, and drops one with an offer id or unknown keys", () => {
+    const modelFit = { reason: "context-too-small" as const, providerId: "ollama" as const, model: "openadmin-8b", neededTokens: 40652, limitTokens: 16384 };
+    const intent = createPendingIntent({ kind: "agent-run", slug: "device-inventory", providerId: "openai", model: "gpt-5", modelFit, returnTo: "/agents" });
+    writePendingIntent(intent);
+    expect(readPendingIntent()).toEqual(intent);
+    writePendingIntent({ ...intent, modelFit: { ...modelFit, offerId: "fit_1" } } as never);
+    expect(readPendingIntent()).toBeNull();
+  });
+
   it("persists only safe action metadata", () => {
     const intent = createPendingIntent(
       {

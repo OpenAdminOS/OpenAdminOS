@@ -77,3 +77,33 @@ test("non-Windows errors and non-lock failures are reported without retrying", a
     assert.equal(attempts, 1);
   }
 });
+
+test("a refusal before a retry stops the replacement and leaves the previous file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "atomic-rename-"));
+  const source = join(dir, "state.tmp"),
+    destination = join(dir, "state.json");
+  let attempts = 0,
+    checks = 0;
+  try {
+    await writeFile(source, "new state");
+    await writeFile(destination, "previous state");
+    await assert.rejects(
+      atomicRename(source, destination, {
+        platform: "win32",
+        replace: async (from, to) => {
+          if (attempts++ < 1) throw Object.assign(new Error("locked"), { code: "EBUSY" });
+          await rename(from, to);
+        },
+        wait: async () => undefined,
+        beforeAttempt: () => {
+          if (checks++ > 0) throw new Error("stopped");
+        },
+      }),
+      /stopped/,
+    );
+    assert.equal(attempts, 1);
+    assert.equal(await readFile(destination, "utf8"), "previous state");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

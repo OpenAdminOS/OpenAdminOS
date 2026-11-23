@@ -15,10 +15,12 @@ import { isProviderImplemented } from "../shared/providers";
 import type {
   ConnectTenantOptions,
   ProviderId,
+  ProviderSummary,
   RequestedScope,
   TenantRecord,
 } from "../shared/openAdminOS";
 import { isManagedSettingLocked } from "../shared/openAdminOS";
+import { hostedModelFitModel, SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
 import { useAppState } from "../state";
 import {
   clearPendingIntent,
@@ -105,6 +107,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           ? candidate.providerId
           : state.activeProviderId;
       const provider = state.providers.find((entry) => entry.id === providerId);
+      // A run for one request after a model fit failure never goes to a self-hosted server outside this device.
+      if (isOneRunProviderIntent(candidate) && provider && !modelFitUsable(provider, state.activeModelByProviderId)) return false;
       return Boolean(
         provider &&
           isProviderImplemented(provider.id) &&
@@ -115,7 +119,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
             (provider.id === "azure-openai" && provider.status === "available")),
       );
     },
-    [state.activeProviderId, state.providers],
+    [state.activeModelByProviderId, state.activeProviderId, state.providers],
   );
   const providerReadyForIntent = providerReady;
 
@@ -185,11 +189,15 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(timer);
   }, [open, refresh, stage]);
 
+  // A provider picked for one run moves setup on only once its full check is done,
+  // so a cached "connected" does not let the admin resume before a stale sign-in shows.
+  // A count, so a second pick while the first check runs keeps it pending until both are done.
+  const [oneRunChecksRunning, setOneRunChecksRunning] = useState(0);
   useEffect(() => {
-    if (open && stage === "provider" && providerReadyForIntent(intent)) {
+    if (open && stage === "provider" && oneRunChecksRunning === 0 && providerReadyForIntent(intent)) {
       setStage("ready");
     }
-  }, [intent, open, providerReadyForIntent, stage]);
+  }, [intent, oneRunChecksRunning, open, providerReadyForIntent, stage]);
 
   const requireTenant = useCallback(
     (nextIntent?: PendingIntent) => {
@@ -280,6 +288,33 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     setStage("permissions");
   }, []);
 
+  const recheckOneRunProvider = useCallback(
+    async (id: ProviderId) => {
+      setOneRunChecksRunning((running) => running + 1);
+      try {
+        await window.openAdminOS?.recheckProvider?.(id);
+      } finally {
+        // The list is read again even when the check failed, so it does not stay stale.
+        try {
+          await refresh();
+        } finally {
+          setOneRunChecksRunning((running) => running - 1);
+        }
+      }
+    },
+    [refresh],
+  );
+
+  const recheckProviders = useCallback(async () => {
+    try {
+      setError(null);
+      if (isOneRunProviderIntent(intent) && intent.providerId) await recheckOneRunProvider(intent.providerId);
+      else await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, [intent, recheckOneRunProvider, refresh]);
+
   const selectProvider = useCallback(
     async (id: ProviderId) => {
       try {
@@ -290,12 +325,19 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           writePendingIntent(next);
           return next;
         });
+        // A run that moves off a local model that could not fit it is for that run only:
+        // the replacement stays on the run and the active provider is left as it was. It still
+        // gets the full check selecting a provider runs, so a cached result does not hold it back.
+        if (isOneRunProviderIntent(intent)) {
+          await recheckOneRunProvider(id);
+          return;
+        }
         await setActiveProvider(id);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     },
-    [setActiveProvider],
+    [intent, recheckOneRunProvider, setActiveProvider],
   );
 
   const resume = useCallback(() => {
@@ -355,8 +397,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         error={error}
         activeTenant={connectedTenant ?? activeTenant}
         agentName={pendingAgentName}
-        providers={state.providers}
-        activeProviderId={state.activeProviderId}
+        // The picker for one run offers only what the run host admits for it.
+        providers={isOneRunProviderIntent(intent) ? state.providers.filter((provider) => modelFitUsable(provider, state.activeModelByProviderId)) : state.providers}
+        activeProviderId={isOneRunProviderIntent(intent) && intent.providerId ? intent.providerId : state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
         registrationLocked={
           isManagedSettingLocked(state.managedPolicy, "appRegistration") &&
@@ -370,7 +413,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         onTryAgain={() => void tryAgain()}
         onEditSignIn={editSignIn}
         onSelectProvider={(id) => void selectProvider(id)}
-        onRecheckProviders={refresh}
+        onRecheckProviders={recheckProviders}
         onResume={resume}
       />
     </SetupFlowContext.Provider>
@@ -387,6 +430,31 @@ export function useSetupFlow(): SetupFlowValue {
 
 export function currentReturnTo(pathname: string, search = ""): string {
   return `${pathname}${search}`;
+}
+
+/** A self-hosted server outside this device (LM Studio, Lemonade or Ollama reached elsewhere) is never a model fit choice. */
+function modelFitEligible(provider: ProviderSummary): boolean {
+  return provider.isLocal || !SELF_HOSTED_PROVIDER_IDS.has(provider.id);
+}
+
+/**
+ * A connected hosted provider is ready for a model fit rerun only with a model the run could name
+ * (listed, not a placeholder such as Gemini's `gemini-default`, not only a policy lock). One that
+ * still needs setup stays in the picker, so the admin can set it up.
+ */
+function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined): boolean {
+  if (!modelFitEligible(provider)) return false;
+  // Azure OpenAI's ready state is "available"; any other state still needs setup.
+  const ready = provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available");
+  if (provider.isLocal || !ready) return true;
+  return hostedModelFitModel(provider, activeModelByProviderId) !== undefined;
+}
+
+/** A model fit rerun (or Run again of one): the provider it names is for this run only. */
+function isOneRunProviderIntent(
+  intent: PendingIntent | null | undefined,
+): intent is Extract<PendingIntent, { kind: "agent-run" }> {
+  return intent?.kind === "agent-run" && Boolean(intent.modelFit || intent.safeguards);
 }
 
 function intentNeedsProvider(intent: PendingIntent): boolean {
