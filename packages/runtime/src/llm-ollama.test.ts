@@ -2367,6 +2367,139 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("reads the retry lookup again when an upgraded server now resolves a lone :local to another model", async () => {
+    let version = "0.17.7";
+    let shows = 0;
+    let chats = 0;
+    const unpinned = { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const pinned = { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } };
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/version") { res.end(JSON.stringify({ version })); return; }
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [
+            { name: "alias-report:local", digest: "sha256:tagged" },
+            { name: "alias-report:latest", digest: "sha256:default" },
+          ] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          res.end(JSON.stringify(version === "0.18.0" ? pinned : unpinned));
+          // Upgraded right after the retry lookup answered for the tagged model.
+          if (shows === 2) version = "0.18.0";
+          return;
+        }
+        chats += 1;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "request (40652 tokens) exceeds the available context size (16384 tokens), try increasing it" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "alias-report:local" }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the retry is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("gives the fallback's sizing lookup its own time after a slow list read", async () => {
+    let replaced = false;
+    let tags = 0;
+    let chats = 0;
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      req.resume();
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tags += 1;
+          const answer = JSON.stringify({ models: [replaced
+            ? { name: "gpt-oss-slow:latest", digest: "sha256:new" }
+            : { name: "gpt-oss-slow:latest", digest: "sha256:old" }] });
+          // The list read in the fallback outlasts the first request's timeout.
+          if (tags > 1) setTimeout(() => res.end(answer), 150);
+          else res.end(answer);
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          res.end(JSON.stringify(replaced
+            ? { parameters: "num_ctx                        4096", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }
+            : { model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }));
+          return;
+        }
+        chats += 1;
+        replaced = true;
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: '"gpt-oss-slow:latest" does not support thinking' }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      await assert.rejects(
+        createOllamaLlm({ endpoint, defaultModel: "gpt-oss-slow:latest", timeoutMs: 100 }).complete({ prompt: "word ".repeat(18000), enforceContextWindow: true }),
+        (error) => error instanceof ContextTooSmallError && error.failure.limitTokens === 4096,
+      );
+      assert.equal(chats, 1, "the resend is refused before it is sent");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("chooses the fallback's think value after its sizing lookup, from a list read that applied during it", async () => {
+    let replaced = false;
+    let shows = 0;
+    const sent: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [replaced
+            ? { name: "concurrent-swap:latest", digest: "sha256:qwen", details: { family: "qwen3" } }
+            : { name: "concurrent-swap:latest", digest: "sha256:oss", details: { family: "gptoss" } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = JSON.stringify({ model_info: { "general.architecture": "llama", "llama.context_length": 131072 } });
+          if (shows === 2) {
+            // While the fallback sizes the request, a provider check records a gpt-oss copy.
+            recordOllamaModelList(endpoint, [{ name: "concurrent-swap:latest", digest: "sha256:oss2", details: { family: "gptoss" } }], beginOllamaModelRead());
+            setTimeout(() => res.end(answer), 30);
+          } else res.end(answer);
+          return;
+        }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (sent.length === 1) {
+          replaced = true;
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"concurrent-swap:latest" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "concurrent-swap:latest" }).complete({ prompt: "word ".repeat(18000) })).text, "ok");
+      assert.deepEqual(sent, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("starts the chat request's timeout after the model list read", async () => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       req.resume();

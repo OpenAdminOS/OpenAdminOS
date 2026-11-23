@@ -353,13 +353,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : cachedCtx !== undefined ? { size: cachedCtx, kept: true } : undefined, text));
       };
       // The context lookup for this request, by the name as given.
-      const sizeRequest = () => ollamaRequestNumCtx({
+      // Takes the signal of the attempt it belongs to; the lookup has its own timeout.
+      const sizeRequest = (signal: AbortSignal = controller.signal) => ollamaRequestNumCtx({
         endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
         ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
         ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
         ...(opts.enforceContextWindow ? { enforce: true } : {}),
         ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
-        timeoutMs: lookupTimeoutMs, signal: controller.signal,
+        timeoutMs: lookupTimeoutMs, signal,
       });
       /**
        * Sends once, and once more without a level when Ollama rejects the
@@ -372,9 +373,25 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // was built gets its own value first, and if it rejects that too, none.
         // The last resend always sends none.
         for (let resend = 0; resend < 2 && sent.status === 400 && body.think !== false && rejectsThinkLevel(text); resend += 1) {
+          // The rejected request's budget ends here; the lookups below have their own.
+          clearTimeout(timer);
           const previous = { model: installedModel, generation: sentGeneration, family: sentFamily };
-          installedModel = await settleInstalledModel();
+          await settleInstalledModel();
+          const changed = () => ollamaInstalledModelNow(endpoint, model) !== previous.model ||
+            (ollamaModelGenerations.get(familyKey(endpoint, ollamaInstalledModelNow(endpoint, model))) ?? 0) !== previous.generation;
+          if (changed()) {
+            // Another model now: the context this request was sized for was
+            // another model's, so it is sized again, and refused when the
+            // new one cannot take it.
+            const resized = await sizeRequest(opts.signal ?? new AbortController().signal);
+            if (opts.signal?.aborted) throw stoppedByUser();
+            if (resized?.tooLarge) throw new ContextTooSmallError(resized.tooLarge);
+            numCtx = resized?.numCtx;
+          }
+          // Chosen after every lookup, from what is known right before the resend.
+          installedModel = ollamaInstalledModelNow(endpoint, model);
           const key = familyKey(endpoint, installedModel);
+          if (!ollamaModelGenerations.has(key)) ollamaModelGenerations.set(key, 0);
           const generation = ollamaModelGenerations.get(key) ?? 0;
           const family = ollamaModelFamilies.get(key);
           if (installedModel === previous.model && generation === previous.generation && family === previous.family) {
@@ -389,15 +406,6 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           } else {
             // Another model, or one Ollama now reports a family for.
             body.think = family !== undefined ? ollamaThinkSetting(model, family) : ollamaThinkFor(endpoint, installedModel);
-          }
-          if (installedModel !== previous.model || generation !== previous.generation) {
-            // Another model now: the context this request was sized for was
-            // another model's, so it is sized again, and refused when the
-            // new one cannot take it.
-            const resized = await sizeRequest();
-            if (opts.signal?.aborted) throw stoppedByUser();
-            if (resized?.tooLarge) throw new ContextTooSmallError(resized.tooLarge);
-            numCtx = resized?.numCtx;
           }
           sentDigest = ollamaModelDigests.get(key);
           sentGeneration = generation;
@@ -519,9 +527,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // the retry gets the think value of the model installed now. When
           // the list then names another revision than the lookup saw, the
           // lookup is read again, once, so the context and pin are that model's.
-          await settleInstalledModel();
+          const beforeRetry = installedModel;
+          installedModel = await settleInstalledModel();
           const listedForRetry = ollamaModelRevisions.get(familyKey(endpoint, installedModel));
-          if (retryShow?.revision !== undefined && listedForRetry !== undefined && !sameRevision(retryShow.revision, listedForRetry)) {
+          // Also when the name now resolves to another installed model (an
+          // upgraded server reads a lone :local as the default tag).
+          if (installedModel !== beforeRetry || (retryShow?.revision !== undefined && listedForRetry !== undefined && !sameRevision(retryShow.revision, listedForRetry))) {
             retryShow = await readRetryShow();
             if (opts.signal?.aborted) throw stoppedByUser();
           }
