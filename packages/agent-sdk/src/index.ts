@@ -27,6 +27,8 @@ export interface ProviderSummary {
   isLocal: boolean;
   status: ProviderStatus;
   detail?: string;
+  /** Ollama can answer, but a capability check for another model was refused. */
+  capabilityWarning?: string;
   /**
    * The check itself failed (an HTTP error, an unreachable or refused
    * endpoint, a CLI that errored), as opposed to completing with a
@@ -68,7 +70,7 @@ export function providerModelLabel(provider: Pick<ProviderSummary, "modelLabels"
 }
 
 /** One provider check in the first-launch scan, as it resolves. */
-export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check";
+export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check" | "unavailable";
 
 export interface ModelScanProbe {
   providerId: ProviderId;
@@ -83,6 +85,8 @@ export interface ModelScanProbe {
   summary: string;
   /** Further plain lines: models, versions, what to do next. */
   facts: string[];
+  /** A partial check failure on an otherwise ready provider. */
+  warning?: string;
   /** It can answer now: running with a model, or signed in. */
   ready: boolean;
   models: string[];
@@ -1051,6 +1055,12 @@ export interface RunRecord {
   error?: string;
   steps: RunStepRecord[];
   accessDenial?: GraphAccessDenial;
+  /**
+   * True on a failure classified from its typed error, with or without a
+   * Graph denial. Its message is then never read for Graph advice; only
+   * records without it, stored by earlier versions, are read from their text.
+   */
+  graphDenialChecked?: boolean;
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */
@@ -2109,7 +2119,7 @@ export interface RetrievalStatus {
    * The index alone cannot ground answers without it.
    */
   embeddingModelInstalled?: boolean;
-  /** Why the last background download of the embedding model failed, with the fix. */
+  /** Why the model check or latest background download failed, with the recovery. */
   embeddingModelError?: string;
 }
 
@@ -5060,9 +5070,11 @@ export interface ConnectorInstance<TCapabilities> {
   /**
    * Cheap, side-effect-free reachability probe. Called at preflight; a
    * `healthy: false` result fails the run with the supplied message
-   * surfaced as a designed remediation tile.
+   * surfaced as a designed remediation tile. `error` is the probe's own
+   * error, kept as the cause of a preflight failure so a typed Graph denial
+   * reaches the run record.
    */
-  healthCheck(): Promise<{ healthy: boolean; message?: string }>;
+  healthCheck(): Promise<{ healthy: boolean; message?: string; error?: unknown }>;
   /** Called once at run finish, success or failure. */
   dispose(): Promise<void>;
 }

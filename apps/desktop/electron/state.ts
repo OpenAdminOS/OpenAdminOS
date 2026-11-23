@@ -350,6 +350,7 @@ import {
   type RetrievalStatus,
 } from "./retrieval/retrieval.js";
 import {
+  EmbeddingPullStalledError,
   embeddingEndpoint,
   embeddingModelState,
   pullEmbeddingModel,
@@ -416,6 +417,7 @@ import {
   forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
+  withoutMisclassifiedGraphDenial,
   isNodeError,
   signInTargetFor,
   normalizeWorkspaceInstructions,
@@ -3090,22 +3092,32 @@ export class AppStateStore {
     return this.retrievalIndexInstance;
   }
 
+  /** Index status plus the embedding model's state: what Settings shows, so no reply drops a warning. */
+  async getRetrievalStatusWithEmbedding(): Promise<RetrievalStatus> {
+    const status = await this.getRetrievalStatus();
+    const embedding = await embeddingModelState().catch((error: unknown) => ({
+      ollamaReachable: undefined,
+      installed: false,
+      error: `Could not check the embedding endpoint (${error instanceof Error ? error.message : String(error)}). Check the local Ollama address, then refresh.`,
+    }));
+    const pullError = (await this.read()).embeddingModelPullError;
+    const error = embedding.error ?? (embedding.ollamaReachable && !embedding.installed ? pullError : undefined);
+    return {
+      ...status,
+      ...(embedding.ollamaReachable === undefined ? {} : { ollamaReachable: embedding.ollamaReachable }),
+      embeddingModelInstalled: embedding.installed,
+      ...(error ? { embeddingModelError: error } : {}),
+    };
+  }
+
   /** Status plus, when known, a newer published index version. */
   async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
-    const status = await this.getRetrievalStatus();
-    const embedding = await embeddingModelState();
-    const pullError = (await this.read()).embeddingModelPullError;
-    const withEmbedding: RetrievalStatus = {
-      ...status,
-      ollamaReachable: embedding.ollamaReachable,
-      embeddingModelInstalled: embedding.installed,
-      ...(pullError && !embedding.installed ? { embeddingModelError: pullError } : {}),
-    };
-    if (!withEmbedding.available) return withEmbedding;
+    const status = await this.getRetrievalStatusWithEmbedding();
+    if (!status.available) return status;
     const manifest = await fetchIndexManifest();
-    return manifest && manifest.version !== withEmbedding.version
-      ? { ...withEmbedding, updateAvailable: manifest.version }
-      : withEmbedding;
+    return manifest && manifest.version !== status.version
+      ? { ...status, updateAvailable: manifest.version }
+      : status;
   }
 
   async getRetrievalStatus(): Promise<RetrievalStatus> {
@@ -3135,9 +3147,8 @@ export class AppStateStore {
   ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
     const index = this.retrievalIndex();
     if (!index || !index.status().available) return [];
-    const endpoint =
-      process.env.OPENADMINOS_EMBEDDING_ENDPOINT ?? "http://127.0.0.1:11434";
-    return index.retrieve(query, ollamaEmbedQuery(endpoint), { k: 12 });
+    // The same endpoint Settings checks, so its state and Chat's searches agree.
+    return index.retrieve(query, ollamaEmbedQuery(embeddingEndpoint()), { k: 12 });
   }
 
   /** Install an index from a local folder or a URL, then reload it. */
@@ -3229,9 +3240,10 @@ export class AppStateStore {
       // fetches the index and the model together. Not counted as an
       // attempt, so no daily backoff applies to this case.
       const embedding = await embeddingModelState();
-      if (!embedding.ollamaReachable) {
+      if (!embedding.ollamaReachable || embedding.error) {
         console.info(
-          "[retrieval] automatic index install skipped: Ollama is not reachable, so grounding could not use the index yet.",
+          "[retrieval] automatic index install skipped:",
+          embedding.error ?? "Ollama is not reachable, so grounding could not use the index yet.",
         );
         return;
       }
@@ -3278,7 +3290,7 @@ export class AppStateStore {
    * Pull the embedding model in the background when Ollama is running
    * and the model is missing. Same contract as the index install: never
    * blocks, never dialogs, honours the same auto-install switch, and a
-   * failed pull is retried at most once a day. An unreachable Ollama is
+   * failed pull is retried at most once a day. An unreachable or stalled Ollama is
    * not counted as an attempt, so starting Ollama later gets the model
    * on the next launch rather than a day later.
    */
@@ -3288,6 +3300,7 @@ export class AppStateStore {
       if (persisted.retrievalAutoInstall === false) return;
       const endpoint = embeddingEndpoint();
       const state = await embeddingModelState(endpoint);
+      if (state.error) throw new Error(state.error);
       if (!state.ollamaReachable || state.installed) return;
 
       const lastAttempt = persisted.embeddingModelPullAttemptedAt;
@@ -3307,11 +3320,15 @@ export class AppStateStore {
         await pullEmbeddingModel(endpoint);
       } catch (error) {
         // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
-        const message =
+        // A stall of the local Ollama is not a registry failure; its own message names the recovery.
+        const message = error instanceof EmbeddingPullStalledError ? error.message :
           (await describeNetworkFailure({ what: "The local index model download", url: "https://registry.ollama.ai/", error, path: "ollama" })) ??
           (error instanceof Error ? error.message : String(error));
+        // Like an unreachable Ollama, a stalled one is not the day's attempt, so the next launch tries again.
+        const stalled = error instanceof EmbeddingPullStalledError;
         await this.serialize(async () => {
-          await this.write({ ...(await this.read()), embeddingModelPullError: message });
+          const { embeddingModelPullAttemptedAt, ...current } = await this.read();
+          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt }), embeddingModelPullError: message });
         });
         this.emitStateChanged("retrieval-embedding-failed");
         throw error;
@@ -3333,7 +3350,7 @@ export class AppStateStore {
     // Rebuilding/downloading the index is host infrastructure; here we
     // drop the cache so a freshly installed index is picked up.
     this.retrievalIndexInstance?.reset();
-    return this.getRetrievalStatus();
+    return this.getRetrievalStatusWithEmbedding();
   }
 
   private emptyAzureOpenAIConfig(): AzureOpenAIProviderConfig {
@@ -4378,6 +4395,12 @@ export class AppStateStore {
 
   /** The first-launch scan's checks, built on `checkProviderEntry`. */
   private async modelScanChecks(found: Map<ProviderId, ProviderSummary>): Promise<ModelScanCheck[]> {
+    const offer = (summary: ProviderSummary): ProviderSummary => {
+      // Keep the raw check for provider listing. Apply policy before offering a signed-in CLI.
+      // Copilot's installation-only result cannot establish whether its model is allowed by the account.
+      if (summary.isLocal || summary.cli?.state !== "ready") return summary;
+      return applyManagedPolicyToProviders([summary], this.managedPolicy)[0] ?? summary;
+    };
     return buildModelScanChecks({
       // The scan checks and offers only providers the IT policy file allows.
       catalog: providerCatalog.filter((provider) => managedProviderAllowed(this.managedPolicy, provider.id)),
@@ -4387,7 +4410,7 @@ export class AppStateStore {
           const listed = (await this.providerListFactory()).find((provider) => provider.id === providerId);
           if (!listed) throw new Error(`${providerId} is not listed.`);
           found.set(providerId, listed);
-          return listed;
+          return offer(listed);
         }
         const entry = providerCatalog.find((provider) => provider.id === providerId)!;
         // Azure OpenAI's check reads the saved configuration and its key from
@@ -4399,7 +4422,7 @@ export class AppStateStore {
           azure: async () => checkAzureOpenAI(entry, await this.getAzureOpenAIConfig()),
         });
         found.set(providerId, summary);
-        return summary;
+        return offer(summary);
       },
     });
   }
@@ -6358,7 +6381,7 @@ export class AppStateStore {
       : undefined;
     const message = error instanceof Error ? error.message : String(error);
     const accessDenial = graphAccessDenialFromError(error);
-    const summary = humanizeScheduledRunError(message, accessDenial);
+    const summary = humanizeScheduledRunError(message, accessDenial, true);
     const runId = `run_${nowMs.toString(36)}_${randomUUID().slice(0, 8)}`;
     const failedRun: RunRecord = {
       id: runId,
@@ -6374,6 +6397,7 @@ export class AppStateStore {
       summary,
       error: message,
       ...(accessDenial ? { accessDenial } : {}),
+      graphDenialChecked: true,
       steps: [],
       logs: [
         {
@@ -8147,7 +8171,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
     const latestFailureMessage = latestWake?.status === "failed"
-      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial)
+      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial, latestWake.graphDenialChecked === true)
       : undefined;
     return {
       supported: process.platform !== "linux",
@@ -9617,7 +9641,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
               // pins a tenant, so a tenant-less scheduled run can only be
               // one of these records.
               .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
-              .map((run) => ({ ...run, usage: run.usage ?? null }))
+              .map((run) => withoutMisclassifiedGraphDenial({ ...run, usage: run.usage ?? null }))
           : defaultState.runs,
         tenants,
       };

@@ -10,6 +10,12 @@ export interface GraphAccessDenial {
   recovery: string;
   missingScopes: string[];
   requiredLicence?: string;
+  /**
+   * Set on every denial classified since only Graph errors are classified.
+   * A stored denial without it predates that check and is trusted only when
+   * its error text comes from Graph (see storedGraphAccessDenial).
+   */
+  source?: "microsoft-graph";
 }
 
 export interface GraphAccessContext {
@@ -77,6 +83,10 @@ function graphSaidSuffix(message: string | undefined): string {
 
 /** Classifies an observed 403 only. It never probes access or changes authentication. */
 export function classifyGraphAccessDenied(context: GraphAccessContext = {}): GraphAccessDenial {
+  return { ...classifyCause(context), source: "microsoft-graph" };
+}
+
+function classifyCause(context: GraphAccessContext): GraphAccessDenial {
   const path = (context.path ?? "").split("?")[0]!;
   const target = context.label ?? (path ? `${context.method ?? "GET"} ${path}` : "this resource");
   const prefix = `Microsoft Graph denied access to ${target} (HTTP 403).`;
@@ -141,15 +151,168 @@ export class GraphAccessDeniedError extends Error {
   }
 }
 
-/** Old string-only errors remain unknown until evidence is available. */
-export function graphAccessDenialFromError(error: unknown, context: GraphAccessContext = {}): GraphAccessDenial | undefined {
-  if (error instanceof GraphAccessDeniedError) {
-    const overrides: GraphAccessContext = Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined));
-    return classifyGraphAccessDenied({ ...error.accessContext, ...overrides });
+/**
+ * New failures are classified from typed errors only: a GraphAccessDeniedError
+ * thrown by the runtime Graph adapter, or a Teams or Outlook connector error for
+ * a Graph 403, also when an agent's error carries it as its `cause`. Text is
+ * read only for records stored by earlier versions, which kept the message and
+ * not the error (see graphAccessDenialFromStoredText).
+ */
+const GRAPH_CONNECTOR_IDS = new Set(["teams", "outlook"]);
+
+function isGraphConnectorDenial(error: Error): boolean {
+  const connector = error as Error & { connectorId?: unknown; statusCode?: unknown };
+  if (typeof connector.connectorId !== "string" || !GRAPH_CONNECTOR_IDS.has(connector.connectorId)) return false;
+  return connector.name === "ConnectorScopeError" || (connector.name === "ConnectorRemoteError" && connector.statusCode === 403);
+}
+
+function typedGraphDenial(error: unknown): GraphAccessDeniedError | Error | undefined {
+  for (let current = error, depth = 0; current instanceof Error && depth < 5; current = current.cause, depth += 1) {
+    if (current instanceof GraphAccessDeniedError || isGraphConnectorDenial(current)) return current;
   }
-  const raw = error instanceof Error ? error.message : String(error);
-  if (!/\b403\b|\bforbidden\b|Authentication_RequestFromNonPremiumTenantOrB2CTenant/i.test(raw)) return undefined;
+  return undefined;
+}
+
+/** Classifies a failure as a Graph denial only when a Graph client raised it. */
+export function graphAccessDenialFromError(error: unknown, context: GraphAccessContext = {}): GraphAccessDenial | undefined {
+  const denied = typedGraphDenial(error);
+  if (!denied) return undefined;
+  const overrides: GraphAccessContext = Object.fromEntries(Object.entries(context).filter(([, value]) => value !== undefined));
+  return classifyGraphAccessDenied(denied instanceof GraphAccessDeniedError ? { ...denied.accessContext, ...overrides } : overrides);
+}
+
+/** Graph hosts of the national clouds the runtime adapter can call. */
+const GRAPH_HOSTS = new Set(["graph.microsoft.com", "graph.microsoft.us", "dod-graph.microsoft.us", "microsoftgraph.chinacloudapi.cn"]);
+
+function graphHostAfter(raw: string, prefix: RegExp): boolean {
+  const url = raw.match(prefix)?.[1];
+  if (!url) return false;
+  try {
+    return GRAPH_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stored text that OpenAdminOS's own Graph code wrote, matched from the start
+ * of the message: the runtime adapter ("Graph responded with HTTP 403 for
+ * https://graph.microsoft.com/...", with the host checked exactly), the
+ * connectors ("Microsoft Graph rejected the request (HTTP 403)."), the licence
+ * check ("Microsoft Graph answered /subscribedSkus with HTTP 403."), and stored
+ * denial text ("Microsoft Graph denied access to ... (HTTP 403)."). A real Graph
+ * 403 body ({"error":{"code":"Forbidden"|"accessDenied",...}}) does not name
+ * Graph, so text elsewhere in a message, such as a provider's response body,
+ * never counts.
+ */
+const ADAPTER_403 = /^Graph responded with HTTP 403 for (\S+?):?(?:\s|$)/;
+const ADAPTER_ANY = /^Graph (?:responded with HTTP \d+|request failed \(|request timed out after \d+ms:) ?(?:for )?(\S+?)[):]?(?:\s|$)/;
+const OWN_DENIAL_403 = /^(?:Microsoft Graph denied access to [^\n]*?\(HTTP 403\)|Microsoft Graph rejected the (?:\w+ )?request \(HTTP 403\)|Microsoft Graph answered \S+ with HTTP 403\b)/;
+const OWN_GRAPH_TEXT = /^(?:Microsoft Graph (?:denied|rejected|answered|responded)\b|Graph rejected the access token \(HTTP 401\)|(?:Teams|Outlook) Graph request failed\b)/;
+
+/**
+ * A sandboxed script agent's failure as earlier versions stored it: the
+ * script's stderr, where a Node stack preamble (file and line, source line,
+ * caret) can come before the thrown error's header. Only a header for a
+ * brokered Graph or connector request ("Error: graph.request: ...",
+ * "Error: connector.invoke: ...") is unwrapped; text further down, such as a
+ * provider body that quotes a Graph error, is not.
+ */
+const SCRIPT_AGENT_FAILURE = /^MXC script agent "[^"\n]*" failed: /;
+const ERROR_HEADER = /^[A-Za-z]*Error: /;
+
+function unwrapScriptAgentGraphError(raw: string): string {
+  const prefix = raw.match(SCRIPT_AGENT_FAILURE)?.[0];
+  if (!prefix) return raw;
+  const lines = raw.slice(prefix.length).split("\n");
+  const headerAt = lines.findIndex((line) => ERROR_HEADER.test(line));
+  if (headerAt < 0) return raw;
+  const thrown = [lines[headerAt]!.replace(ERROR_HEADER, ""), ...lines.slice(headerAt + 1)].join("\n");
+  // A brokered connector call carries the connector's own Graph wording,
+  // which the stored text checks still require.
+  const brokered = thrown.match(/^(?:graph\.request|connector\.invoke): /)?.[0];
+  return brokered ? thrown.slice(brokered.length) : raw;
+}
+
+/**
+ * Wrappers the app puts in front of a Graph error: a required Teams or Outlook
+ * connector's failed health check, and, when a write run stops before apply, a
+ * failed check of the reviewed plan or proposal and a failed replan. The Graph
+ * error follows them unchanged.
+ */
+const APP_FAILURE_WRAPPERS = [
+  /^Connector '(?:teams|outlook)' failed its health check: /,
+  /^The (?:plan|proposal) could not be checked against the tenant before applying, so nothing was applied\. /,
+  /^Nothing was applied: /,
+];
+
+function storedText(error: unknown): string {
+  let raw = (error instanceof Error ? error.message : String(error ?? "")).trimStart();
+  // Wrappers nest, for example "Nothing was applied: Connector 'teams' failed its health check: ...".
+  for (let unwrapped = true; unwrapped;) {
+    unwrapped = false;
+    for (const wrapper of APP_FAILURE_WRAPPERS) {
+      const next = raw.replace(wrapper, "");
+      if (next !== raw) {
+        raw = next;
+        unwrapped = true;
+      }
+    }
+  }
+  return unwrapScriptAgentGraphError(raw);
+}
+
+/**
+ * The start of a Graph 401 as Graph code writes it: the runtime adapter
+ * ("Graph rejected the access token (HTTP 401)."), its older wording ("Graph
+ * responded with HTTP 401 for ..."), and the connectors ("Microsoft Graph
+ * rejected the Teams access token (HTTP 401).").
+ */
+const GRAPH_401_START = /^(?:Graph rejected the access token \(HTTP 401\)|Microsoft Graph rejected the (?:\w+ )?access token \(HTTP 401\))/;
+const ADAPTER_401 = /^Graph responded with HTTP 401 for (\S+?):?(?:\s|$)/;
+
+/**
+ * True when Graph rejected the tenant's access token. A 401 or "unauthorized"
+ * elsewhere, such as in a Graph 403 body or a provider's response, is not.
+ */
+export function errorIsGraphSignInRejection(error: unknown): boolean {
+  const raw = storedText(error);
+  return GRAPH_401_START.test(raw) || graphHostAfter(raw, ADAPTER_401);
+}
+
+/** True when a stored error message was written by OpenAdminOS's Graph code. */
+function storedTextComesFromGraph(raw: string): boolean {
+  return OWN_GRAPH_TEXT.test(raw) || graphHostAfter(raw, ADAPTER_ANY);
+}
+
+/**
+ * True when the error came from a Microsoft Graph call: a typed Graph error, or
+ * a stored message written by OpenAdminOS's own Graph code. A 403 from a local
+ * model server, a vendor API, or an MCP server is not a Graph error.
+ */
+export function errorComesFromGraph(error: unknown): boolean {
+  return typedGraphDenial(error) !== undefined || storedTextComesFromGraph(storedText(error));
+}
+
+/**
+ * For records stored by earlier versions, which kept the error message only.
+ * New failures are classified with graphAccessDenialFromError.
+ */
+export function graphAccessDenialFromStoredText(text: string | undefined, context: GraphAccessContext = {}): GraphAccessDenial | undefined {
+  const raw = storedText(text);
+  if (!OWN_DENIAL_403.test(raw) && !graphHostAfter(raw, ADAPTER_403)) return undefined;
   const errorCode = raw.match(/"code"\s*:\s*"([^"]+)"/)?.[1]
     ?? (raw.includes("Authentication_RequestFromNonPremiumTenantOrB2CTenant") ? "Authentication_RequestFromNonPremiumTenantOrB2CTenant" : undefined);
   return classifyGraphAccessDenied({ ...context, errorCode: context.errorCode ?? errorCode });
+}
+
+/**
+ * A stored denial to show for a run or cache error. Denials stored by earlier
+ * versions could come from a 403 of any service; those are kept only when the
+ * stored error text is a Graph 403 that Graph code wrote.
+ */
+export function storedGraphAccessDenial(denial: GraphAccessDenial | undefined, error: unknown): GraphAccessDenial | undefined {
+  if (!denial) return undefined;
+  if (denial.source === "microsoft-graph" || typedGraphDenial(error)) return denial;
+  return graphAccessDenialFromStoredText(storedText(error)) ? denial : undefined;
 }

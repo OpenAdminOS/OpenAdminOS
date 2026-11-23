@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { GraphAccessDeniedError } from "@openadminos/agent-sdk";
 import type {
   GraphRequestInput,
   RunGraphApi,
@@ -18,6 +19,7 @@ import {
 
 interface HarnessOptions {
   failOnRequestIndex?: number;
+  failWith?: Error;
   cancelAfterRequests?: number;
 }
 
@@ -54,7 +56,7 @@ function makeHarness(options: HarnessOptions = {}) {
         requests.length === options.failOnRequestIndex
       ) {
         requests.push(input);
-        throw new Error("Graph responded with HTTP 400 for test purposes.");
+        throw options.failWith ?? new Error("Graph responded with HTTP 400 for test purposes.");
       }
       requests.push(input);
       if (options.cancelAfterRequests === requests.length) {
@@ -194,6 +196,24 @@ describe("rollback apply", () => {
       run?.steps.map((step) => step.status),
       ["completed", "failed"],
     );
+  });
+
+  it("keeps the Graph denial of the action that stopped the rollback", async () => {
+    const denied = new GraphAccessDeniedError({ method: "PATCH", path: "/deviceManagement/assignmentFilters/1", requiredScopes: ["DeviceManagementConfiguration.ReadWrite.All"], grantedScopes: ["DeviceManagementConfiguration.ReadWrite.All"] });
+    const { service, persisted } = makeHarness({ failOnRequestIndex: 1, failWith: denied });
+    const queued = await service.startRollbackRun({
+      tenantId: "tenant-1",
+      baselineId: "baseline-1",
+      plan: planWithActions(3),
+      requiredScopes: [],
+      manualCount: 0,
+    });
+    await service.confirmRun(queued.id, "ROLLBACK 3 OBJECTS");
+    const run = await waitForTerminal(persisted, queued.id);
+    assert.equal(run?.status, "failed");
+    assert.match(run?.summary ?? "", /applying 1 of 3 actions/);
+    assert.equal(run?.accessDenial?.cause, "missing-role");
+    assert.equal(run?.graphDenialChecked, true);
   });
 
   it("invalidates attempted writes when cancelled between actions", async () => {

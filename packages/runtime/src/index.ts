@@ -950,6 +950,7 @@ async function failPhase(
     summary: `${input.agent.name} failed: ${message}`,
     error: message,
     ...(accessDenial ? { accessDenial } : {}),
+    graphDenialChecked: true,
     logs: [
       ...working.logs,
       buildLog(working.id, "error", `Agent failed: ${message}`, finishedAt),

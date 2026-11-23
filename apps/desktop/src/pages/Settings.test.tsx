@@ -13,6 +13,7 @@ import {
 } from "../test/test-utils";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  type RetrievalStatus,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
 import { PROVIDER_DETECTION_COPY } from "../copy";
@@ -62,6 +63,18 @@ describe("Settings provider section", () => {
       await user.click(screen.getByRole("button", { name: `Show details for ${connected.name}` }));
       expect(screen.queryByText(connected.detail!)).toBeNull();
     }
+  });
+
+  it("shows a ready Ollama's capability warning in the provider row", async () => {
+    const capabilityWarning = "Some model capabilities could not be verified. Ollama answered with a redirect to another address.";
+    const ollama = { ...provider("ollama"), status: "connected" as const, capabilityWarning };
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge({}, createMockAppState({ providers: [ollama] })),
+    });
+    expect(await screen.findByText(capabilityWarning)).toBeVisible();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
   });
 
   it("stores the Chat answer font as a device-local General preference", async () => {
@@ -925,6 +938,64 @@ describe("Settings provider section", () => {
     });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
     expect(await screen.findByRole("alert", { name: "" })).toHaveTextContent(message);
+  });
+
+  it("shows an embedding check failure without an index and says when Ollama is unreachable", async () => {
+    const message = "Ollama answered with a redirect to another address. Check Ollama's local endpoint, then refresh.";
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({
+        available: false, ollamaReachable: true, embeddingModelInstalled: false, embeddingModelError: message,
+      })),
+      refreshRetrievalIndex: vi.fn(async () => ({
+        available: false, ollamaReachable: false, embeddingModelInstalled: false,
+      })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(screen.queryByText(/Ollama not reachable/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Check for index" }));
+    expect(await screen.findByText(/Ollama not reachable/)).toBeVisible();
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
+  it("says the embedding model downloads on its own while Ollama answers and it is missing (PR #206 review round 1, Muse)", async () => {
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({ available: false, ollamaReachable: true, embeddingModelInstalled: false })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    expect(await screen.findByText("The embedding model is not installed yet. OpenAdminOS downloads it through Ollama in the background when it starts with Ollama running; answers stay ungrounded until it arrives.")).toBeVisible();
+    expect(screen.queryByText(/setting above/)).toBeNull();
+  });
+
+  it("never runs a Refresh and an index install at once, so neither reply replaces the other's (PR #206 review rounds 3 and 4)", async () => {
+    let answerRefresh: (status: RetrievalStatus) => void = () => undefined;
+    let answerInstall: (status: RetrievalStatus) => void = () => undefined;
+    const missing: RetrievalStatus = { available: false, reason: "The documentation index is not installed.", ollamaReachable: true, embeddingModelInstalled: true };
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => missing),
+      refreshRetrievalIndex: vi.fn(() => new Promise<RetrievalStatus>((resolve) => {
+        answerRefresh = resolve;
+      })),
+      installRetrievalIndex: vi.fn(() => new Promise<RetrievalStatus>((resolve) => {
+        answerInstall = resolve;
+      })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    await screen.findByText(missing.reason!);
+    const refresh = screen.getByRole("button", { name: "Check for index" });
+    const fromFolder = screen.getByRole("button", { name: /^Install from folder/ });
+
+    await userEvent.click(refresh);
+    await waitFor(() => expect(fromFolder).toBeDisabled());
+    await act(async () => answerRefresh(missing));
+    await waitFor(() => expect(fromFolder).toBeEnabled());
+
+    await userEvent.click(fromFolder);
+    await waitFor(() => expect(refresh).toBeDisabled());
+    await act(async () => answerInstall({ available: true, version: "2026-11-01", chunkCount: 12, ollamaReachable: true, embeddingModelInstalled: true }));
+    await waitFor(() => expect(screen.queryByText(missing.reason!)).toBeNull());
+    expect(bridge.refreshRetrievalIndex).toHaveBeenCalledTimes(1);
+    expect(bridge.installRetrievalIndex).toHaveBeenCalledTimes(1);
   });
 
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {

@@ -2,27 +2,91 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
+import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
   title: string;
-  body: string;
+  /** Fixed advice, or advice read from the error when it carries the specifics. */
+  body: string | ((error: string) => string);
 }
+
+/**
+ * The app's own text of an error. What Ollama said, quoted after "Ollama said:",
+ * can contain words such as "context limit" or "invalid" that would pick an unrelated playbook.
+ */
+const ownText = (e: string) => e.split("Ollama said:")[0] ?? e;
+
+/**
+ * A failed lookup of the model's context limit has its own playbook only.
+ * The runtime names the lookup URL followed by a final ".", by ": " or by " answered ", so an
+ * endpoint prefix such as `/api/showroom` or `/api/show.v1` in front of `/api/chat` is not read as the lookup.
+ */
+const isContextLimitLookup = (e: string) => /ollama/i.test(e) && /context limit|\/api\/show(?=\.$|:\s| answered )/i.test(e);
+
+/**
+ * LM Studio's context error from the runtime. It quotes LM Studio and token
+ * counts, so no other playbook and no Graph denial is read from its text.
+ */
+const LM_STUDIO_CONTEXT_PREFIX = "LM Studio context length too small:";
+const isLmStudioContextTooSmall = (e: string) => e.includes(LM_STUDIO_CONTEXT_PREFIX);
+
+/**
+ * The sizes and the reload steps from the runtime's LM Studio context
+ * error, without LM Studio's own text. The run header truncates the error,
+ * so the playbook repeats what the admin needs to act on.
+ */
+function lmStudioContextAdvice(error: string): string {
+  const start = error.indexOf(LM_STUDIO_CONTEXT_PREFIX) + LM_STUDIO_CONTEXT_PREFIX.length;
+  const end = error.indexOf(" LM Studio said:", start);
+  const advice = error.slice(start, end === -1 ? undefined : end).trim();
+  return advice.length > 0
+    ? advice
+    : "LM Studio sets a model's context length when the model is loaded, and this request did not fit. In LM Studio, raise Context Length in the model's load settings and reload the model, then re-run.";
+}
+
+/** Errors with one cause and one recovery: only their own playbook is shown. */
+const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
+
+/**
+ * A Microsoft sign-in error as MSAL reports it: the message starts with an
+ * AADSTS code, or with an OAuth error such as interaction_required followed by
+ * one, also after the app's write-plan wrappers. An AADSTS code quoted further
+ * into a provider's error is not a tenant sign-in.
+ */
+const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
 
 const SUGGESTIONS: Suggestion[] = [
   {
-    match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e),
+    match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e) && !isContextLimitLookup(e),
     title: "Ollama isn't running",
     body: "Start it from a terminal with `ollama serve`, confirm it's reachable at http://127.0.0.1:11434, then re-run.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /(not pulled|pull|model)/i.test(e),
+    match: (e) => /ollama/i.test(e) && /context size/i.test(e),
+    title: "Ollama context too small",
+    body: "The request did not fit in the context Ollama loaded for this model. OpenAdminOS raises that context up to the model's limit when the model allows it, and the error names the limit that stopped it. Narrow the question or the agent's scope, close other apps to free memory, or pick a model with a larger context window in Settings → LLM Providers, then re-run.",
+  },
+  {
+    match: isContextLimitLookup,
+    title: "Ollama did not report the model's context limit",
+    body: "The request did not fit in the context Ollama loaded, and Ollama did not answer when OpenAdminOS asked for the model's limit before raising it. Check that Ollama is responsive with `ollama ps`, restart it if it is stuck, then re-run.",
+  },
+  {
+    match: isLmStudioContextTooSmall,
+    title: "LM Studio context too small",
+    body: lmStudioContextAdvice,
+  },
+  {
+    match: (e) =>
+      !isContextLimitLookup(e) &&
+      (/Ollama model "[^"]+" is not pulled\. Run `ollama pull [^`]+`\./.test(e) ||
+        /No Ollama model available\. Pull a model with `ollama pull <model>`\./.test(e)),
     title: "Model not pulled",
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },
   {
-    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e),
+    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e) && !isContextLimitLookup(e),
     title: "Ollama generation timed out",
     body: "The local model did not finish in time. OpenAdminOS now waits up to 3 minutes by default; restart the app to pick up that change. For very large local models, set `OPENAGENTS_OLLAMA_TIMEOUT_MS` higher or pick a smaller model.",
   },
@@ -37,12 +101,18 @@ const SUGGESTIONS: Suggestion[] = [
     body: "The provider was still producing output when it reached the limit for one request. Narrow the agent's scope or pick a faster model, then re-run. To allow longer requests, set `OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS` or `OPENADMINOS_CODEX_TIMEOUT_MS` higher, in milliseconds, and restart the app.",
   },
   {
-    match: (e) => /timed out|timeout|aborted/i.test(e),
+    match: (e) => /timed out|timeout|aborted/i.test(e) && !isContextLimitLookup(e),
     title: "Request timed out",
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",
   },
   {
-    match: (e) => /401|unauthor|expired token|interaction_required/i.test(e),
+    // Only a Graph 401 ("Graph rejected the access token (HTTP 401)") or a
+    // Microsoft sign-in error (an AADSTS code) is a tenant sign-in failure; a
+    // model server or vendor API that answers 401, 403 Unauthorized or
+    // "expired token" is not.
+    match: (e) =>
+      (errorIsGraphSignInRejection(e) || MICROSOFT_SIGN_IN_ERROR.test(e)) &&
+      !isContextLimitLookup(e),
     title: "Tenant token expired",
     body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
   },
@@ -52,7 +122,7 @@ const SUGGESTIONS: Suggestion[] = [
     body: "Choose an organization in the organization switcher, or connect a Microsoft 365 tenant in Connections, before running agents.",
   },
   {
-    match: (e) => /yaml|manifest|schema|invalid/i.test(e),
+    match: (e) => /yaml|manifest|schema|invalid/i.test(e) && !isContextLimitLookup(e),
     title: "Manifest validation failed",
     body: "The agent's manifest didn't validate against the schema. If you authored it, re-open the New Agent flow and re-draft; if it's a registry agent, check for a newer version.",
   },
@@ -61,8 +131,24 @@ const SUGGESTIONS: Suggestion[] = [
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
-  const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
-  const accessDenial = run.accessDenial ?? graphAccessDenialFromError(run.error);
+  // A failed lookup of the Ollama model's context limit and an LM Studio
+  // context error each have one cause and one recovery; an HTTP status or a
+  // number in their text (for example 403) is not a Graph denial.
+  const own = ownText(run.error);
+  const exclusive = EXCLUSIVE.find((match) => match(own));
+  const matched = exclusive
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+    : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
+  // Only a Graph error gets Graph recovery advice. Runs stored by earlier
+  // versions can carry an accessDenial for a 403 from a model server, a
+  // vendor API, or an MCP server, for example a "403 MiB" in what Ollama
+  // said; that stored value is ignored. A failure classified from its typed
+  // error is never read from its text; a run stored by an earlier version is
+  // read from its message, as Graph code wrote it before denials were stored.
+  const accessDenial = exclusive
+    ? undefined
+    : storedGraphAccessDenial(run.accessDenial, run.error)
+      ?? (run.graphDenialChecked ? undefined : graphAccessDenialFromStoredText(run.error));
   if (accessDenial) {
     matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
   }
@@ -101,7 +187,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
                     {suggestion.title}
                   </div>
                   <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
-                    {suggestion.body}
+                    {typeof suggestion.body === "function" ? suggestion.body(run.error!) : suggestion.body}
                   </p>
                 </div>
               ))}

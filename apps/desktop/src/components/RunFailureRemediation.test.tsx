@@ -1,12 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { classifyGraphAccessDenied, type RunRecord } from "@openadminos/agent-sdk";
+import { classifyGraphAccessDenied, type GraphAccessContext, type GraphAccessDenial, type RunRecord } from "@openadminos/agent-sdk";
 import { RunFailureRemediation } from "./RunFailureRemediation";
 
 vi.mock("./ReportIssueModal", () => ({ useReportIssue: () => vi.fn() }));
 
+/** A denial as earlier versions stored it, before denials carried their source. */
+function legacyDenial(context: GraphAccessContext = {}): GraphAccessDenial {
+  const { source: _source, ...denial } = classifyGraphAccessDenied(context);
+  return denial;
+}
+
 describe("Graph run failure recovery", () => {
-  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: "HTTP 403", steps: [], logs: [] };
+  const base: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", error: 'Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: {"error":{"code":"Forbidden","message":"You cannot perform the requested operation, required scopes are missing in the token."}}', steps: [], logs: [] };
 
   it.each([
     ["missing-consent", { requiredScopes: ["User.Read.All"], grantedScopes: [] }, "Graph consent required"],
@@ -25,6 +31,33 @@ describe("Graph run failure recovery", () => {
     render(<RunFailureRemediation run={base} />);
     expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
     expect(screen.queryByText("Scope or consent issue")).not.toBeInTheDocument();
+  });
+
+  it("shows the stored denial for a run whose error is the denial text", () => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error: `${accessDenial.message} ${accessDenial.recovery}`, accessDenial }} />);
+    expect(screen.getByText("Graph consent required")).toBeInTheDocument();
+  });
+
+  it("shows a denial classified from a Graph error that an agent wrapped", () => {
+    const accessDenial = classifyGraphAccessDenied({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error: "Listing users failed.", accessDenial }} />);
+    expect(screen.getByText("Graph consent required")).toBeInTheDocument();
+  });
+
+  it.each([
+    "Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Forbidden",
+    "LM Studio responded with HTTP 403 at http://127.0.0.1:1234/v1/chat/completions: forbidden",
+    "Anthropic API returned 403 Forbidden: permission_error",
+    "MCP server \"tickets\" responded with HTTP 403: forbidden",
+    "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden by the Microsoft Graph lab proxy",
+    "HTTP 403",
+  ])("ignores a stored Graph denial when the error did not come from Microsoft Graph: %s", (error) => {
+    const accessDenial = legacyDenial({ requiredScopes: ["User.Read.All"], grantedScopes: [] });
+    render(<RunFailureRemediation run={{ ...base, error, accessDenial }} />);
+    for (const title of ["Graph consent required", "Graph access cause unverified", "Role access required", "Tenant licence required"]) {
+      expect(screen.queryByText(title)).not.toBeInTheDocument();
+    }
   });
 });
 
@@ -47,4 +80,268 @@ it.each([
   expect(screen.getByText(title)).toBeInTheDocument();
   expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it.each([
+  "Ollama context size too small: This request needs 40,652 tokens of context, but qwen3:8b supports at most 40,960.",
+  "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give gpt-oss:20b 16,384, usually because free memory ran out.",
+])("gives an Ollama context overflow its own recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("still matches a model that is not pulled", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: 'Ollama model "qwen3:8b" is not pulled. Run `ollama pull qwen3:8b`.' };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model not pulled")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
+});
+
+it.each([
+  "Ollama did not report the model's context limit within 5000ms at http://127.0.0.1:11434/api/show.",
+  "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: busy",
+])("gives a failed Ollama context limit lookup its own recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Ollama at http://127.0.0.1:11434/api/show answered with a redirect to another address. OpenAdminOS does not follow redirects from a model server on this device, so nothing was sent there."],
+  ["Ollama not reachable at http://127.0.0.1:11434/api/show: fetch failed"],
+])("gives a failed lookup of the model's context limit its recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("does not read incidental `ollama pull` text as a missing model", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: ollama pull is disabled during maintenance" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it("matches the provider's message when no Ollama model is available", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "No Ollama model available. Pull a model with `ollama pull <model>`." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model not pulled")).toBeInTheDocument();
+});
+
+it("treats the overall deadline during the context limit lookup as a lookup failure, not a slow generation", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/show." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+});
+
+it.each([
+  "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat on the retry with a 45,056 token context.",
+  "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat with the 45,056 token context kept from an earlier request.",
+])("gives a timed out request with a raised context the generation timeout playbook: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama generation timed out")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("does not read a context limit in what Ollama said as a failed lookup", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: out of memory at the requested context limit" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("does not read a 403 in what Ollama said as a Graph denial", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText(/Graph/)).not.toBeInTheDocument();
+});
+
+it("ignores a Graph denial an older build saved from what Ollama said", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)",
+    accessDenial: legacyDenial(),
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText(classifyGraphAccessDenied({}).title)).not.toBeInTheDocument();
+});
+
+it("keeps a stored Graph denial whose error only mentions the Ollama marker", () => {
+  const denial = classifyGraphAccessDenied({});
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: "Graph responded with HTTP 403 for GET /users: Ollama said: denied",
+    accessDenial: denial,
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText(denial.title)).toBeInTheDocument();
+});
+
+it("does not pick a playbook from words in what Ollama said", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: CUDA allocation failed: invalid argument" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Manifest validation failed")).not.toBeInTheDocument();
+});
+
+it("gives a memory failure with the kept context the context playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+});
+
+it("gives the overall deadline during a streaming answer the Ollama generation playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama generation timed out")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it.each(["/api/showroom", "/api/show.v1", "/api/show-1", "/api/show staging"])("does not read an endpoint prefix %s as the context limit lookup", (prefix) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: `Ollama timed out after 180000ms at http://127.0.0.1:8080${prefix}/api/chat.` };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama generation timed out")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("gives a memory failure on the context retry the context playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could not load gpt-oss:20b with 45,056, usually because free memory ran out. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it("does not read incidental `is not pulled` text as a missing model", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 503 at http://127.0.0.1:11434/api/show: maintenance index is not pulled from cache" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it.each([
+  "Ollama not reachable at http://127.0.0.1:11434/api/show: fetch failed",
+  "Ollama could not report the model's context limit: HTTP 401 at http://127.0.0.1:11434/api/show: unauthorized",
+  "Ollama could not report the model's context limit: http://127.0.0.1:11434/api/show answered with an error: invalid model name",
+])("shows only the lookup playbook for a failed context limit lookup: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  for (const title of ["Ollama isn't running", "Tenant token expired", "Manifest validation failed", "Request timed out", "Model not pulled"]) {
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+  }
+});
+
+it("does not show the missing-model playbook for a lookup error that quotes it", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not report the model's context limit: HTTP 502 at http://127.0.0.1:11434/api/show: upstream said Ollama model \"qwen3:8b\" is not pulled. Run `ollama pull qwen3:8b`." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+});
+
+it("shows only the lookup playbook for an HTTP 403 from the lookup, even with a stored Graph denial", () => {
+  const error = "Ollama could not report the model's context limit: HTTP 403 at http://127.0.0.1:11434/api/show: Forbidden";
+  const accessDenial = legacyDenial();
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama did not report the model's context limit")).toBeInTheDocument();
+  expect(screen.queryByText(accessDenial.title)).not.toBeInTheDocument();
+  expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});
+
+it("does not read Graph advice from the text of a failure classified from its typed error", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], graphDenialChecked: true, error: "Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: forbidden" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Graph access cause unverified")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Ollama responded with HTTP 403 at http://127.0.0.1:11434/api/chat: Unauthorized", false],
+  ["Anthropic API returned 401 Unauthorized: invalid x-api-key", false],
+  ["Ollama responded with HTTP 403: expired token", false],
+  ["Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
+  ["The plan could not be checked against the tenant before applying, so nothing was applied. Graph rejected the access token (HTTP 401). Tenant needs reconnect.", true],
+  ["Graph responded with HTTP 401 for https://graph.microsoft.com/v1.0/users: {\"error\":{\"code\":\"InvalidAuthenticationToken\"}}", true],
+  ["AADSTS65001 interaction_required: consent is needed", true],
+  ["interaction_required: AADSTS50076: Due to a configuration change made by your administrator, you must use multi-factor authentication.", true],
+  ["Microsoft Graph rejected the Teams access token (HTTP 401). Reconnect the tenant.", true],
+  ["Graph responded with HTTP 401 for https://gateway.example/v1/messages: unauthorized", false],
+  ['Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users/1/authentication/methods: {"error":{"code":"accessDenied","message":"The caller is unauthorized to perform this action."}}', false],
+  ["Ollama responded with HTTP 403 at http://gateway.example/api/chat: upstream said AADSTS65001 interaction_required", false],
+])("gives tenant sign-in advice only for a tenant sign-in failure: %s", (error, tenant) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  if (tenant) expect(screen.getByText("Tenant token expired")).toBeInTheDocument();
+  else expect(screen.queryByText("Tenant token expired")).not.toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored write-plan failure that wraps a Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: 'The plan could not be checked against the tenant before applying, so nothing was applied. Graph responded with HTTP 403 for https://graph.microsoft.com/beta/users: {"error":{"code":"Forbidden"}}' };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
+});
+
+it.each([
+  "LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Raise Context Length to at least 20,480 (qwen3-8b supports up to 32,768) in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run. If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window. OpenAdminOS does not reload the model itself, because that would replace the model you loaded. LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens when context the overflows. However, the model is loaded with context length of only 4096 tokens, which is not enough.",
+  "LM Studio context length too small: This request does not fit in the context length qwen3-8b is loaded with in LM Studio. Raise Context Length in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run. If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window. OpenAdminOS does not reload the model itself, because that would replace the model you loaded. LM Studio said: The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input. Error Data: n/a, Additional Data: n/a",
+  "LM Studio context length too small: This request needs 40,301 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,030. qwen3-8b supports at most 403,000, so narrow the request or pick a model with a larger context window. LM Studio said: invalid input, request timed out, forbidden",
+])("gives an LM Studio context error only its own recovery: %s", (error) => {
+  const accessDenial = classifyGraphAccessDenied({});
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, accessDenial };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("LM Studio context too small")).toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+  for (const title of [accessDenial.title, "Tenant token expired", "Manifest validation failed", "Request timed out", "Ollama context too small"]) {
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+  }
+});
+
+it("shows the sizes and the load settings steps in the LM Studio playbook, which the header cuts off", () => {
+  const advice = "This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Raise Context Length to at least 20,480 (qwen3-8b supports up to 32,768) in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run. If LM Studio refuses the larger size or keeps the smaller one, narrow the request or pick a model with a larger context window. OpenAdminOS does not reload the model itself, because that would replace the model you loaded.";
+  const error = `LM Studio context length too small: ${advice} LM Studio said: <LM Studio error> Trying to keep the first 15857 tokens when context the overflows.`;
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  const body = screen.getByText(advice);
+  expect(body.textContent).toContain("20,480");
+  expect(body.textContent).toContain("32,768");
+  expect(body.textContent).toContain("My Models");
+  expect(body.textContent).not.toContain("LM Studio said");
+});
+
+it("does not give an Ollama context error the LM Studio playbook", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but qwen3:8b supports at most 40,960." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.queryByText("LM Studio context too small")).not.toBeInTheDocument();
+});
+
+it("keeps the LM Studio playbook for a model whose name mentions Ollama", () => {
+  const error = "LM Studio context length too small: This request does not fit in the 8,192 tokens of context ollama-port/qwen3 is loaded with in LM Studio. Raise Context Length in the model's load settings in LM Studio (My Models, or the loaded model in the Developer tab) and reload it, then re-run. LM Studio said: context limit reached at /api/show: n/a";
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("LM Studio context too small")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored required Teams connector failure on a Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
+});
+
+it("shows Graph advice for a stored replan failure on a required Teams connector's Graph 403", () => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Nothing was applied: Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
 });

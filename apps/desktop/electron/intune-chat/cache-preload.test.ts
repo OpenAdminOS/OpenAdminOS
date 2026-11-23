@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { AppStateStore } from "../state.js";
-import type { RunGraphApi } from "@openadminos/agent-sdk";
+import { GraphAccessDeniedError, type RunGraphApi } from "@openadminos/agent-sdk";
 
 it("preloads all pages and preserves the complete snapshot after a paging failure or cancellation", async () => {
   const dir = await mkdtemp(join(tmpdir(), "oaos-preload-"));
@@ -37,7 +37,7 @@ it("preloads all pages and preserves the complete snapshot after a paging failur
       requests++;
       const page = Number(input.query?.$skiptoken || 0);
       if (mode === "failure" && page === 1)
-        throw new Error("HTTP 403 Forbidden");
+        throw new GraphAccessDeniedError({});
       if (mode === "cancel") {
         await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(resolve, 10000);

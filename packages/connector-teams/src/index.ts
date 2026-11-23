@@ -258,7 +258,7 @@ export const teamsConnector: ConnectorFactory<TeamsConnectorCapabilities> =
               error instanceof Error
                 ? error.message
                 : "Teams health check failed.";
-            return { healthy: false, message };
+            return { healthy: false, message, error };
           }
         },
         async dispose() {
