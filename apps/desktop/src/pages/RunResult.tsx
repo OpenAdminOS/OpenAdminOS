@@ -228,8 +228,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
           ...(run.tenantId ? { tenantId: run.tenantId } : {}),
           ...(run.providerId ? { providerId: run.providerId } : {}),
           ...(run.model ? { model: run.model } : {}),
-          // Run for real of a model fit dry run keeps its safeguards through setup, so a provider
-          // picked there stays on this run and does not become the active provider.
+          // Run for real of a model fit dry run keeps its safeguards through setup.
           ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
           returnTo: `/runs/${encodeURIComponent(run.id)}`,
         }),

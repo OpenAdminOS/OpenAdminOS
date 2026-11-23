@@ -21,7 +21,7 @@ import type {
   RequestedScope,
   TenantRecord,
 } from "../shared/openAdminOS";
-import { isManagedSettingLocked } from "../shared/openAdminOS";
+import { isManagedSettingLocked, isRemoteBackedModel } from "../shared/openAdminOS";
 import { hostedModelFitModel, onDeviceRerunProvider, SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
 import { useAppState } from "../state";
 import {
@@ -107,13 +107,18 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   ));
   const onDeviceModelMissing = isOneRunProviderIntent(intent) && selectedProvider?.isLocal &&
     selectedProvider.status === "connected" && onDeviceRerunProvider(selectedProvider).models.length === 0;
+  const dryRunIntent = lockedDryRunIntent(intent);
+  const dryRunProvider = state.providers.find((provider) => provider.id === dryRunIntent?.providerId);
   const providerReady = useCallback(
     (candidate: PendingIntent | null | undefined) => {
       const providerId =
         candidate?.kind === "agent-run" && candidate.providerId
           ? candidate.providerId
           : state.activeProviderId;
-      const provider = state.providers.find((entry) => entry.id === providerId);
+      const dryRun = lockedDryRunIntent(candidate);
+      const provider = state.providers.find((entry) => entry.id === (dryRun ? dryRun.providerId : providerId));
+      if (dryRun?.model && (!provider?.models.includes(dryRun.model) || provider.modelsFromPolicy)) return false;
+      if (dryRun?.model && dryRun.safeguards?.onDevice && provider && isRemoteBackedModel(provider, dryRun.model)) return false;
       // A run for one request after a model fit failure never goes to a self-hosted server outside this device.
       if (isOneRunProviderIntent(candidate) && provider && !modelFitUsable(provider, state.activeModelByProviderId, candidate.safeguards?.onDevice === true)) return false;
       return Boolean(
@@ -203,6 +208,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (open && stage === "provider" && oneRunChecksRunning === 0 && providerReadyForIntent(intent)) {
       setStage("ready");
+    } else if (open && stage === "ready" && lockedDryRunIntent(intent) && !providerReadyForIntent(intent)) {
+      setStage("provider");
     }
   }, [intent, oneRunChecksRunning, open, providerReadyForIntent, stage]);
 
@@ -315,19 +322,21 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const recheckProviders = useCallback(async () => {
     try {
       setError(null);
-      if (isOneRunProviderIntent(intent) && intent.providerId) await recheckOneRunProvider(intent.providerId);
+      const providerId = dryRunIntent?.providerId ?? (isOneRunProviderIntent(intent) ? intent.providerId : undefined);
+      if (providerId) await recheckOneRunProvider(providerId);
       else await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [intent, recheckOneRunProvider, refresh]);
+  }, [dryRunIntent, intent, recheckOneRunProvider, refresh]);
 
   const selectProvider = useCallback(
     async (id: ProviderId) => {
+      if (dryRunIntent) return;
       try {
         setError(null);
         setIntent((current) => {
-          if (current?.kind !== "agent-run") return current;
+          if (current?.kind !== "agent-run" || lockedDryRunIntent(current)) return current;
           const next = { ...current, providerId: id, model: undefined };
           writePendingIntent(next);
           return next;
@@ -344,11 +353,15 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     },
-    [intent, recheckOneRunProvider, setActiveProvider],
+    [dryRunIntent, intent, recheckOneRunProvider, setActiveProvider],
   );
 
   const resume = useCallback(() => {
     const nextIntent = intent ?? readPendingIntent();
+    if (lockedDryRunIntent(nextIntent) && !providerReadyForIntent(nextIntent)) {
+      setStage("provider");
+      return;
+    }
     clearPendingIntent();
     setIntent(null);
     setOpen(false);
@@ -379,7 +392,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         });
         break;
     }
-  }, [intent, navigate]);
+  }, [intent, navigate, providerReadyForIntent]);
 
   const value = useMemo<SetupFlowValue>(
     () => ({
@@ -409,6 +422,17 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           ? state.providers.filter((provider) => modelFitUsable(provider, state.activeModelByProviderId, intent.safeguards?.onDevice === true))
           : state.providers.map((provider) => activeModelProvider(provider, state.activeModelByProviderId))}
         activeProviderId={isOneRunProviderIntent(intent) && intent.providerId ? intent.providerId : state.activeProviderId}
+        {...(dryRunIntent ? {
+          dryRunSetup: {
+            provider: dryRunProvider,
+            providerId: dryRunIntent.providerId,
+            model: dryRunIntent.model,
+            onOpenAgent: () => {
+              closeFlow();
+              navigate(`/agents/${encodeURIComponent(dryRunIntent.slug)}`);
+            },
+          },
+        } : {})}
         savedRegistrations={state.savedAppRegistrations ?? []}
         registrationLocked={
           isManagedSettingLocked(state.managedPolicy, "appRegistration") &&
@@ -458,6 +482,10 @@ function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Part
   if (!ready) return true;
   if (provider.isLocal) return onDeviceRerunProvider(provider).models.length > 0;
   return hostedModelFitModel(provider, activeModelByProviderId) !== undefined;
+}
+
+function lockedDryRunIntent(intent: PendingIntent | null | undefined) {
+  return intent?.kind === "agent-run" && intent.runForRealOfRunId ? intent : undefined;
 }
 
 /** A model fit rerun (or Run again of one): the provider it names is for this run only. */

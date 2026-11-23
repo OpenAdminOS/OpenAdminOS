@@ -2824,8 +2824,10 @@ such a provider as ready for it. Start passes the provider and model the review 
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
-provider for a model fit rerun or for Run for real of a model fit dry run, and
-checks the picked provider in full the way selecting it does. A run resumed
+provider for a model fit rerun, and checks the picked provider in full the
+way selecting it does. Run for real keeps its dry run provider and model
+through setup. The admin can recheck that provider or open the agent page to
+start a new run with different settings. A run resumed
 from setup opens only its own review, and setup moves on from a provider
 picked for one run only once its full check is done. A hosted provider that
 reports no model, or only a CLI default placeholder such as Gemini's

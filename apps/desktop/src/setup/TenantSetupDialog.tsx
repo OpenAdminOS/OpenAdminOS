@@ -65,6 +65,13 @@ export type SetupStage =
   | "provider"
   | "ready";
 
+interface DryRunSetup {
+  provider: ProviderSummary | undefined;
+  providerId: ProviderId | undefined;
+  model: string | undefined;
+  onOpenAgent: () => void;
+}
+
 export function TenantSetupDialog({
   open,
   stage,
@@ -76,6 +83,7 @@ export function TenantSetupDialog({
   agentName,
   providers,
   activeProviderId,
+  dryRunSetup,
   savedRegistrations = [],
   registrationLocked = false,
   editOptions,
@@ -99,6 +107,7 @@ export function TenantSetupDialog({
   agentName?: string;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
+  dryRunSetup?: DryRunSetup;
   /** Custom registrations remembered on this device, most recent first. */
   savedRegistrations?: SavedAppRegistration[];
   /** The IT policy file locks sign-in to its own registration (the `managed` entry). */
@@ -117,13 +126,14 @@ export function TenantSetupDialog({
   onRecheckProviders: () => void | Promise<void>;
   onResume: () => void;
 }) {
-  const statusAnnouncement = setupAnnouncement(stage, activeTenant);
+  const checkingDryRun = stage === "provider" ? dryRunSetup : undefined;
+  const statusAnnouncement = checkingDryRun ? "Check the dry run provider" : setupAnnouncement(stage, activeTenant);
 
   return (
     <Modal open={open} onClose={onClose} size="md" closeOnScrim={stage !== "waiting"}>
       <ModalHeader
-        title={dialogTitle(stage)}
-        subtitle={dialogSubtitle(stage)}
+        title={checkingDryRun ? "Check the dry run provider" : dialogTitle(stage)}
+        subtitle={checkingDryRun ? undefined : dialogSubtitle(stage)}
         onClose={onClose}
       />
       <div className="sr-only" aria-live="polite" aria-atomic="true">
@@ -163,7 +173,8 @@ export function TenantSetupDialog({
           {...(onEditSignIn ? { onEditSignIn } : {})}
         />
       )}
-      {stage === "provider" && (
+      {checkingDryRun && <DryRunProviderStep setup={checkingDryRun} error={error} onRecheck={onRecheckProviders} onCancel={onClose} />}
+      {stage === "provider" && !checkingDryRun && (
         <ProviderStep
           providers={providers}
           activeProviderId={activeProviderId}
@@ -1048,6 +1059,32 @@ function ErrorStep({
           )}
           <Button data-autofocus variant="primary" onClick={onTryAgain}>Try again</Button>
         </div>
+      </DialogFooter>
+    </>
+  );
+}
+
+function DryRunProviderStep({ setup, error, onRecheck, onCancel }: {
+  setup: DryRunSetup;
+  error: string | null;
+  onRecheck: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const { provider, providerId, model, onOpenAgent } = setup;
+  const providerName = provider?.name ?? providerId ?? "the original provider";
+  const showSetup = provider && provider.status !== "connected";
+  return (
+    <>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6 text-sm text-[var(--color-text-soft)]">
+        <p>Run for real uses {providerName}{model ? ` with ${model}` : ""}, as the dry run did.</p>
+        <p>If you cannot restore that provider and model, open the agent page to start a new run.</p>
+        {error ? <p role="alert" className="text-[var(--color-danger)]">{error}</p> : null}
+        {showSetup ? <ProviderNotReadyCard provider={provider} onRecheck={onRecheck} /> : null}
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button variant="secondary" onClick={onOpenAgent}>Open agent page</Button>
+        {providerId && !showSetup ? <Button variant="secondary" onClick={() => void onRecheck()}>Recheck dry run provider</Button> : null}
       </DialogFooter>
     </>
   );

@@ -744,6 +744,39 @@ it("shows a refused Run again start inside the review (review round 3)", async (
   expect(within(dialog).getByText(/Ollama isn't reachable/)).toBeInTheDocument();
 });
 
+it("keeps Run for real on the dry run model when setup rechecks its provider", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({
+    status: "planned", dryRun: true, tenantId: "tenant-1", providerId: "openai", model: "original-model",
+  });
+  const buildState = (checked: number) => createMockAppState({
+    providers: mockProviders.map((provider) => provider.id === "openai"
+      ? { ...provider, status: checked ? "connected" : "error", models: [checked >= 2 ? "original-model" : "different-model"] }
+      : provider),
+    runs: [run],
+    installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
+  });
+  let checked = 0;
+  const recheckProvider = vi.fn(async () => { checked += 1; });
+  const bridge = makeMockBridge({ recheckProvider, getAppState: vi.fn(async () => buildState(checked)) }, buildState(checked));
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: /Run for real/ }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the dry run provider" });
+  expect(within(dialog).getByText(/with original-model/)).toBeInTheDocument();
+  expect(within(dialog).queryByRole("button", { name: /Ollama|different-model|Continue/ })).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Open agent page" })).toBeInTheDocument();
+  await user.click(within(dialog).getByRole("button", { name: "Recheck" }));
+  await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith("openai"));
+  const recheck = await within(dialog).findByRole("button", { name: "Recheck dry run provider" });
+  expect(within(dialog).queryByRole("button", { name: /Review .* run/ })).not.toBeInTheDocument();
+  await user.click(recheck);
+  await user.click(await screen.findByRole("button", { name: /Review .* run/ }));
+  const review = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(within(review).getByText("original-model")).toBeInTheDocument();
+  expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});
+
 it("runs Run for real after Switch from No organization without opening setup (Muse round 3)", async () => {
   const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, tenantId: "tenant-1", finishedAt: "2026-10-31T12:00:00Z" });
