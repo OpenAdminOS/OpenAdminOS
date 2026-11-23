@@ -416,22 +416,24 @@ it no longer lists, also for a reply still in flight, and the fallback after a
 rejected level reads the list again. A family Ollama reported decides. For a model without
 one, Ollama's answers decide, per endpoint and model and only for the version
 (digest) the request was sent to and learned against: a rejected level (`think value ... is not
-supported`, or `... does not support thinking`) is sent again with
+supported`, `... does not support thinking`, or an older Ollama whose `think`
+is a Boolean only) is sent again with
 `false`, and reasoning streamed after `false` switches later requests to "low".
 The model is resolved again before that resend; when it now resolves to
 another model, that model's own value is sent instead and a rejection of it is
 handled the same way, at most two resends per request.
 Without either, the name decides. Reasoning a model writes inline in its
-content, in `<think>` blocks (also split across chunks, nested, or never
-closed),
-is taken out of the answer as it streams; a tag start the token limit cut off
+content, in `<think>` blocks before any answer text (also split across
+chunks, nested, or never closed), is taken out of the answer as it streams;
+once the answer has started, a tag is its text (code that names one); a tag start the token limit cut off
 after reasoning is not an answer. The model list is read before context
 sizing; when the sizing lookup saw another revision (`modified_at`) than the
 list (compared to the nanosecond), the list is read and the request sized
 again, once. A think level resend to another model than the one the request
 was sized for sizes it again first, with its own timeout, and is refused when
 that model cannot take it; its think value is chosen after that lookup, and
-a context overflow on that resend is checked against what the new lookup saw. The
+a context overflow on that resend is checked, and reported, against what the
+new lookup saw and the size that resend sent. The
 retry after a context overflow reads its lookup again when the list then
 names another revision or the name resolves to another installed model. The think value,
 version and family a send uses are taken right before it, and the chat
