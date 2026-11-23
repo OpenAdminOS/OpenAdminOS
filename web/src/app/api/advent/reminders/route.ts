@@ -19,12 +19,9 @@ function authorised(request: Request) {
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
-export async function POST(request: Request) {
-  if (!authorised(request)) {
-    return Response.json({ error: adventEnabled() ? "Unauthorized." : "Not found." }, {
-      status: adventEnabled() ? 401 : 404, headers,
-    });
-  }
+export async function GET(request: Request) {
+  if (!adventEnabled()) return Response.json({ error: "Not found." }, { status: 404, headers });
+  if (!authorised(request)) return Response.json({ error: "Unauthorized." }, { status: 401, headers });
 
   const day = reminderDoorAt(campaignNow(process.env.ADVENT_NOW));
   const apiKey = process.env.ADVENT_RESEND_API_KEY?.trim();
@@ -34,12 +31,16 @@ export async function POST(request: Request) {
   const delivery = switchedOn && apiKey && from && secret ? { apiKey, from, secret } : null;
   const canSend = delivery !== null;
 
-  if (day !== null && !storageConfig()) {
+  if (!storageConfig()) {
     console.info("[advent] Reminder count unavailable", { day, dryRun: !canSend });
     return Response.json({ error: "Campaign storage is not configured.", day, dryRun: !canSend }, { status: 503, headers });
   }
 
   try {
+    const cleanup = await rpc<{ expiredTokens: number; staleAttempts: number }>("advent_daily_cleanup", {
+      p_now: new Date().toISOString(),
+    });
+    console.info("[advent] Daily cleanup", cleanup);
     const result = await runReminders(day, canSend, {
       count: (day) => rpc<number>("advent_reminder_count", { p_day: day }),
       claim: (day, limit) => rpc<Recipient[]>("advent_reminder_claim", { p_day: day, p_limit: limit }),
@@ -62,6 +63,8 @@ export async function POST(request: Request) {
       { status: 503, headers });
   }
 }
+
+export const POST = GET;
 
 async function sendBatch(day: number, recipients: Recipient[], { apiKey, from, secret }: { apiKey: string; from: string; secret: string }) {
   const ids = recipients.map(({ id }) => id);

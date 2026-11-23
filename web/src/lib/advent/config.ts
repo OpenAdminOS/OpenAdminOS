@@ -17,6 +17,11 @@ export function sessionSecret() {
   return secret && Buffer.byteLength(secret) >= 32 ? secret : null;
 }
 
+export function answerPepper() {
+  const secret = process.env.ADVENT_ANSWER_PEPPER;
+  return secret && Buffer.byteLength(secret) >= 32 ? secret : null;
+}
+
 export function storageConfig() {
   const key = process.env.ADVENT_SUPABASE_SERVICE_KEY?.trim();
   try {

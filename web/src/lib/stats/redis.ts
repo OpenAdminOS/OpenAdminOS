@@ -37,6 +37,7 @@ export const keys = {
   supportIssueDedup: (hash: string) => `oa:dedup:support-issue:${hash}`,
   adventEmailRate: (hash: string) => `oa:rate:advent:email:${hash}`,
   adventIpRate: (hash: string) => `oa:rate:advent:ip:${hash}`,
+  adventWrongAnswerRate: (hash: string) => `oa:rate:advent:wrong-answer:${hash}`,
   installs7d: (slug: string) => `oa:installs7d:${slug}`,
   knownSlugs: () => `oa:slugs`,
 } as const;

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 const QUOTES = new Map([['"', '"'], ["'", "'"], ["“", "”"], ["‘", "’"], ["«", "»"]]);
 
@@ -19,6 +19,6 @@ export function normalizeAnswer(answer: string) {
   }
 }
 
-export function hashAnswer(day: number, answer: string) {
-  return createHash("sha256").update(`${day}:${normalizeAnswer(answer)}`).digest("hex");
+export function hashAnswer(day: number, answer: string, pepper: string) {
+  return createHmac("sha256", pepper).update(`${day}:${normalizeAnswer(answer)}`).digest("hex");
 }

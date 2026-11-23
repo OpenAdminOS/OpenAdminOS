@@ -1,15 +1,16 @@
-type DoorDraft = {
+type Door = {
   day: number;
   title: string;
   goal: string;
   needsTenant: boolean;
-  draft: true;
+  draft: boolean;
   steps?: readonly string[];
   question?: string;
   hint?: string;
 };
 
-export const doors: readonly DoorDraft[] = [
+// Choose check answers with a meaningful search space. Avoid counts, yes or no, and multiple choice.
+export const doors: readonly Door[] = [
   {
     day: 1, title: "Install OpenAdminOS", goal: "Install the desktop app and find the version you are running.",
     needsTenant: false, draft: true,
@@ -71,10 +72,10 @@ export const doors: readonly DoorDraft[] = [
     steps: [
       "Open Marketplace, select Agents and search for Find inactive devices.",
       "Open the listing and read its mode near the title. Leave the agent uninstalled for this door.",
-      "Open Permissions and count the Microsoft Graph scopes listed there. Count each scope once.",
+      "Open Permissions. Read the exact name of the first Microsoft Graph scope in the list.",
     ],
-    question: "How many Microsoft Graph permissions does Find inactive devices declare?",
-    hint: "That is not what the app shows. Count the scopes listed in step 3.",
+    question: "What is the exact name of the first Microsoft Graph scope listed under Permissions for Find inactive devices?",
+    hint: "That is not what the app shows. Check the exact spelling of the first scope in step 3.",
   },
   {
     day: 7, title: "Try the OpenAdmin 8B local model", goal: "Install OpenAdmin 8B in Ollama if your hardware can run it. This door is optional.",

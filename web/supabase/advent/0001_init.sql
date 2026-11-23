@@ -279,7 +279,7 @@ returns void language sql security invoker set search_path = public, pg_temp as 
 $$;
 
 create function public.advent_complete_door(
-  p_id uuid, p_day int, p_now timestamptz, p_on_time boolean, p_hash text, p_feedback text
+  p_id uuid, p_day int, p_now timestamptz, p_on_time boolean, p_hash text, p_feedback text, p_can_record_wrong boolean
 ) returns jsonb language plpgsql security invoker set search_path = public, pg_temp as $$
 declare
   account public.advent_participants;
@@ -292,7 +292,6 @@ begin
     return jsonb_build_object('status', 'signed_out');
   end if;
 
-  delete from public.advent_attempts where at < p_now - interval '7 days';
   select * into previous from public.advent_completions where participant_id = p_id and day = p_day;
   if found then
     return jsonb_build_object('status', 'done');
@@ -315,6 +314,9 @@ begin
       return jsonb_build_object('status', 'limited');
     end if;
     if not coalesce(p_hash = any(hashes), false) then
+      if p_can_record_wrong is not true then
+        return jsonb_build_object('status', 'ip_limited');
+      end if;
       insert into public.advent_attempts (participant_id, day, at) values (p_id, p_day, p_now);
       return jsonb_build_object('status', 'wrong', 'remaining', 9 - attempts);
     end if;
@@ -403,13 +405,26 @@ begin
     return null;
   end if;
 
-  delete from public.advent_login_tokens where expires_at <= clock_timestamp();
   delete from public.advent_participants as p
   where not exists (
     select 1 from public.advent_draws as draw where p.id = any(draw.winner_participant_ids)
   );
   get diagnostics removed = row_count;
   return removed;
+end;
+$$;
+
+create function public.advent_daily_cleanup(p_now timestamptz)
+returns jsonb language plpgsql security invoker set search_path = public, pg_temp as $$
+declare
+  expired_tokens int;
+  stale_attempts int;
+begin
+  delete from public.advent_login_tokens where expires_at <= p_now;
+  get diagnostics expired_tokens = row_count;
+  delete from public.advent_attempts where at <= p_now - interval '7 days';
+  get diagnostics stale_attempts = row_count;
+  return jsonb_build_object('expiredTokens', expired_tokens, 'staleAttempts', stale_attempts);
 end;
 $$;
 
@@ -480,7 +495,8 @@ revoke execute on function public.advent_issue_signup_token(text, timestamptz, t
   public.advent_preview_token(text, timestamptz),
   public.advent_consume_token(text, timestamptz, timestamptz, text, boolean, jsonb, boolean),
   public.advent_sign_out(uuid, int), public.advent_unsubscribe_reminders(uuid),
-  public.advent_complete_door(uuid, int, timestamptz, boolean, text, text),
+  public.advent_complete_door(uuid, int, timestamptz, boolean, text, text, boolean),
+  public.advent_daily_cleanup(timestamptz),
   public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
   public.advent_draw_candidates(int), public.advent_purge(timestamptz),
@@ -492,7 +508,8 @@ grant execute on function public.advent_issue_signup_token(text, timestamptz, ti
   public.advent_preview_token(text, timestamptz),
   public.advent_consume_token(text, timestamptz, timestamptz, text, boolean, jsonb, boolean),
   public.advent_sign_out(uuid, int), public.advent_unsubscribe_reminders(uuid),
-  public.advent_complete_door(uuid, int, timestamptz, boolean, text, text),
+  public.advent_complete_door(uuid, int, timestamptz, boolean, text, text, boolean),
+  public.advent_daily_cleanup(timestamptz),
   public.advent_update_settings(uuid, text, boolean, boolean, text, boolean, text),
   public.advent_door_stats(), public.advent_referral_count(uuid),
   public.advent_draw_candidates(int), public.advent_purge(timestamptz),

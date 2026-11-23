@@ -3,9 +3,10 @@ import { after, type NextRequest, NextResponse } from "next/server";
 import { SITE_URL } from "~/app/seo";
 import { drawCsv, drawOpens, recordDraw } from "~/lib/advent/admin";
 import { SESSION_COOKIE, SESSION_SECONDS, signSession } from "~/lib/advent/auth";
+import { reserveWrongAnswer } from "~/lib/advent/answer-rate";
 import { hashAnswer, normalizeAnswer } from "~/lib/advent/answers";
 import {
-  adventEnabled, isAdventAdmin, MARKETING_CONSENT_VERSION, missingLoginConfig,
+  adventEnabled, answerPepper, isAdventAdmin, MARKETING_CONSENT_VERSION, missingLoginConfig,
   REMINDERS_CONSENT_VERSION, rulesApproved, sessionSecret, storageConfig,
 } from "~/lib/advent/config";
 import { AdventStorageError, currentAdmin, currentParticipant, db, rpc } from "~/lib/advent/db";
@@ -15,6 +16,7 @@ import { allowLoginEmail, consumeLogin, issueLoginLink, parseEmail, previewLogin
 import type { SignupConfirmation, SignupDraft } from "~/lib/advent/login";
 import { CAMPAIGN_CLOSE, campaignNow, doorState, isOnTime, parseDay } from "~/lib/advent/time";
 import { doors } from "~/content/advent/doors";
+import { requiresAnswer } from "~/lib/advent/readiness";
 
 type RouteContext = { params: Promise<{ action: string }> };
 type Payload = Record<string, unknown>;
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const now = campaignNow(process.env.ADVENT_NOW);
     if (account) {
       switch (action) {
-        case "complete": return await completeDoor(account, body, now);
+        case "complete": return await completeDoor(request, account, body, now);
         case "settings": return await updateSettings(account, body);
         case "sign-out":
           await rpc<void>("advent_sign_out", { p_id: account.id, p_version: account.session_version });
@@ -190,19 +192,31 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 }
 
-async function completeDoor(account: Participant, body: Payload, now: number) {
+async function completeDoor(request: Request, account: Participant, body: Payload, now: number) {
   const day = parseDay(value(body, "day"));
   if (!day) return fail(400, "Choose a door from 1 to 24.");
   const state = doorState(day, now);
   if (state === "locked") return fail(409, "This door has not opened yet.");
   if (state === "closed") return fail(409, "Completions closed on 31 December.");
+  if (requiresAnswer(day) && !doors[day - 1]?.question?.trim()) {
+    return fail(409, "This door’s check question is being prepared. Try again later.");
+  }
   const answer = value(body, "answer");
   const feedback = value(body, "feedback").trim();
   if (day === 22 && (feedback.length < 1 || feedback.length > 2000)) {
     return fail(400, "Enter feedback using 1 to 2,000 characters.");
   }
-  if (day !== 22 && day !== 24 && (answer.length > 256 || !normalizeAnswer(answer))) {
+  if (requiresAnswer(day) && (answer.length > 256 || !normalizeAnswer(answer))) {
     return fail(400, "Enter the check answer using 1 to 256 characters.");
+  }
+
+  const pepper = requiresAnswer(day) ? answerPepper() : null;
+  if (requiresAnswer(day) && !pepper) return fail(503, "Door answers are not configured yet.");
+  let reservation;
+  try {
+    reservation = pepper ? await reserveWrongAnswer(request, pepper) : null;
+  } catch {
+    return fail(503, "Answer rate limiting is temporarily unavailable. Try again later.");
   }
 
   const result = await rpc<{ status: string; remaining?: number }>("advent_complete_door", {
@@ -210,14 +224,19 @@ async function completeDoor(account: Participant, body: Payload, now: number) {
     p_day: day,
     p_now: new Date(now).toISOString(),
     p_on_time: isOnTime(day, now),
-    p_hash: day === 22 || day === 24 ? null : hashAnswer(day, answer),
+    p_hash: pepper ? hashAnswer(day, answer, pepper) : null,
     p_feedback: day === 22 ? feedback : null,
+    p_can_record_wrong: reservation !== null,
   });
+  if (reservation && result.status !== "wrong") {
+    await reservation.release().catch(() => console.error("[advent] Could not release an answer rate-limit slot"));
+  }
   switch (result.status) {
     case "done": return success(undefined, `/advent/day/${day}#check`);
     case "private_badge": return fail(409, "Set your badge to public in My Advent, then try again.");
     case "no_answers": return fail(409, "The check for this door is being prepared. Try again later.");
     case "signed_out": return fail(401, "Sign in to Advent of Admin and try again.");
+    case "ip_limited": return fail(429, "Too many wrong answers from this network. Try again in an hour.");
     case "limited": return fail(429, "Too many wrong answers for this door. Try again in an hour.");
     case "wrong": {
       const hint = doors[day - 1]?.hint ?? "That is not what the app shows. Check the answer in the app.";
@@ -266,12 +285,14 @@ async function deleteAccount(account: Participant, body: Payload) {
 
 async function setAnswers(body: Payload) {
   const day = parseDay(value(body, "day"));
-  if (!day || day === 22 || day === 24) return fail(400, "Choose a door that uses a written check answer.");
+  if (!day || !requiresAnswer(day)) return fail(400, "Choose a door that uses a written check answer.");
+  const pepper = answerPepper();
+  if (!pepper) return fail(503, "Configure the campaign answer pepper before setting answers.");
   const answers = value(body, "answers").split(/\r?\n/).filter((answer) => normalizeAnswer(answer));
   if (answers.length > 50 || answers.some((answer) => answer.length > 256)) {
     return fail(400, "Enter up to 50 accepted answers, one per line, with at most 256 characters each.");
   }
-  const hashes = [...new Set(answers.map((answer) => hashAnswer(day, answer)))];
+  const hashes = [...new Set(answers.map((answer) => hashAnswer(day, answer, pepper)))];
   await db("advent_answers", { on_conflict: "day" }, {
     method: "POST",
     prefer: "resolution=merge-duplicates",

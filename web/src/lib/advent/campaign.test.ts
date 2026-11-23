@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { test } from "node:test";
 
 import { hashAnswer, normalizeAnswer } from "./answers.ts";
 import { createLoginToken, redeemLoginToken, SESSION_SECONDS, signSession, TOKEN_MS, verifySession } from "./auth.ts";
 import { drawWinners, earnsBadge, eligibleList, grandEntries, hashEligibleList } from "./eligibility.ts";
+import { clientIp } from "./client-ip.ts";
+import { launchReadiness, requiresAnswer } from "./readiness.ts";
 import { newReferralCode, parseReferral, validHandle } from "./identity.ts";
 import { CAMPAIGN_CLOSE, campaignNow, doorState, doorUnlock, doorWindowEnd, isOnTime, parseDay } from "./time.ts";
 
@@ -56,11 +58,51 @@ test("normalization handles compatibility characters, whitespace, quotes and one
   assert.equal(normalizeAnswer(" “ ” "), "");
 });
 
-test("accepted answers hash the normalized value in the namespace of their door", () => {
-  assert.equal(hashAnswer(7, "‘Sample answer.’"), createHash("sha256").update("7:sample answer").digest("hex"));
-  assert.equal(hashAnswer(7, "SAMPLE   ANSWER"), hashAnswer(7, "sample answer"));
-  assert.notEqual(hashAnswer(7, "sample answer"), hashAnswer(8, "sample answer"));
-  assert.equal(hashAnswer(7, "Sample answer..."), createHash("sha256").update("7:sample answer..").digest("hex"));
+test("accepted answers are keyed, normalized, and scoped to their door", () => {
+  const pepper = "only-for-testing-a-peppered-answer";
+  const expected = createHmac("sha256", pepper).update("7:sample answer").digest("hex");
+  assert.equal(hashAnswer(7, "‘Sample answer.’", pepper), expected);
+  assert.equal(hashAnswer(7, "SAMPLE   ANSWER", pepper), expected);
+  assert.notEqual(hashAnswer(8, "sample answer", pepper), expected);
+  assert.notEqual(hashAnswer(7, "sample answer", "a different pepper"), expected);
+  assert.notEqual(createHash("sha256").update("7:sample answer").digest("hex"), expected);
+  assert.equal(hashAnswer(7, "Sample answer...", pepper), createHmac("sha256", pepper).update("7:sample answer..").digest("hex"));
+});
+
+test("launch readiness counts only written doors with a question and accepted answers, plus the two special doors", () => {
+  const allDoors = Array.from({ length: 24 }, (_, index) => {
+    const day = index + 1;
+    return { day, draft: false, question: requiresAnswer(day) ? "A question" : undefined };
+  });
+  const answers = allDoors.filter(({ day }) => requiresAnswer(day)).map(({ day }) => ({ day, answer_count: 1 }));
+  const environment = {
+    ADVENT_SUPABASE_URL: "https://example.test", ADVENT_SUPABASE_SERVICE_KEY: "fixture",
+    ADVENT_SESSION_SECRET: "test-secret".repeat(4), ADVENT_ANSWER_PEPPER: "test-pepper".repeat(4),
+    ADVENT_RESEND_API_KEY: "fixture", ADVENT_EMAIL_FROM: "sender@example.test", ADVENT_ADMIN_EMAILS: "admin@example.test",
+    UPSTASH_REDIS_REST_URL: "https://redis.example.test", UPSTASH_REDIS_REST_TOKEN: "fixture", CRON_SECRET: "fixture",
+    ADVENT_RULES_APPROVED: "true",
+  };
+  const ready = launchReadiness(allDoors, answers, environment);
+  assert.equal(ready.completable, 24);
+  assert.equal(ready.ready, true);
+  const blocked = launchReadiness(
+    allDoors.map((door) => door.day === 8 ? { ...door, question: "  ", draft: true } : door),
+    answers.filter(({ day }) => day !== 9),
+    { ...environment, ADVENT_RULES_APPROVED: "false", ADVENT_ANSWER_PEPPER: "short" },
+  );
+  assert.deepEqual(blocked, {
+    completable: 22, missingQuestions: [8], missingAnswers: [9], draftDoors: [8],
+    rulesUnapproved: true, missingEnv: ["ADVENT_ANSWER_PEPPER"], ready: false,
+  });
+});
+
+test("rate-limit clients ignore caller-supplied IP headers outside Vercel", () => {
+  const request = new Request("https://example.test", { headers: {
+    "x-forwarded-for": "192.0.2.1", "x-real-ip": "192.0.2.2", "x-vercel-forwarded-for": "192.0.2.3, 192.0.2.4",
+  } });
+  assert.equal(clientIp(request, "0"), "unknown");
+  assert.equal(clientIp(request, "1"), "192.0.2.3");
+  assert.equal(clientIp(new Request("https://example.test", { headers: { "x-forwarded-for": "192.0.2.1" } }), "1"), "unknown");
 });
 
 test("badge and grand draw thresholds differ and referrals add at most five entries", () => {

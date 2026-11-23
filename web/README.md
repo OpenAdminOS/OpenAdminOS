@@ -63,6 +63,7 @@ and running the rest of the site.
 | `ADVENT_SUPABASE_URL` | HTTPS project origin for the dedicated EU-region Supabase project. If unset or invalid, the public calendar and door content remain visible and account storage is unavailable. |
 | `ADVENT_SUPABASE_SERVICE_KEY` | Supabase server secret key or legacy service-role key. If unset, storage is unavailable. Keep this out of client variables and source control. |
 | `ADVENT_SESSION_SECRET` | At least 32 bytes of entropy for session, login-link and reminder unsubscribe signatures. If unset or shorter than 32 bytes, accounts and login are unavailable. Changing it invalidates active sessions and unredeemed links. |
+| `ADVENT_ANSWER_PEPPER` | Server-only secret with at least 32 bytes for HMAC-SHA256 door answers. Written door checks and answer setup are unavailable when unset. Set accepted answers again after changing the pepper. |
 | `ADVENT_RESEND_API_KEY` | Enables Resend for sign-in emails and, separately, for door reminders. If unset, `next dev` prints the sign-in link to the server console and production sign-in shows a configuration error. |
 | `ADVENT_REMINDERS_SEND` | Set to `true` to enable reminder delivery when the campaign, API key, sender and signing secret are configured. Unset or any other value runs a count-only dry run. |
 | `CRON_SECRET` | Existing bearer secret for cron authorization. If unset, the reminder route rejects requests. |
@@ -78,7 +79,9 @@ Resend sender, with open and click tracking disabled for its domain. A sign-in e
 so automated mail previews leave the one-time link usable.
 
 Review the draft doors against the desktop release and set accepted answers from
-the campaign admin page. The database stores only hashes of accepted answers.
+the campaign admin page. The database stores only HMAC-SHA256 hashes of accepted
+answers. The admin page lists missing questions and answers, draft doors, rules
+approval, and missing launch configuration.
 The admin page can export CSVs for manual prize contact and run each draw once
 after its eligibility window closes. The audit snapshot lists participant IDs
 and weights, the SHA-256 digest and the 32-byte seed needed to replay the draw.
@@ -95,17 +98,20 @@ Reminders are a separate opt-in from release emails. Participants can turn them
 off in My Advent or use the unsubscribe link in any reminder. A signed link
 works without an account session and expires after 90 days.
 
-The authenticated `POST /api/advent/reminders` endpoint evaluates the current
-Berlin date and only handles 1 to 24 December, after that day’s door opens.
-With sending disabled, including when the campaign flag is off, an authorised
-request counts eligible participants and logs only totals. No recipient records
-are claimed or sent to Resend during a dry run.
+The authenticated `GET /api/advent/reminders` and `POST /api/advent/reminders`
+routes use the same handler. Vercel calls GET at 05:05 UTC daily with
+`Authorization: Bearer ${CRON_SECRET}`. An enabled campaign uses each invocation
+to delete expired login tokens and pending signups, and wrong-answer attempts
+older than seven days. Door reminders run only from 1 to 24 December after the
+current Berlin day’s door opens. With delivery off, the job counts eligible
+recipients without claiming them. When the campaign is off, both methods
+return 404.
 
-<!-- TODO(ugur): Schedule an authenticated POST to /api/advent/reminders at 05:05 UTC daily. Vercel crons issue GET requests, so use a scheduler that supports POST and can securely supply CRON_SECRET. -->
-Schedule a job capable of POST at 05:05 UTC daily using the cron secret in the
-Authorization bearer header. The existing Vercel cron configuration sends GET
-requests. Confirm that the sender domain has open and click tracking disabled
-before switching on delivery.
+Keep open and click tracking disabled on the sender domain before turning on
+delivery. Rate limits trust the Vercel-managed IP header on Vercel. Deployments
+outside Vercel share an `unknown` IP bucket regardless of forwarded headers.
+Door answers allow 10 wrong submissions per account and door and 100 across
+accounts and doors per IP, each over a rolling hour.
 
 Each run reserves opted-in participants who still need that day’s completion,
 then sends up to 100 emails per Resend batch. The daily send record prevents

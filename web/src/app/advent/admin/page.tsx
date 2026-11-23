@@ -6,6 +6,7 @@ import { doors } from "~/content/advent/doors";
 import { drawOpens, draws, RETENTION_MS } from "~/lib/advent/admin";
 import { currentAdmin, doorStats, rpc } from "~/lib/advent/db";
 import type { Draw } from "~/lib/advent/db";
+import { launchReadiness, requiresAnswer } from "~/lib/advent/readiness";
 import { renderReminder } from "~/lib/advent/reminders";
 import { campaignDoorForDate, campaignNow } from "~/lib/advent/time";
 import { ActionForm } from "../ActionForm";
@@ -35,13 +36,14 @@ export default async function AdminPage() {
       <AdventTitle title="Campaign admin" label="Advent of Admin" />
       {!state.stats || !state.records || !state.reminders ? <Notice tone="error">{STORAGE_UNAVAILABLE}</Notice> : (
         <>
+          <LaunchReadiness status={launchReadiness(doors, state.stats, process.env)} />
           <section id="answers" className="scroll-mt-24 space-y-4" aria-labelledby="answers-title">
             <h2 id="answers-title" className={heading}>Accepted answers</h2>
             <div className="max-w-xl">
               <ActionForm action="set-answers" label="Replace accepted answers">
                 <label className="block text-sm font-medium">Door
                   <select name="day" className={`${field} mt-2 block`}>
-                    {doors.filter(({ day }) => day !== 22 && day !== 24).map(({ day, title }) => (
+                    {doors.filter(({ day }) => requiresAnswer(day)).map(({ day, title }) => (
                       <option value={day} key={day}>{day} · {title}</option>
                     ))}
                   </select>
@@ -101,6 +103,27 @@ export default async function AdminPage() {
         </>
       )}
     </div>
+  );
+}
+
+function LaunchReadiness({ status }: { status: ReturnType<typeof launchReadiness> }) {
+  return (
+    <section aria-labelledby="launch-readiness" className="space-y-3 border-y border-brand-line py-5">
+      <h2 id="launch-readiness" className={heading}>Launch readiness</h2>
+      <Notice tone={status.ready ? "ok" : "error"}>
+        <p className="font-medium">{status.ready ? "Ready to launch" : "Launch blockers remain"}</p>
+        <p>{status.completable} of 24 doors can be completed with the current questions and accepted answers.</p>
+        {!status.ready && (
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {status.missingQuestions.length > 0 && <li>Missing check questions on doors {status.missingQuestions.join(", ")}.</li>}
+            {status.missingAnswers.length > 0 && <li>Missing accepted answers on doors {status.missingAnswers.join(", ")}.</li>}
+            {status.draftDoors.length > 0 && <li>Draft doors {status.draftDoors.join(", ")}.</li>}
+            {status.rulesUnapproved && <li>Campaign rules are awaiting approval.</li>}
+            {status.missingEnv.length > 0 && <li>Configure <span className="break-all font-mono">{status.missingEnv.join(", ")}</span>.</li>}
+          </ul>
+        )}
+      </Notice>
+    </section>
   );
 }
 
