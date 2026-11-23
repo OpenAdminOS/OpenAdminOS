@@ -2685,7 +2685,8 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   model in auto mode a context overflow no longer fails the turn (PR #215): the
   loop ends with `failureReason: "context-too-small"` and Chat answers from
   cached data, and that answer carries the offer ("Ask this again with"). A
-  `thinking-only` loop failure does the same; repeated malformed or unfinished
+  context overflow concerns the current request and does not count towards
+  disabling tool use on later questions. A `thinking-only` loop failure does the same; repeated malformed or unfinished
   loop answers give the repeated-failure offer once the failure memory takes the
   model off the loop. The issue names the model the turn ran on, the adapter's
   own default when the provider list names none. A typed runtime failure, where `kind`, `code` or `reason`

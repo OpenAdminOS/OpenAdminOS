@@ -2520,7 +2520,7 @@ export class IntuneChatService {
             toolTrace = agentic.toolTrace;
             // A hosted context overflow says more about the question than the model; a local one is the model's fit.
             // A provider that could not be reached says nothing about the model.
-            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && agentic.reason !== "context-limit")) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
@@ -3434,7 +3434,7 @@ export class IntuneChatService {
             toolTrace = agentic.toolTrace;
             // A hosted context overflow says more about the question than the model; a local one is the model's fit.
             // A provider that could not be reached says nothing about the model.
-            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && agentic.reason !== "context-limit")) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
@@ -4379,7 +4379,8 @@ const LOCAL_FALLBACK_UNFINISHED =
  * models and keeps re-attempting models that provably cannot emit the
  * tool schema, burning a round trip on every question before falling
  * back. Record what actually happened instead and stop retrying a model
- * that has failed repeatedly.
+ * that has failed repeatedly. A context overflow is specific to the
+ * current request, so it does not count against the model's tool use.
  *
  * Deliberately in-memory: if the user pulls a better build of the same
  * tag, or the failures were caused by a transient provider problem, a

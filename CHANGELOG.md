@@ -95,6 +95,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Managed policies that allow Ollama also allow Ollama Cloud with hosted Chat confirmation. IT can lock `defaultModel` to an installed Ollama model by name. Keep that name backed by a model that runs on this device.
 
 - Ollama Cloud models show where prompts are processed and require the usual hosted Chat confirmation. On-device reruns only offer models that run on this device.
+- Chat keeps showing the token counts for each oversized question after repeated context overflows.
+
 - Chat shows model fit choices when Lemonade or LM Studio reports a context overflow in the response body.
 
 - Model fit rechecks that an Ollama model runs on this device before the adapter resends the prompt with a larger context.

@@ -848,21 +848,18 @@ describe("A retry that finds nothing cached", () => {
 });
 
 describe("Local context overflows in the failure memory", () => {
-  it("counts a local model's context overflows towards skipping the tool loop, and names them", async () => {
+  it("keeps trying the tool loop after consecutive context overflows", async () => {
     await withHarness(async ({ store, calls, reply }) => {
       reply(({ loop }) => {
         if (loop) throw new Error("the prompt exceeds the model's maximum context length (8192 tokens)");
         return "Deterministic answer.";
       });
-      for (let turn = 0; turn < 2; turn += 1) {
+      for (let turn = 0; turn < 3; turn += 1) {
         const overflow = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
         assert.equal(overflow.status, "completed");
         assert.equal(overflow.engineNotice, LOCAL_FALLBACK_NOTICES["context-too-small"]);
       }
-      const before = calls.filter((call) => call.loop).length;
-      const skipped = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-      assert.equal(calls.filter((call) => call.loop).length, before, "the third question skips the tool loop");
-      assert.match(skipped.engineNotice ?? "", /did not complete its last 2 tool-loop answers: the question and its data did not fit its context window twice\./);
+      assert.equal(calls.filter((call) => call.loop).length, 3, "each question tries the tool loop");
     });
   });
 });
@@ -1182,6 +1179,25 @@ describe("Model fit after a local model failure (PR #213 with #215)", () => {
       assert.equal(answered.modelFit?.limitTokens, 16384);
       assert.ok(answered.modelFit?.offerId);
       assert.equal(answered.switchedFrom, undefined);
+    }));
+  });
+
+  it("reports each question's token counts after repeated context overflows", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+      let neededTokens = 40000;
+      reply(({ loop }) => {
+        if (loop) throw new Error(`request (${++neededTokens} tokens) exceeds the available context size (16384 tokens)`);
+        return "Deterministic answer.";
+      });
+      for (const expected of [40001, 40002, 40003]) {
+        const { assistantMessage } = await store.streamIntuneChatMessage(
+          { content: "Which of our devices need attention?", refreshIfStale: false }, () => {},
+        );
+        assert.equal(assistantMessage.modelFit?.reason, "context-too-small");
+        assert.equal(assistantMessage.modelFit?.neededTokens, expected);
+        assert.equal(assistantMessage.modelFit?.limitTokens, 16384);
+        assert.ok(assistantMessage.modelFit?.offerId);
+      }
     }));
   });
 
