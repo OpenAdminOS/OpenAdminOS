@@ -1152,10 +1152,13 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
     if (!Array.isArray(data.models)) return;
     const wanted = ollamaModelName(model);
-    // A newer list read may have applied first; a name this list does not
-    // have is still looked up below, guarded per name.
-    recordOllamaModelList(endpoint, data.models, seq);
-    if (data.models.some((candidate) => entryName(candidate) === wanted)) return;
+    // Only a list read that applied decides that the name is listed: an
+    // older one may still have a model removed or replaced since. Otherwise
+    // the name is looked up below, under its own read number.
+    const applied = recordOllamaModelList(endpoint, data.models, seq);
+    const listedHere = data.models.some((candidate) => entryName(candidate) === wanted);
+    if (applied && listedHere) return;
+    const showSeq = beginOllamaModelRead();
     // Not listed: a server alias (Ollama lists only the model it points to)
     // is read with /api/show, which also loads no model and reports the
     // family of the model the alias resolves to.
@@ -1173,18 +1176,25 @@ export async function refreshOllamaModelFamily(endpoint: string, model: string, 
     if (shown.status !== 404 && !shown.ok) return;
     if (shown.ok) {
       const details = (await shown.json().catch(() => undefined)) as unknown;
-      // The list read just applied (its number) for the name, unless a newer one has.
+      // Applied for the name unless a newer read has.
       const key = familyKey(endpoint, model);
-      if (typeof details === "object" && details !== null && (ollamaFamilyReadApplied.get(key) ?? 0) <= seq) {
-        ollamaFamilyReadApplied.set(key, seq);
-        recordFamily(key, details);
-        ollamaShownOnly.add(key);
+      if (typeof details === "object" && details !== null && (ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
+        ollamaFamilyReadApplied.set(key, showSeq);
+        // /api/show has no digest: a listed model keeps its digest while the
+        // revision is the same one the list named.
+        const knownDigest = ollamaModelDigests.get(key);
+        const knownRevision = ollamaModelRevisions.get(key);
+        const shownRevision = (details as { modified_at?: unknown }).modified_at;
+        const sameModel = knownDigest !== undefined &&
+          (typeof shownRevision !== "string" || knownRevision === undefined || sameRevision(knownRevision, shownRevision));
+        recordFamily(key, sameModel ? { ...details, digest: knownDigest } : details);
+        if (!listedHere) ollamaShownOnly.add(key);
       }
       return;
     }
     // The model is not installed: nothing known about it carries over to a
     // model installed later under the name, also a reply still in flight.
-    forgetOllamaModel(endpoint, model, seq);
+    forgetOllamaModel(endpoint, model, showSeq);
   } catch {
     // The send goes ahead with what is known; Ollama's answer still corrects it.
   } finally {

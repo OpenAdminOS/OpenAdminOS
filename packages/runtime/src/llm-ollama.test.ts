@@ -1594,6 +1594,8 @@ describe("Ollama reasoning models", () => {
           setTimeout(() => res.end(JSON.stringify({ models: [{ name: "raced-model:latest", digest, details: { family } }] })), delay);
           return;
         }
+        // The model the name holds now.
+        if (req.url === "/api/show") { res.end(JSON.stringify({ details: { family: "qwen3" } })); return; }
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         res.end(answered);
       });
@@ -1999,6 +2001,8 @@ describe("Ollama reasoning models", () => {
           setTimeout(() => res.end(JSON.stringify({ models: [{ name: "team-alias:latest", digest: "sha256:oss", details: { family: "gptoss" } }] })), 150);
           return;
         }
+        // Removed: Ollama no longer knows the name.
+        if (req.url === "/api/show") { res.statusCode = 404; res.end(); return; }
         thinks.push((JSON.parse(raw) as { think?: unknown }).think);
         res.end(answered);
       });
@@ -2980,6 +2984,43 @@ describe("Ollama reasoning models", () => {
       target = "gptoss";
       await llm.complete({ prompt: "p" });
       assert.deepEqual(thinks, [false, "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("looks the model up when its list read was overtaken by a newer one", async () => {
+    let tagsCalls = 0;
+    const thinks: unknown[] = [];
+    let endpoint = "";
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          tagsCalls += 1;
+          if (tagsCalls === 1) {
+            // Answered before the replacement, arriving after a newer read.
+            setTimeout(() => res.end(JSON.stringify({ models: [{ name: "team-model:latest", digest: "sha256:llama", details: { family: "llama" } }] })), 100);
+            return;
+          }
+          // The newer read: the name is mid-replacement.
+          res.end(JSON.stringify({ models: [] }));
+          return;
+        }
+        if (req.url === "/api/show") { res.end(JSON.stringify({ details: { family: "gptoss" }, modified_at: "2026-11-20T10:00:00Z" })); return; }
+        thinks.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const pending = createOllamaLlm({ endpoint, defaultModel: "team-model:latest" }).complete({ prompt: "p" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await refreshOllamaModelFamily(endpoint, "other:latest");
+      await pending;
+      assert.deepEqual(thinks, ["low"]);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
