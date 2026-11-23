@@ -2590,7 +2590,14 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   context error, and the agent runtime's own prompt fit message ("This request
   needs about N tokens of context (P for the prompt and A for the answer), but
   <model> accepts L") when only that text survives in a stored run error. The
-  loop's `failureDetail` gives a cached-data fallback its numbers. A typed runtime failure, where `kind`, `code` or `reason`
+  loop's `failureDetail` gives a cached-data fallback its numbers. On a local
+  model in auto mode a context overflow no longer fails the turn (PR #215): the
+  loop ends with `failureReason: "context-too-small"` and Chat answers from
+  cached data, and that answer carries the offer ("Ask this again with"). A
+  `thinking-only` loop failure does the same; repeated malformed or unfinished
+  loop answers give the repeated-failure offer once the failure memory takes the
+  model off the loop. The issue names the model the turn ran on, the adapter's
+  own default when the provider list names none. A typed runtime failure, where `kind`, `code` or `reason`
   carries `context-too-small` with needed and limit numbers, on the error, on
   its `failure` record or through `cause`, is read by its shape, and a run's
   typed `failureReason` comes before its error text, so the runtime's prompt
