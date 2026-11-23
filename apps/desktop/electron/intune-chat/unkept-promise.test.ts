@@ -1,7 +1,29 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, eachAttemptWithin, looksLikeUnkeptPromise } from "./unkept-promise.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, announcesLookup, completeWithPromiseNudge, eachAttemptWithin, looksLikeUnkeptPromise } from "./unkept-promise.js";
+
+describe("announced lookups", () => {
+  it("finds a lookup announced in long prose, and not an offer or an explanation", () => {
+    for (const text of [
+      `I understand the question about the devices in this organization, and I will check the cached Intune device data now so that the answer rests on the current snapshot. ${"Thank you for waiting. ".repeat(3)}`,
+      "Let me look into the device inventory.",
+      "I'm checking the sign-in logs now.",
+      // A purpose after the promise, and a negation before it, do not undo the announcement.
+      "I will check the cached Intune device data now so I can answer from the current snapshot.",
+      "I can't answer that from memory, so I will check the cached data now.",
+    ]) assert.equal(announcesLookup(text), true, text.slice(0, 40));
+    for (const text of [
+      "WIN-01 to WIN-04 are not compliant. If you want, I will check the compliance policy next.",
+      "Would you like me to check the other tenant too? I can look into it.",
+      "To check this yourself, ask Chat for the cached count with a filter on the compliance state.",
+      "I'll explain how to check the count: the request below asks the host for it.",
+      // A trailing offer, with or without a comma.
+      "I will check the cached data now, if you want the exact numbers.",
+      "I will check the cached data now if you want the exact numbers.",
+    ]) assert.equal(announcesLookup(text), false, text.slice(0, 40));
+  });
+});
 
 describe("unkept promise", () => {
   it("finds answers that only announce work", () => {

@@ -10,9 +10,9 @@ import { isProviderReady } from "./provider-detection.js";
  * renderer, which offers the choices.
  */
 
-// "thinking-only" has no producer on main yet: the reasoning report work
-// (runtime/gpt-oss-reasoning-report) is to raise it as a typed reason.
-// TODO(ugur): confirm the shape that branch uses (`kind` or `code`).
+// "thinking-only" comes from the Chat tool loop as its typed `failureReason`
+// (a reply with no answer text), read below as a bare reason; an error that
+// carries the reason as `kind` or `code` is read the same way.
 /**
  * How every host refusal that ends a model fit offer (expired, used, made for
  * another question, the organization or model changed) tells the admin what

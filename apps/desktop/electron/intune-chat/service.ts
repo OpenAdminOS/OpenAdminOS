@@ -1,5 +1,5 @@
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
-import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, announcesLookup, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
@@ -3266,7 +3266,9 @@ export class IntuneChatService {
             assistantContent = chunk.accumulated;
             if (assistantContent.trim()) finishAnswerStep.writing();
             // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-            emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+            // The one fallback call after a compact loop is not shown live: only the complete reply tells a tool
+            // request from an answer, whatever the stream's chunks are, and it is shown in full below.
+            if (!afterCompactLoop) emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
           }
           // After a compact loop the fallback is one model call, so the turn stays bounded.
           if (isCancelled() || nudge >= (afterCompactLoop ? 0 : MAX_PROMISE_NUDGES) || !looksLikeUnkeptPromise(assistantContent)) break;
@@ -3293,7 +3295,8 @@ export class IntuneChatService {
         if (!isCancelled()) engineNotice = notice;
         // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
         if (computed && assistantContent.trim()) computedShown = true;
-        emitDelta(assistantContent, "");
+        // A stopped fallback shows nothing of the text held back: the stopped answer replaces it.
+        if (!(afterCompactLoop && isCancelled())) emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
 
@@ -4247,29 +4250,67 @@ export class IntuneChatService {
 }
 
 
-/** Tool names the Chat loop offers: a "tool" naming one of these is a request wherever it sits in a reply. */
+/** Tool names the Chat loop offers; protocolReply says when a "tool" naming one makes a reply a request. */
 const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
+
+/** Prose this long around a quoted tool call is an answer that shows the call, not a lead-in to a request. */
+const PROSE_AROUND_REQUEST_LIMIT = 160;
+
+/** Whether a reply leaves a brace open, counting braces outside JSON strings only (a "WIN-{01" value is not one). */
+function leavesBraceOpen(text: string): boolean {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && depth > 0) depth -= 1;
+  }
+  return depth > 0;
+}
+
+/**
+ * The prose of a reply outside its JSON: closed and unclosed code fences and balanced brace spans are cut out,
+ * and an unclosed brace or fence runs to the end, so the body of a cut-short request is never counted as prose.
+ */
+function proseOutsideJson(text: string): string {
+  let rest = text.replace(/```[\s\S]*?```/g, " ").replace(/```[\s\S]*$/, " ");
+  for (let previous = ""; previous !== rest; ) {
+    previous = rest;
+    rest = rest.replace(/\{[^{}]*\}/g, " ");
+  }
+  return rest.replace(/\{[\s\S]*$/, " ").replace(/\s+/g, " ").trim();
+}
 
 /**
  * A reply in the tool loop's JSON protocol: `{ answer }` when it carries an answer text, `{ request }` when it
- * is a tool request or a protocol object with no answer, undefined for prose.
- * - A "tool" naming a Chat tool anywhere in the reply is a request: before or after prose, next to a JSON
- *   example, or cut short with its closing brace missing.
+ * is a tool request or a protocol object with no answer, undefined for prose. Read in this order:
  * - A whole-reply object (bare or in one fence) is read as the loop reads it: final with an answer or content
- *   text is the answer; otherwise a tool, final or kind key makes it a request.
- * - A final answer object after prose ("Hope this helps." after it, or before it) is the answer.
+ *   text is the answer, also when it names a tool too; otherwise a tool, final or kind key makes it a request.
+ * - Otherwise the object the loop reads (the last fenced block or balanced object) is the answer when it is a
+ *   final answer, with prose before or after it.
+ * - A "tool" naming a Chat tool makes the reply a request when the request was cut short, when the prose
+ *   outside the JSON announces a lookup ("I will check the cached data now"), or when that prose is a short
+ *   lead-in ("I need to check:"). A longer prose answer that quotes a tool call as an example stays an answer.
  * - A reply that opens as a protocol object and does not parse was cut short: a request.
  * - Any other JSON, such as an FAQ example inside a prose answer, stays prose.
  */
 function protocolReply(text: string): { answer: string } | { request: true } | undefined {
-  for (const match of text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)) {
-    if (CHAT_TOOL_NAME.test(match[1]!.trim())) return { request: true };
-  }
   const answerOf = (record: Record<string, unknown>): string | undefined => {
     const value = typeof record.answer === "string" ? record.answer : typeof record.content === "string" ? record.content : undefined;
     return value?.trim() ? value.trim() : undefined;
   };
   const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
+  const namesChatTool = [...text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)].some((match) => CHAT_TOOL_NAME.test(match[1]!.trim()));
   if (bare.startsWith("{")) {
     let whole: unknown;
     let parses = true;
@@ -4289,10 +4330,19 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
     }
   }
   const extracted = extractLastJsonObject(text);
-  if (extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)) {
-    const record = extracted.value as Record<string, unknown>;
-    const answer = answerOf(record);
-    if (record.final === true && answer) return { answer };
+  const extractedRecord = extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)
+    ? extracted.value as Record<string, unknown>
+    : undefined;
+  if (extractedRecord?.final === true) {
+    const answer = answerOf(extractedRecord);
+    if (answer) return { answer };
+  }
+  if (namesChatTool) {
+    const unclosedFence = ((text.match(/```/g) ?? []).length % 2) === 1;
+    // Braces are counted from the first one, so a stray quote in the prose before it cannot hide an open brace.
+    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || leavesBraceOpen(text.slice(Math.max(0, text.indexOf("{"))));
+    const outside = proseOutsideJson(text);
+    if (cutShort || outside.length < PROSE_AROUND_REQUEST_LIMIT || announcesLookup(outside)) return { request: true };
   }
   // Opens as a protocol object and does not parse: cut short, never an answer.
   if (/^(?:```(?:json)?\s*)?\{\s*"(?:tool|kind|final|answer|sources)"\s*:/.test(text.trim()) && !(extracted.found && extracted.valid)) return { request: true };
@@ -4301,7 +4351,7 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */
 const LOCAL_FALLBACK_UNFINISHED =
-  "The local model did not finish an answer. Its answer from cached data was empty, only a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
+  "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.

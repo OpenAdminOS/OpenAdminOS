@@ -40,6 +40,13 @@ const CHECKING_NOW = /^(?:i(?:'m|’m| am)\s+)?(?:just\s+|still\s+)?(?:checking|
  */
 const BARE_PROGRESS = /^(?:i(?:'m|’m| am)\s+)?(?:now\s+|currently\s+|just\s+|still\s+)?(?:on it|(?:checking|looking|querying|searching|investigating|retrieving|verifying|fetching|reviewing|digging|researching|working)(?:\s+(?:on|into|at)?\s*(?:it|that|this))?)(?:\s+(?:now|for you|right now))?$/i;
 
+/**
+ * An offer or a step that depends on the admin, for announcesLookup: CONDITIONAL without "I can" and "I could",
+ * which also match "I can't" and say nothing about the admin.
+ */
+const OFFER =
+  /\b(?:if (?:you|needed|that helps|it helps|useful|wanted|required)|should i|do you want|would you like|let me know|when you|whenever you|once you|if you ask|on request|just ask|tell me)\b/i;
+
 /** A promise that depends on the admin, or an offer, is not unkept work. */
 const CONDITIONAL =
   /\b(?:if (?:you|needed|that helps|it helps|useful|wanted|required)|should i|do you want|would you like|let me know|i can\b|i could\b|when you|whenever you|once you|if you ask|on request|just ask|tell me)\b/i;
@@ -113,6 +120,25 @@ export function looksLikeUnkeptPromise(answer: string): boolean {
     return false;
   }
   return promised;
+}
+
+/**
+ * Whether any clause of a text announces work ("I will check the cached Intune device data now"), with no limit
+ * on length or code blocks: the prose around a tool request a model wrote instead of an answer.
+ */
+export function announcesLookup(text: string): boolean {
+  for (const sentence of withoutInlineQuotes(text.trim()).split(/(?<=[.!?…])\s+|\n+/)) {
+    // An offer that depends on the admin anywhere in the sentence ("If you want, I will check the policy next.",
+    // "I will check it next, if you want.") makes it no announcement, whatever the punctuation. OFFER has no
+    // "I can", so a purpose ("so I can answer") or a negation ("I can't answer that, so I will check") does not.
+    if (OFFER.test(sentence)) continue;
+    for (const clause of clauses(sentence)) {
+      if (CHECKING_NOW.test(clause)) return true;
+      const match = PROMISE.exec(clause);
+      if (match && isFiller(clause.slice(0, match.index))) return true;
+    }
+  }
+  return false;
 }
 
 /** The repair turn for a single-call model, such as an Agent Team answer. */
