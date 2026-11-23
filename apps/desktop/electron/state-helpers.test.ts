@@ -676,7 +676,8 @@ describe("humanizeScheduledRunError", () => {
   it("keeps an Ollama memory failure that mentions 403 MiB instead of calling it a Graph denial", () => {
     const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
     const text = humanizeScheduledRunError(message);
-    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+    assert.match(text, /^Ollama failed with a kept context size\. Rerun the schedule to try without it\./);
+    assert.match(text, /free memory or pick a smaller model/);
     assert.doesNotMatch(text, /Graph/);
   });
 
@@ -685,7 +686,7 @@ describe("humanizeScheduledRunError", () => {
     // Older builds stored denials without a source.
     const { source: _source, ...saved } = classifyGraphAccessDenied({});
     const text = humanizeScheduledRunError(message, saved);
-    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+    assert.match(text, /Rerun the schedule to try without it/);
   });
 
   it("keeps a stored Graph denial for an error that is not Ollama's", () => {

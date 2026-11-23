@@ -830,6 +830,15 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
   // What the host records with such a failure, after confirming the model ran on this device.
   const FIT = { modelFit: { reason: "context-too-small" as const, providerId: "ollama" as const, model: "llama3.1", neededTokens: 40652, limitTokens: 16384 } };
 
+  it("offers a same-request retry for a kept context failure even when the run has a stored model-fit issue", async () => {
+    const error = "Ollama could not load llama3.1 with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: out of memory";
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error, ...FIT });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    expect(await screen.findByText("Ollama failed with a kept context size")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "llama3.1 cannot fit this run" })).not.toBeInTheDocument();
+  });
+
   it("offers the ready hosted provider with its location label, accepts in the run review, and reruns with it", async () => {
     const user = userEvent.setup();
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });

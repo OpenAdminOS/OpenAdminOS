@@ -646,8 +646,14 @@ lookup fails. Chat leaves it unset,
 so #211's raise still serves a larger request there. A kept `num_ctx` belongs
 to the model revision the lookup that chose it saw (`/api/show`
 `modified_at`), even when the request finishes after the model was created
-again; a model created again under the same name starts from its own settings. LM Studio reports none for now because its
-context fields could not be verified.
+again; a model created again under the same name starts from its own settings.
+When Ollama fails to load or answer with a kept context size, or refuses it
+without reporting token counts, the run failure panel and schedule status
+advise re-running first. If the failure repeats, the advice is to free memory
+or choose a smaller model. The run page shows this recovery in place of the
+model-fit offer.
+LM Studio reports no context limit for now because its context fields could
+not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
 punctuation and line breaks separately. Calibrated against OpenAdmin 8B

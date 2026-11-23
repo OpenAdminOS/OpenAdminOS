@@ -7,6 +7,7 @@ import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { ModelFitNotice } from "../components/ModelFitNotice";
 import { isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
+import { isOllamaKeptContextFailure } from "../shared/ollama-failure";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
@@ -134,7 +135,8 @@ function RunResultPage({ run }: { run: RunRecord }) {
   // The host records the fit issue when the run fails, after confirming its model ran on this
   // device then; a provider that is not on this device now is not offered from either.
   const modelFit =
-    run.status === "failed" && !isSystemRun && !run.officeContext && run.modelFit && run.failureCause !== "reasoning-without-answer" && runProvider && isOnDeviceModel(runProvider, run.model)
+    run.status === "failed" && !isSystemRun && !run.officeContext && run.modelFit && run.failureCause !== "reasoning-without-answer"
+      && !isOllamaKeptContextFailure(run.error) && runProvider && isOnDeviceModel(runProvider, run.model)
       ? run.modelFit
       : undefined;
   // Run again of a model fit rerun keeps its safeguards: the on-device check and the endpoint binding.
