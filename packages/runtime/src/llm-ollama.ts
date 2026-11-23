@@ -178,16 +178,28 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // gpt-oss ignores `false` and always reasons, so it gets the
         // lowest effort level instead. What Ollama showed about this model
         // (it rejected the level, or reasoned anyway) overrides its name.
-        think: ollamaThinkFor(endpoint, installedModel),
+        // Set by captureThink just before a send.
+        think: false,
       };
       // What Ollama's answers show applies only to the version this request was sent to.
-      let sentDigest = ollamaModelDigests.get(familyKey(endpoint, installedModel));
-      // Registered, so a model list read that finds it removed while this
-      // request runs changes its generation.
-      if (!ollamaModelGenerations.has(familyKey(endpoint, installedModel))) ollamaModelGenerations.set(familyKey(endpoint, installedModel), 0);
-      let sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
+      let sentDigest: string | undefined;
+      let sentGeneration = 0;
       // The family the think value was chosen with.
-      let sentFamily = ollamaModelFamilies.get(familyKey(endpoint, installedModel));
+      let sentFamily: string | undefined;
+      // The think value, version, generation and family of the model as known
+      // right before a send, so a newer list read that applied while this
+      // request waited (for example on context sizing) decides.
+      const captureThink = () => {
+        installedModel = ollamaInstalledModelNow(endpoint, model);
+        const key = familyKey(endpoint, installedModel);
+        body.think = ollamaThinkFor(endpoint, installedModel);
+        sentDigest = ollamaModelDigests.get(key);
+        // Registered, so a model list read that finds it removed while this
+        // request runs changes its generation.
+        if (!ollamaModelGenerations.has(key)) ollamaModelGenerations.set(key, 0);
+        sentGeneration = ollamaModelGenerations.get(key) ?? 0;
+        sentFamily = ollamaModelFamilies.get(key);
+      };
       const learn = (value: false | "low") => {
         const key = familyKey(endpoint, installedModel);
         // Only about the model this request went to: not one removed or
@@ -349,6 +361,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         let text = await errorDetail(sent);
         // At most two resends: a model replaced or upgraded since the request
         // was built gets its own value first, and if it rejects that too, none.
+        // The last resend always sends none.
         for (let resend = 0; resend < 2 && sent.status === 400 && body.think !== false && rejectsThinkLevel(text); resend += 1) {
           const previous = { model: installedModel, generation: sentGeneration, family: sentFamily };
           installedModel = await settleInstalledModel();
@@ -359,6 +372,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             // The model that rejected the level is still the one installed:
             // it gets none, and that is remembered for it.
             learn(false);
+            body.think = false;
+          } else if (resend === 1) {
+            // The last resend sends none, without remembering it: the model
+            // that rejected the level could not be confirmed.
             body.think = false;
           } else {
             // Another model, or one Ollama now reports a family for.
@@ -416,6 +433,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.
         const firstSent = numCtx;
+        captureThink();
         let detail: string;
         [response, detail] = await sendWithThinkFallback(numCtx);
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
@@ -474,11 +492,8 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           if (retryShow?.revision !== undefined) requestRevision = retryShow.revision;
           // The model may have been replaced under its name during the lookup:
           // the retry gets the think value of the model installed now.
-          installedModel = await settleInstalledModel();
-          body.think = ollamaThinkFor(endpoint, installedModel);
-          sentDigest = ollamaModelDigests.get(familyKey(endpoint, installedModel));
-          sentGeneration = ollamaModelGenerations.get(familyKey(endpoint, installedModel)) ?? 0;
-          sentFamily = ollamaModelFamilies.get(familyKey(endpoint, installedModel));
+          await settleInstalledModel();
+          captureThink();
           const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
           // An agent run holds a pinned model to its pin, on the retry too.
           // Ollama counted more than the estimate, so the request did not fit.

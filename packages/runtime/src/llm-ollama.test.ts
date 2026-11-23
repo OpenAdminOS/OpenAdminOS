@@ -2124,6 +2124,76 @@ describe("Ollama reasoning models", () => {
   });
 
 
+  it("sends the think value known right before the send, after a list read that applied while it was sized", async () => {
+    let installed = { digest: "sha256:llama", family: "llama" };
+    let shows = 0;
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        if (req.url === "/api/tags") {
+          res.end(JSON.stringify({ models: [{ name: "swap-report:latest", digest: installed.digest, details: { family: installed.family } }] }));
+          return;
+        }
+        if (req.url === "/api/ps") { res.end(JSON.stringify({ models: [] })); return; }
+        if (req.url === "/api/show") {
+          shows += 1;
+          const answer = JSON.stringify({ model_info: { "general.architecture": "llama", "llama.context_length": 131072 } });
+          // The first request's sizing lookup is slow.
+          if (shows === 1) setTimeout(() => res.end(answer), 150);
+          else res.end(answer);
+          return;
+        }
+        sent.push((JSON.parse(raw) as { think?: unknown }).think);
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const llm = createOllamaLlm({ endpoint, defaultModel: "swap-report:latest" });
+      // Long enough that the request is sized before it is sent.
+      const first = llm.complete({ prompt: "word ".repeat(18000) });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The name now holds a gpt-oss copy, which a second request reads.
+      installed = { digest: "sha256:oss", family: "gptoss" };
+      await llm.complete({ prompt: "p" });
+      await first;
+      assert.deepEqual(sent, ["low", "low"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("sends no level on the last resend when the model list never lists the model", async () => {
+    const sent: unknown[] = [];
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      let raw = "";
+      req.on("data", (part) => (raw += part));
+      req.on("end", () => {
+        // An alias the list omits: each read finds it missing.
+        if (req.url === "/api/tags") { res.end(JSON.stringify({ models: [] })); return; }
+        const think = (JSON.parse(raw) as { think?: unknown }).think;
+        sent.push(think);
+        if (think !== false) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: '"gpt-oss-ghost:latest" does not support thinking' }));
+          return;
+        }
+        res.end(answered);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      assert.equal((await createOllamaLlm({ endpoint, defaultModel: "gpt-oss-ghost:latest" }).complete({ prompt: "p" })).text, "ok");
+      assert.deepEqual(sent, ["low", "low", false]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("lets a newer version read decide over an older one that finishes later", async () => {
     let versionReads = 0;
     const sent: Array<[unknown, unknown]> = [];
