@@ -1198,6 +1198,34 @@ describe("Ollama reasoning models", () => {
     }
   });
 
+  it("finds think tags in text whose lowercase is longer, before and inside a block", async () => {
+    const filter = createInlineThinkFilter();
+    assert.equal(filter.push("<think>İstanbul</think>4"), "4");
+    const prefixed = createInlineThinkFilter();
+    assert.equal(prefixed.push("İİİİ İstanbul: <think>secret</think> answer"), "İİİİ İstanbul:  answer");
+    // A character that only lowercases to a tag letter is not one.
+    const lookalike = createInlineThinkFilter();
+    assert.equal(lookalike.push("x <th\u0130"), "x <th\u0130");
+    const fake = await fakeChat([
+      { model: "qwen3:8b", message: { content: "<think>İstanbul" }, done: false },
+      { model: "qwen3:8b", message: { content: "</think>4" }, done: true, eval_count: 3 },
+    ]);
+    try {
+      assert.equal((await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" })).text, "4");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("returns text held back as a possible tag when the body ends without a final record", async () => {
+    const fake = await fakeChat([{ model: "qwen3:8b", message: { content: "value <" }, done: false }]);
+    try {
+      assert.equal((await createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "qwen3:8b" }).complete({ prompt: "p" })).text, "value <");
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("holds back only a possible think tag and keeps other text", () => {
     const filter = createInlineThinkFilter();
     assert.equal(filter.push("a <b> <"), "a <b> ");

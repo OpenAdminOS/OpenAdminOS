@@ -672,11 +672,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           if (done) break;
         }
+        // Text held back as a possible tag is the answer's once the body ends.
+        const tail = inlineThink.flush();
+        accumulated += tail;
         // The body ended without a final record after reasoning alone.
-        accumulated += inlineThink.flush();
         if (accumulated.trim().length === 0 && reasoned) {
           throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, undefined));
         }
+        if (tail.length > 0) yield { delta: tail, accumulated, done: false, model: actualModel };
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
@@ -688,6 +691,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
 const THINK_OPEN = "<think>";
 const THINK_CLOSE = "</think>";
+const THINK_TAGS = { [THINK_OPEN]: /<think>/i, [THINK_CLOSE]: /<\/think>/i } as const;
 
 /**
  * Takes reasoning a model writes inline in its content, in `<think>` blocks,
@@ -698,10 +702,14 @@ export function createInlineThinkFilter(): { push(text: string): string; flush()
   let inThink = false;
   let pending = "";
   let reasoned = false;
-  // The longest end of `text` that could start `tag`.
+  // The longest end of `text` that could start `tag`. Compared character by
+  // character, ASCII case only, so text whose lowercase is longer (İ) never
+  // shifts an offset.
   const partialTag = (text: string, tag: string): number => {
+    const sameLetter = (a: string, b: string) => a === b || (/[A-Z]/.test(a) && a.toLowerCase() === b);
     for (let length = Math.min(tag.length - 1, text.length); length > 0; length -= 1) {
-      if (tag.startsWith(text.slice(-length).toLowerCase())) return length;
+      const tail = text.slice(text.length - length);
+      if ([...tail].every((char, index) => sameLetter(char, tag[index]!))) return length;
     }
     return 0;
   };
@@ -712,7 +720,8 @@ export function createInlineThinkFilter(): { push(text: string): string; flush()
       let visible = "";
       while (rest.length > 0) {
         const tag = inThink ? THINK_CLOSE : THINK_OPEN;
-        const at = rest.toLowerCase().indexOf(tag);
+        // Found in the text itself, so offsets are the text's own.
+        const at = rest.search(THINK_TAGS[tag]);
         if (at >= 0) {
           if (!inThink) {
             visible += rest.slice(0, at);
