@@ -27,7 +27,7 @@ import {
 } from "./local-reset.js";
 import type { LocalResetInfo, LocalResetReport } from "@openadminos/agent-sdk";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
-import { runOfficeSmoke } from "./office-smoke.js";
+import { runOfficeSmoke, withOfficeSmokeOllama } from "./office-smoke.js";
 import { captureLandingShots } from "./landing-capture.js";
 import {
   captureFirstRunShots,
@@ -1180,8 +1180,13 @@ async function runScreenshotCapture(): Promise<void> {
     return;
   }
   if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
-    await runOfficeSmoke(window, screenshotCaptureOutDir);
-    await runOfficeRehearsal(window,screenshotCaptureOutDir,async()=>{officeRehearsalRevision=1;await store.tickOffice();});
+    await withOfficeSmokeOllama(smokeModelName, async () => {
+      await runOfficeSmoke(window, screenshotCaptureOutDir);
+      await runOfficeRehearsal(window, screenshotCaptureOutDir, async () => {
+        officeRehearsalRevision = 1;
+        await store.tickOffice();
+      });
+    });
     app.exit(0);
     return;
   }

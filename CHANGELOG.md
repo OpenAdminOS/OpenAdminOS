@@ -85,6 +85,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- The Agent Team smoke rehearsal supplies Ollama model metadata so it checks on-device planning and verifies that the Chief skips redundant work.
 - Schedules paused for model destination review show a pause notice with a link to review the schedule.
 
 - Agent Team, Run with, install checks and delivered reports label Ollama Cloud models as hosted. Opt-in usage counts them as hosted.

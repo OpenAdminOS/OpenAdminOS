@@ -3981,7 +3981,9 @@ no window manager; CI still covers the controller lifecycle and renderer behavio
 
 The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
 Graph/model fixtures: assessment change → research → bounded Chief delegation → script
-draft → evidence question → admin review. Captures identify rehearsal data. Quality
+draft → evidence question → admin review. A loopback Ollama fixture lists the
+rehearsal model in `/api/tags` so Agent Team checks its locality before each model
+call. Captures identify rehearsal data. Quality
 evidence covers responsive layouts, 24 personas, floor navigation, motion, reduced
 motion, hidden-window behavior, high-contrast emulation, and 200% zoom. Linux
 Xvfb memory measurement, attempted frame sampling, and a recording accompany the design reference; they do not
