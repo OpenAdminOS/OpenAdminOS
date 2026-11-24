@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_NAME, activeModelProvider, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { MODEL_CHOICE_COPY, PROVIDER_TOOL_NAMES, promptsGoTo } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ProviderId, ProviderSummary } from "../shared/openAdminOS";
 import { isProviderReady, providerCheckFailed } from "../shared/provider-detection";
@@ -61,7 +62,7 @@ export function modelDisplayName(model: string | undefined): string | undefined 
 }
 
 export function toolName(id: ProviderId, fallback: string): string {
-  return PROVIDER_TOOL_NAMES[id] ?? fallback;
+  return fallback === OLLAMA_CLOUD_NAME ? fallback : PROVIDER_TOOL_NAMES[id] ?? fallback;
 }
 
 /** The scan's found rows as choices. Not-found rows and refused off-device endpoints are not choices. */
@@ -132,9 +133,13 @@ export function optionsFromProbes(
  * runtime that is not installed is offered as OpenAdmin 8B on Ollama; a
  * provider whose check failed is a could not check row with Retry.
  */
-export function optionsFromProviders(providers: readonly ProviderSummary[]): ChoiceOption[] {
+export function optionsFromProviders(
+  providers: readonly ProviderSummary[],
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ChoiceOption[] {
   const options: ChoiceOption[] = [];
-  for (const provider of providers) {
+  for (const endpoint of providers) {
+    const provider = activeModelProvider(endpoint, activeModelByProviderId);
     const name = toolName(provider.id, provider.name);
     // The same readiness the send path uses: a runtime without a model it can answer with is not ready.
     const ready = isProviderReady(provider);
@@ -170,7 +175,7 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
     }
     if (provider.isLocal) {
       if (ready) {
-        const model = provider.defaultModel ?? provider.models[0];
+        const model = resolveProviderDefaultModel(provider, activeModelByProviderId).model;
         options.push({ providerId: provider.id, name, where: "local", whereLine: MODEL_CHOICE_COPY.localReady(modelDisplayName(model)), state: MODEL_CHOICE_COPY.ready, action: "open", ...(model ? { model } : {}) });
       } else if (provider.status === "connected" && provider.id === "lm-studio") {
         // Running without a loaded model: the scan's recovery.

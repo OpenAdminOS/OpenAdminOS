@@ -188,10 +188,18 @@ export default function AgentsHome() {
         // Each start is a scheduled start, so the host refuses it if the
         // schedule's organization is no longer the active one.
         for (const agent of agents) {
-          await startRun(agent.slug, { trigger: "schedule" });
-          started += 1;
+          if (agent.schedule?.lastSkipReason) {
+            toast.error(agent.schedule.lastSkipReason);
+            continue;
+          }
+          const run = await startRun(agent.slug, { trigger: "schedule" });
+          if (run?.status === "failed") {
+            toast.error(run.summary ?? run.error ?? "Review the schedule before running it again.");
+          } else {
+            started += 1;
+          }
         }
-        toast.success(`${started} scheduled ${started === 1 ? "run" : "runs"} queued.`);
+        if (started > 0) toast.success(`${started} scheduled ${started === 1 ? "run" : "runs"} queued.`);
       } catch (caught) {
         toast.error(caught instanceof Error ? caught.message : String(caught));
       } finally {
@@ -571,6 +579,18 @@ export default function AgentsHome() {
           <p role="alert" className="mb-2 text-sm text-[var(--color-danger)]">{SCHEDULE_ORGANIZATION_COPY.backgroundFailed(schedulerError)}</p>
         ) : null}
         {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
+        {scheduledOnly ? state.installedAgents.map((agent) => {
+          const reason = agent.schedule?.lastSkipReason;
+          if (!agent.schedule?.enabled || !reason) return null;
+          return (
+            <div key={agent.slug} role="status" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
+              <span>Schedule paused: {reason.replace(/^Skipped: /, "")}</span>
+              <Button size="sm" variant="secondary" onClick={() => openAgent(agent.slug, "schedule")}>
+                Review schedule
+              </Button>
+            </div>
+          );
+        }) : null}
         {scheduledOnly && state.schedulerStatus?.lastError ? (
           <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             <span>Latest scheduled run failed: {state.schedulerStatus.lastError}</span>
@@ -705,7 +725,7 @@ function toInstalledDisplay(agent: AgentSummary): AgentDisplay {
 
 function nextRunTime(agent: AgentSummary) {
   const schedule = agent.schedule;
-  if (!schedule?.enabled) return Number.POSITIVE_INFINITY;
+  if (!schedule?.enabled || schedule.lastSkipReason) return Number.POSITIVE_INFINITY;
   return schedule.lastScheduledRunAt
     ? Date.parse(schedule.lastScheduledRunAt) + schedule.intervalSeconds * 1000
     : Date.parse(agent.installedAt) + schedule.intervalSeconds * 1000;
@@ -739,6 +759,7 @@ function scheduleLine(
   activeOrganizationId: string | undefined,
   connectors: readonly ConnectorSummary[] | "failed" | undefined,
 ): string {
+  if (agent.schedule?.lastSkipReason) return agent.schedule.lastSkipReason;
   const when = !organization
     ? "Paused until it is assigned to an organization."
     : organization.id !== activeOrganizationId

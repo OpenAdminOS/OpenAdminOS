@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_LOCATION, isRemoteBackedModel, type ProviderSummary } from "@openadminos/agent-sdk";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
@@ -399,12 +400,13 @@ function statusDotTone(status: RunStatus): StatusDotTone {
 
 function runDescription(
   run: RunRecord,
-  providers: { id: string; name: string; isLocal?: boolean }[],
+  providers: Pick<ProviderSummary, "id" | "name" | "remoteModels" | "isLocal">[],
   tenants: { id: string; displayName: string }[],
 ): string {
   const provider = providers.find((candidate) => candidate.id === run.providerId);
   const providerName = provider?.name ?? run.providerId ?? "Provider not recorded";
-  const boundary = provider ? (provider.isLocal ? "local, stays on this device" : "hosted") : "location not recorded";
+  const cloud = run.providerId === "ollama" && (run.ollamaCloud ?? isRemoteBackedModel(provider ?? { id: "ollama" }, run.model));
+  const boundary = cloud ? OLLAMA_CLOUD_LOCATION : provider ? ((run.ollamaCloud === false || provider.isLocal) ? "local, stays on this device" : "hosted") : "location not recorded";
   const model = run.model ? ` · ${run.model}` : "";
   return `${providerName}${model} · ${boundary} · ${tenantNameForRun(run, tenants)} · ${capitalize(triggerForRun(run))}`;
 }

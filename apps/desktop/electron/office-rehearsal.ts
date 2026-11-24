@@ -115,7 +115,7 @@ export async function runOfficeRehearsal(
     );
     await select(ids.chief);
     const evidence = await evaluate<any>(
-      `(async()=>{const s=await window.openAdminOS.getAppState();const m=s.office.missions.find(m=>m.personaId==='${ids.chief}'&&m.handoffId);const run=s.runs.find(r=>m.runIds.includes(r.id));if(run.agentSlug!=='team-script-draft'||!run.officeContext.evidence.length)throw new Error('Missing bounded delegation or evidence');if(!m.skippedAgentSlugs.includes('team-evidence-review'))throw new Error('Chief did not skip redundant review');return {handoffs:s.office.handoffs.length,plannedTasks:m.agentSlugs,skippedTasks:m.skippedAgentSlugs,sourceReferences:run.officeContext.evidence.length};})()`,
+      `(async()=>{const s=await window.openAdminOS.getAppState();const m=s.office.missions.find(m=>m.personaId==='${ids.chief}'&&m.handoffId);const run=s.runs.find(r=>m.runIds.includes(r.id));if(run.agentSlug!=='team-script-draft'||!run.officeContext.evidence.length)throw new Error('Missing bounded delegation or evidence');if(!m.skippedAgentSlugs.includes('team-evidence-review'))throw new Error('Chief did not skip redundant review. '+m.planningReason);return {handoffs:s.office.handoffs.length,plannedTasks:m.agentSlugs,skippedTasks:m.skippedAgentSlugs,sourceReferences:run.officeContext.evidence.length};})()`,
     );
     await frame(join(outputDir, "rehearsal-delegation.png"));
     await evaluate(

@@ -1,3 +1,4 @@
+import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import { isNovaConversationOnly } from "../../src/shared/nova-transcript.js";
 import { fenceTenantData } from "@openadminos/runtime";
 import type {
@@ -49,6 +50,7 @@ export function voiceConversationContext(
 export function voiceInventoryAnswer(
   question: string,
   statuses: GraphCacheResourceStatus[],
+  timestampLocale?: ChatDateTimeLocale,
 ): string | undefined {
   const kind = classifyVoiceQuestion(question);
   if (kind?.kind !== "inventory") return undefined;
@@ -78,7 +80,7 @@ export function voiceInventoryAnswer(
           : partial
             ? `The partial snapshot contains at least ${count} ${name}`
             : `The snapshot contains ${count} ${name}`;
-      return `${detail}, refreshed ${status.refreshedAt}.${partial ? " Detail coverage is partial." : ""}${status.lastError ? " The latest refresh failed, so I cannot confirm the current count. Open Cache for details." : ""}`;
+      return `${detail}, refreshed ${formatCacheRefreshTime(status.refreshedAt, timestampLocale) ?? "earlier"}.${partial ? " Detail coverage is partial." : ""}${status.lastError ? " The latest refresh failed, so I cannot confirm the current count. Open Cache for details." : ""}`;
     })
     .join(" ");
 }
@@ -148,6 +150,7 @@ export function voiceAppPlatformCountAnswer(
   ) =>
     | { total: number; breakdowns: Record<string, Record<string, number>> }
     | undefined,
+  timestampLocale?: ChatDateTimeLocale,
 ): string | undefined {
   const kind = classifyVoiceQuestion(question);
   if (kind?.kind !== "app-platform-count" || !kind.appPlatform) return undefined;
@@ -174,7 +177,7 @@ export function voiceAppPlatformCountAnswer(
   const detail = partial
     ? `The partial snapshot contains at least ${count} ${name}`
     : `The snapshot contains ${count} ${name}`;
-  return `${detail}, refreshed ${status.refreshedAt}.${partial ? " Detail coverage is partial." : ""}${status.lastError ? " The latest refresh failed, so I cannot confirm the current count. Open Cache for details." : ""}`;
+  return `${detail}, refreshed ${formatCacheRefreshTime(status.refreshedAt, timestampLocale) ?? "earlier"}.${partial ? " Detail coverage is partial." : ""}${status.lastError ? " The latest refresh failed, so I cannot confirm the current count. Open Cache for details." : ""}`;
 }
 
 function appPlatformCount(
@@ -264,6 +267,7 @@ export function voiceDeviceSummaryAnswer(
   aggregate: () =>
     | { total: number; breakdowns: Record<string, Record<string, number>> }
     | undefined,
+  timestampLocale?: ChatDateTimeLocale,
 ): string | undefined {
   const kind = classifyVoiceQuestion(question);
   if (!kind || (kind.kind !== "encryption" && kind.kind !== "versions")) return undefined;
@@ -276,7 +280,7 @@ export function voiceDeviceSummaryAnswer(
   const partial =
     status.pageLimitReached ||
     (status.tenantTotal !== undefined && status.rows < status.tenantTotal);
-  const prefix = `${status.lastError ? "The latest refresh failed. " : ""}${partial ? "Detail coverage is partial. " : ""}In the Intune snapshot of ${data.total} devices, refreshed ${status.refreshedAt}: `;
+  const prefix = `${status.lastError ? "The latest refresh failed. " : ""}${partial ? "Detail coverage is partial. " : ""}In the Intune snapshot of ${data.total} devices, refreshed ${formatCacheRefreshTime(status.refreshedAt, timestampLocale) ?? "earlier"}: `;
   if (encryption) {
     const buckets = data.breakdowns.isEncrypted ?? {};
     const encrypted = buckets["1"] ?? buckets.true ?? 0;

@@ -3,6 +3,7 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 import {
   classifyOpenAiCompatibleEndpoint,
   createOpenAiCompatibleLlm,
+  fetchLocal,
   probeOpenAiCompatibleLlm,
   resolveOpenAiCompatibleEndpoint,
   type OpenAiCompatibleEndpointTrust,
@@ -79,6 +80,22 @@ function isLemonadeCloudModel(model: OpenAiCompatibleModel): boolean {
     (typeof model.recipe === "string" && model.recipe.trim().toLowerCase().startsWith("cloud")) ||
     (model.cloud_provider !== undefined && model.cloud_provider !== null && model.cloud_provider !== "")
   );
+}
+
+/** The context Lemonade reports for a downloaded local chat model. */
+export async function readLemonadeContextWindow(endpoint: string, model: string): Promise<number | undefined> {
+  try {
+    const response = await fetchLocal(`${endpoint.replace(/\/$/, "")}/models`, { signal: AbortSignal.timeout(1500) });
+    if (!response.ok) return undefined;
+    const { data } = await response.json() as { data?: Array<OpenAiCompatibleModel & { context_length?: unknown }> };
+    if (!Array.isArray(data)) return undefined;
+    const entry = data.find((item) => item?.id === model);
+    if (!entry || !lemonadeChatModelIds([entry]).includes(model)) return undefined;
+    const limit = entry.context_length;
+    return typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0 ? limit : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function createLemonadeLlm(options: LemonadeProviderOptions = {}): RunLlmApi {

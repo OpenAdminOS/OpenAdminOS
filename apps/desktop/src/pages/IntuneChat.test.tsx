@@ -23,6 +23,7 @@ import type {
   GraphCacheStatus,
   IntuneChatConversation,
   IntuneChatMessage,
+  MultiTenantChatJob,
   OpenAdminOSApi,
   ProviderSummary,
   SendIntuneChatMessageResult,
@@ -463,7 +464,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
 
   it("asks again after a model change when the no-tenant decision was remembered for another model (finding 10)", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4", "true");
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-4", "true");
     try {
       const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
@@ -472,13 +473,13 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       expect(await screen.findByRole("dialog", { name: "Send this question through Codex?" })).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
-      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4");
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-4");
     }
   });
 
   it("asks again with the tenant-bound confirmation once a tenant is connected, even after remembering the no-tenant one", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5", "true");
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-5", "true");
     try {
       const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
@@ -488,7 +489,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       expect(within(dialog).getByText(/Selected cached data from .+ is included\./)).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
-      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v3:no-tenant:openai:gpt-5");
     }
   });
 });
@@ -1100,6 +1101,67 @@ describe("IntuneChat hosted-provider disclosure", () => {
 });
 
 describe("IntuneChat hosted-provider consent", () => {
+  it("groups models from the same Ollama server by location and confirms a Cloud send", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, models: ["llama3.1", "cloud-alias"], remoteModels: ["cloud-alias"] }
+      : provider);
+    const bridge = makeMockBridge({}, createMockAppState({
+      providers, activeProviderId: "ollama", activeModelByProviderId: { ollama: "cloud-alias" },
+    }));
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, {
+      path: "/chat/:conversationId?", route: "/chat", bridge,
+    });
+
+    await user.click(await screen.findByLabelText("Model: cloud-alias"));
+    const menu = screen.getByRole("menu", { name: "Models" });
+    expect(within(menu).getByText("Hosted").parentElement).toContainElement(
+      within(menu).getByRole("menuitemradio", { name: /cloud-alias.*Ollama Cloud/ }),
+    );
+    expect(within(menu).getByText("On this device").parentElement).toContainElement(
+      within(menu).getByRole("menuitemradio", { name: /llama3.1/ }),
+    );
+    await user.click(screen.getByLabelText("Model: cloud-alias"));
+    await user.type(screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" }), "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to Ollama Cloud?" });
+    expect(within(dialog).getByText("Ollama Cloud · prompts processed on ollama.com")).toBeInTheDocument();
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Send to Ollama Cloud" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]?.[0].hostedProviderConsent).toMatchObject({
+      providerId: "ollama", model: "cloud-alias", tenantId: "tenant-1", ollamaDestination: "ollama-cloud",
+    });
+  });
+
+  it.each([
+    { cloud: true, otherDestination: "ollama-endpoint", name: "Send this question to Ollama Cloud?" },
+    { cloud: false, otherDestination: "ollama-cloud", name: "Send this question to Ollama?" },
+  ])("asks again for the selected Ollama destination when $otherDestination was remembered", async ({ cloud, otherDestination, name }) => {
+    const user = userEvent.setup();
+    const old = "openadminos:intune-chat-hosted-consent:v1:tenant-1:ollama";
+    const other = `openadminos:intune-chat-hosted-consent:v3:tenant-1:ollama:${otherDestination}`;
+    window.localStorage.setItem(old, "true");
+    window.localStorage.setItem(other, "true");
+    try {
+      const providers = mockProviders.map((provider) => provider.id === "ollama" ? {
+        ...provider, isLocal: cloud, models: ["alias"], remoteModels: cloud ? ["alias"] : [],
+      } : provider);
+      const bridge = makeMockBridge({}, createMockAppState({
+        providers, activeProviderId: "ollama", activeModelByProviderId: { ollama: "alias" },
+      }));
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+      await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Which Windows devices are stale?");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      expect(await screen.findByRole("dialog", { name })).toBeInTheDocument();
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    } finally {
+      window.localStorage.removeItem(old);
+      window.localStorage.removeItem(other);
+    }
+  });
+
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge(
@@ -2214,7 +2276,7 @@ it("routes a suggested write-agent dry run through the dry-run preflight", async
   expect(bridge.startRun).not.toHaveBeenCalled();
   expect(await screen.findByRole("heading", { name: "Review dry run" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Start dry run" }));
-  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", expect.objectContaining({ dryRun: true, expectedOllamaCloud: false })));
 });
 
 /**
@@ -2532,4 +2594,124 @@ it("says Azure OpenAI answers through the Azure OpenAI API in the hosted confirm
   const dialog = await screen.findByRole("dialog", { name: "Send this question to Azure OpenAI?" });
   expect(dialog).toHaveTextContent("Azure OpenAI answers through the Azure OpenAI API.");
   expect(dialog).not.toHaveTextContent("Azure OpenAI answers through Azure OpenAI.");
+});
+
+describe("IntuneChat timestamp presentation", () => {
+  const locale = "de-DE";
+  const timeZone = "Europe/Berlin";
+  const timestamp = "2020-04-02T23:15:00.000Z";
+  const dateOptions = { timeZone, year: "numeric", month: "short", day: "numeric" } as const;
+  const conversation = {
+    id: "timestamp-conversation",
+    title: "Windows devices",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    tenantId: "tenant-1",
+    scopeKind: "single-tenant",
+  } satisfies IntuneChatConversation;
+  const answer = {
+    id: "timestamp-answer",
+    conversationId: conversation.id,
+    role: "assistant",
+    content: "One Windows device.",
+    createdAt: timestamp,
+    status: "completed",
+  } satisfies IntuneChatMessage;
+
+  function renderTimestampChat(overrides: Partial<OpenAdminOSApi>) {
+    const bridge = makeMockBridge({
+      chatDateTimeLocale: { locale, timeZone },
+      listIntuneChatConversations: async () => [conversation],
+      getIntuneChatMessages: async () => [answer],
+      ...overrides,
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: `/chat/${conversation.id}`, bridge });
+  }
+
+  it("localizes the inline refresh timestamp on a legacy cache trace", async () => {
+    const user = userEvent.setup();
+    const dateTime = new Intl.DateTimeFormat(locale, { ...dateOptions, hour: "2-digit", minute: "2-digit" });
+    renderTimestampChat({
+      getIntuneChatMessages: async () => [{
+        ...answer,
+        toolTrace: [{
+          id: "legacy-cache-trace",
+          tool: "query_cache",
+          params: {},
+          resultSummary: `1 row; snapshot ${timestamp}`,
+          durationMs: 1,
+          createdAt: timestamp,
+          completedAt: timestamp,
+        }],
+      }],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "How the answer was made" }));
+    await user.click(screen.getByRole("button", { name: /What ran/ }));
+    expect(screen.getByText(`1 row · Snapshot refreshed ${dateTime.format(new Date(timestamp))}`)).toBeInTheDocument();
+  });
+
+  it("labels an epoch timestamp as stale in the answer tooltip", async () => {
+    renderTimestampChat({
+      getIntuneChatMessages: async () => [{ ...answer, createdAt: "1970-01-01T00:00:00.000Z" }],
+    });
+
+    expect(await screen.findByTitle("Answered Before the last write (stale)")).toBeInTheDocument();
+  });
+
+  it("shows the localized sync date without a time in the expanded device table", async () => {
+    const user = userEvent.setup();
+    const dateOnly = new Intl.DateTimeFormat(locale, dateOptions);
+    const counts = { windowsDevices: 1, compliant: 1, nonCompliant: 0, unknown: 0 };
+    const tenant = { tenantId: "tenant-1", tenantName: "Contoso" };
+    const job: MultiTenantChatJob = {
+      id: "timestamp-job",
+      conversationId: conversation.id,
+      prompt: conversation.title,
+      tenantScope: { kind: "all" },
+      resolvedTenantIds: [tenant.tenantId],
+      providerId: "ollama",
+      providerName: "Ollama",
+      providerIsLocal: true,
+      status: "completed",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      preflight: {
+        id: "timestamp-preflight",
+        prompt: conversation.title,
+        tenantScope: { kind: "all" },
+        resolvedTenantIds: [tenant.tenantId],
+        resolvedGroups: [],
+        resources: ["managedDevices"],
+        providerId: "ollama",
+        providerName: "Ollama",
+        providerIsLocal: true,
+        generatedAt: timestamp,
+        tenants: [],
+        canRun: true,
+      },
+      progress: [],
+      summary: { ...counts, tenantsScanned: 1, failedTenants: 0, skippedTenants: 0, staleTenants: 0 },
+      comparisons: [{ ...tenant, ...counts, status: "ready", lastRefresh: timestamp, warnings: [] }],
+      deviceRows: [{
+        ...tenant,
+        deviceName: "WIN-01",
+        complianceState: "compliant",
+        operatingSystem: "Windows",
+        lastSyncDateTime: timestamp,
+        stale: false,
+      }],
+      assistantText: answer.content,
+      exportDossierMarkdown: "",
+    };
+    renderTimestampChat({
+      listIntuneChatConversations: async () => [{ ...conversation, scopeKind: "multi-tenant", multiTenantJobId: job.id }],
+      getMultiTenantChatJob: async () => job,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Contoso" }));
+    const deviceTable = screen.getByRole("columnheader", { name: "Last sync" }).closest("table")!;
+    const deviceRow = within(deviceTable).getByRole("row", { name: /WIN-01/ });
+    expect(within(deviceRow).getByRole("cell", { name: dateOnly.format(new Date(timestamp)) })).toBeInTheDocument();
+  });
 });

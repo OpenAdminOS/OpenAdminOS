@@ -40,13 +40,15 @@ export async function embeddingModelState(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = loopbackTransport.fetch,
+  signal?: AbortSignal,
 ): Promise<{ ollamaReachable?: boolean; installed: boolean; error?: string }> {
   // Refuses a non-loopback endpoint before any connection.
   loopbackLabel(endpoint, "/api/tags");
   const recovery = "Check Ollama's local endpoint, then refresh the documentation index status.";
   let answered = false;
   try {
-    const { response, url } = await fetchLoopback(endpoint, "/api/tags", { signal: AbortSignal.timeout(3000) }, fetchImpl);
+    const timeout = AbortSignal.timeout(3000);
+    const { response, url } = await fetchLoopback(endpoint, "/api/tags", { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }, fetchImpl);
     answered = true;
     if (isRefusedRedirect(response, url)) {
       return { ollamaReachable: true, installed: false, error: `${redirectRefusedDetail("Ollama", url)} ${recovery}` };
@@ -64,6 +66,7 @@ export async function embeddingModelState(
     );
     return { ollamaReachable: true, installed };
   } catch (error) {
+    signal?.throwIfAborted();
     // A reset means something answered and then closed the connection: not a stopped Ollama.
     if (!answered && connectionCode(error) !== "ECONNRESET" && isConnectionRefused(error)) return { ollamaReachable: false, installed: false };
     const reason = error instanceof SyntaxError
@@ -85,9 +88,10 @@ export async function pullEmbeddingModel(
   endpoint: string = embeddingEndpoint(),
   model: string = DEFAULT_INDEX_EMBEDDING_MODEL,
   fetchImpl: typeof fetch = loopbackTransport.fetch,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
-    await pullOnce(endpoint, model, fetchImpl);
+    await pullOnce(endpoint, model, fetchImpl, signal);
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") throw new EmbeddingPullStalledError(model, error);
     throw error;
@@ -106,11 +110,13 @@ export class EmbeddingPullStalledError extends Error {
   }
 }
 
-async function pullOnce(endpoint: string, model: string, fetchImpl: typeof fetch): Promise<void> {
+async function pullOnce(endpoint: string, model: string, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const { response, url } = await fetchLoopback(endpoint, "/api/pull", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, stream: false }),
+    signal,
   }, fetchImpl);
   if (isRefusedRedirect(response, url)) throw new Error(redirectRefusedDetail("Ollama", url));
   // Ollama reports a failed download in the body, often with HTTP 500:

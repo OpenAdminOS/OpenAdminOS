@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_NAME } from "@openadminos/agent-sdk";
 import type { ProviderSummary, RunRecord } from "@openadminos/agent-sdk";
 
 export const FORECAST_HISTORY_LIMIT = 20;
@@ -50,6 +51,7 @@ function percentile(sorted: number[], fraction: number): number {
 export function scheduleBillingMessage(provider: ProviderSummary | undefined): string {
   if (!provider) return "Choose a provider in Settings to see an estimate.";
   if (provider.isLocal) return "Runs on this device. No API charges.";
+  if (provider.id === "ollama" && provider.name === OLLAMA_CLOUD_NAME) return "Runs on Ollama Cloud. Check your Ollama account for usage and billing.";
   if (["openai", "anthropic", "copilot", "gemini"].includes(provider.id)) {
     return "Usage counts against your subscription limits. CLI account billing may apply.";
   }
