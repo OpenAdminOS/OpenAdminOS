@@ -4,11 +4,10 @@ name: Release prep
 # workspace package.json + cross-workspace dep ref to the next version,
 # rolls CHANGELOG.md so the [Unreleased] section becomes a dated
 # [X.Y.Z] section, regenerates the lockfile, and opens a PR. When that
-# PR merges to main, .github/workflows/auto-tag.yml fires, pushes the
-# matching tag, and the existing release.yml builds and publishes a
-# draft GitHub release.
+# PR merges to main, .github/workflows/auto-tag.yml waits for green CI and
+# exact version approval before pushing the tag and dispatching Release.
 #
-# Defaults to "patch" — matches the project's v0.1.x line discipline.
+# Defaults to "patch" to match the project's v0.1.x line discipline.
 # Set bump to "minor" or "major" only when intentionally changing line.
 
 on:
@@ -98,4 +97,4 @@ jobs:
 
           Bumped \`v${OLD_VERSION}\` → \`v${NEW_VERSION}\`.
 
-          Review the CHANGELOG roll (the \`[Unreleased]\` section becomes \`[${NEW_VERSION}] - $(date -u +%Y-%m-%d)\`) and the version bumps across workspace package.json files. When this merges to main, \`auto-tag.yml\` pushes \`v${NEW_VERSION}\` and \`release.yml\` builds the signed installers."
+          Review the CHANGELOG roll (the \`[Unreleased]\` section becomes \`[${NEW_VERSION}] - $(date -u +%Y-%m-%d)\`) and the version bumps across workspace package.json files. After merging and verifying green CI on main, set the \`STABLE_RELEASE_APPROVED\` repository variable to \`${NEW_VERSION}\` and run **Auto-tag release versions** on main to publish stable."

@@ -8,7 +8,7 @@ The release surface publishes Windows, macOS, and Linux binaries:
 - **Linux → GitHub Releases + apt** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums; the `.deb` is also published into a signed GitHub Pages-backed apt repository).
 - **Windows → GitHub Releases + electron-updater** (x64 NSIS `.exe` installer, code signed through Azure Trusted Signing; `latest.yml` is published for electron-updater). AppX packaging validation is still available as an opt-in manual job for the deferred Microsoft Store path, and that AppX is never published.
 
-A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
+Auto-tag creates an approved stable tag and dispatches Release to build Windows, macOS, and Linux, publish the release files, and refresh the apt repository from the released `.deb`.
 
 Before publishing either channel, the release job downloads each platform artifact by name and verifies the expected installers and manifests. It checks updater asset sizes and SHA-512 hashes against the update manifests, and checks build-time SHA-256 hashes for the manifests, Linux packages, and stable macOS PKG. The release job also reads the Linux `.deb` data archive with `dpkg-deb --fsys-tarfile`. A failed check names the file and stops publishing. The stable apt job compares its separately downloaded `.deb` with the verified release checksum before building the repository.
 
@@ -161,7 +161,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 
 ### Linux — apt repository
 
-The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
+The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the published stable release's `.deb`. No package repository vendor, storage bucket, or checked-in package index is required.
 The repository builder validates the `.deb` architecture from package control metadata, not from the release asset filename; Electron Builder names assets like `OpenAdminOS-X.Y.Z-linux-amd64.deb`, which is not the Debian `*_amd64.deb` suffix format.
 
 One-time GitHub setup:
@@ -188,7 +188,7 @@ Expires: 2029-06-04
 
 The workflow exports the public key to `https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
 
-To republish an existing release into apt without rebuilding the app, run the
+To republish an existing published stable release into apt without rebuilding the app, run the
 **Release** workflow manually from `main` and set `backfill_apt_tag` to the
 stable release tag, for example `v0.7.2`. The workflow checks the downloaded
 `.deb` size and SHA-512 against that release's `latest-linux.yml` before
@@ -198,9 +198,8 @@ building the repository. A missing manifest or package entry blocks the backfill
 
 ## Cutting a release
 
-The normal flow needs only the release-prep run and PR merge in GitHub. No
-local terminal is needed. A release that changes commit-derived documentation
-can require merging the generated-doc follow-up before CI is green.
+The normal flow runs entirely in GitHub. A release that changes commit-derived
+documentation can require merging the generated-doc follow-up before CI is green.
 
 1. **Run the Release prep workflow.**
    - Actions tab → **Release prep** → **Run workflow** → branch `main`.
@@ -211,21 +210,28 @@ can require merging the generated-doc follow-up before CI is green.
    - Merge the `release: vX.Y.Z` PR after its checks pass.
 3. **Let main finish reconciling and pass CI.**
    - If the squash merge changes commit-derived GitBook metadata, the Documentation workflow opens a one-line generated-doc PR. Review and merge it before release tagging; the failed main CI run is expected to remain red until that generated update lands.
-4. **The rest is automatic.**
-   - After CI succeeds on the current `main` commit, `auto-tag.yml` reads the version from `package.json`. If that version has no tag yet, it tags that exact green commit as `vX.Y.Z`. A stale successful run is ignored when `main` has already advanced.
-   - `release.yml` fires on the tag → builds the signed Windows x64 installer, macOS release files, and Linux x64 packages.
+4. **Approve the exact stable version and run Auto-tag release versions.**
+   - In **Settings > Secrets and variables > Actions > Variables**, set the repository variable `STABLE_RELEASE_APPROVED` to the exact `package.json` version, for example `0.8.0`.
+   - In **Actions > Auto-tag release versions > Run workflow**, select `main`. The workflow checks that the current `main` commit passed CI. The automatic trigger after green CI also honors the same approval. A stale successful run is ignored when `main` advances.
+   - If the approved version has no tag, Auto-tag creates `vX.Y.Z` and dispatches Release on that tag. Release checks the approval again before building the signed Windows x64 installer, macOS release files, and Linux x64 packages. Keep the variable at that version through the release so a rerun can pass the same check.
    - The GitHub release receives the Windows `.exe` and `latest.yml`, macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
    - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
+
+### Recover a failed stable release
+
+- If **Resolve release channel** (`meta`) passed, use **Re-run failed jobs** on the original Release run. This also covers an apt deployment failure after the release was published.
+- If the tag exists and publication has yet to succeed, keep the exact version approved and run **Auto-tag release versions** manually on `main`. After verifying green CI, Auto-tag dispatches Release again if the tag points to the current `main` commit and there is no published release for it. A draft still qualifies for recovery.
+- If `main` has advanced and the failed jobs cannot be retried, ask the repository owner how to recover. Never delete or move a release tag without the owner's approval.
 
 ### One-time branch packaging test
 
 Use this when validating release workflow changes before they land on `main`.
 Run the **Release** workflow manually from the Actions tab, choose the feature
-branch, and leave `build_windows` off unless you also need AppX validation. The
-manual branch run uploads Windows, macOS, and Linux artifacts as workflow
-artifacts only; it does not create or publish a GitHub Release because
-publishing is gated to `refs/tags/v*` and to nightly dispatches with
-`nightly_sha`. A manual run without the Azure settings configured produces an
+branch, and leave `build_windows` off unless you also need AppX validation. A
+manual branch run uploads Windows, macOS, and Linux workflow artifacts. Stable
+publication requires an approved tag dispatched by Auto-tag, and nightly
+publication requires a main dispatch with `nightly_sha`. A manual packaging run
+without the Azure settings configured produces an
 explicitly unsigned Windows installer and skips signature verification; a
 stable or nightly run fails outright if any of them is missing.
 
@@ -253,9 +259,8 @@ git commit -m "release: v0.1.X"
 git push -u origin release/v0.1.X
 gh pr create --title "release: v0.1.X" --body "Manual release prep."
 
-# 4. After the PR (and any generated-doc follow-up) merges and main CI
-#    passes, auto-tag.yml still picks it up. (If that also
-#    breaks, tag manually: git tag -a v0.1.X && git push origin v0.1.X.)
+# 4. After the PR and any generated-doc follow-up merge and main CI passes,
+#    approve the exact version and run Auto-tag release versions on main.
 ```
 
 ## Nightly builds
@@ -265,8 +270,8 @@ release-prep PR. They are fully automatic.
 
 | | Stable | Nightly |
 |---|---|---|
-| Trigger | Release-prep merge (untagged package version) | Any other green `main` commit that changes the app |
-| Version | `0.7.1` | `0.7.1-nightly.20261023141500` (next stable patch + UTC build time) |
+| Trigger | Green `main` with an approved package version that is untagged or tagged at that commit and unpublished | Green `main` with app changes when stable is not due |
+| Version | `0.8.0` | `0.8.0-nightly.20261124103910` (next stable version + UTC build time) |
 | GitHub release | Latest release, CHANGELOG notes | Prerelease, never latest, notes for that build only |
 | Update files | `latest.yml`, `latest-mac.yml`, `latest-linux.yml` | `nightly.yml`, `nightly-mac.yml`, `nightly-linux.yml` |
 | macOS | `.dmg`, `.pkg`, `.zip` | `.dmg`, `.zip` |
@@ -277,9 +282,10 @@ release-prep PR. They are fully automatic.
 
 How it runs:
 
-1. After CI succeeds on the current `main` commit and the package version is
-   already tagged, `auto-tag.yml` runs `scripts/nightly-app-changes.sh`, which
-   diffs the commit against the newest `v*` tag of either channel. If anything outside `stats/`, `web/`, `docs/`,
+1. After CI succeeds on the current `main` commit, `auto-tag.yml` checks whether
+   a newly approved or recoverable stable release is due. Otherwise,
+   `scripts/nightly-app-changes.sh` diffs the commit
+   against the newest `v*` tag of either channel. If anything outside `stats/`, `web/`, `docs/`,
    `tasks/`, `model/`, `remotion/`, `.github/`, or root Markdown changed, it
    dispatches `release.yml` on `main` with `nightly_sha`. Comparing with the
    newest tag, not the parent commit, means a merge whose CI was cancelled by
@@ -287,8 +293,8 @@ How it runs:
    Contributor tooling never triggers a nightly on its own: the scripts the
    filter lists (docs generation, screenshot capture, smoke tests, QA setup,
    script tests, and the release tooling that decides, describes, or checks a
-   release: this filter, nightly release notes, release prep, and the
-   compatibility check), root `package.json` changes outside the `build` and
+   release: the channel decision, this filter, nightly release notes, release
+   prep, and the compatibility check), root `package.json` changes outside the `build` and
    `dist:desktop` scripts, version, workspaces, and engines, and
    `.gitattributes` lines that only set `linguist-*` attributes. A new file
    under `scripts/` counts as an app change until it is added to that list.
@@ -296,7 +302,8 @@ How it runs:
    and so do `prepare-nightly-build.mjs` and `release-version.mjs`, which
    change what a nightly ships.
 2. The `meta` job checks that the commit is on `main` and computes the version
-   with `scripts/release-version.mjs`.
+   with `scripts/release-version.mjs`. An unshipped package version supplies the
+   base. Once it ships, the base is one patch above the newest stable tag.
 3. Each platform job runs `scripts/prepare-nightly-build.mjs`, which sets the
    desktop version and the `nightly` publish channel for that build only. It
    is never committed.
