@@ -170,8 +170,8 @@ export default function PrivacyPage() {
                   timestamps to serve requests, troubleshoot, and protect the site.
                   We rely on our legitimate interest in operating and securing the
                   site (Art. 6(1)(f) GDPR). Vercel keeps these logs for up to 30 days.
-                  We do not export copies of these logs. Build logs contain no visitor
-                  data. The website&rsquo;s server functions run in the United States.
+                  We do not export copies of these logs. The website&rsquo;s server
+                  functions run in the United States.
                   Logging is part of using the site or API.
                   See <Link href="https://vercel.com/legal/privacy-policy" className="text-link">Vercel&rsquo;s privacy policy</Link>.
                 </p>
@@ -320,7 +320,8 @@ export default function PrivacyPage() {
                 <p className="mt-2">
                   We process booking details to perform a contract or take steps you
                   request before entering into one (Art. 6(1)(b) GDPR). We keep booking
-                  details for 12 months after the call. Booking is optional.
+                  details for 12 months after the call. Booking is optional. Without a
+                  name and email address we cannot confirm a booking.
                   See <Link href="https://cal.com/privacy" className="text-link">Cal.com&rsquo;s privacy policy</Link>.
                 </p>
               </div>
@@ -334,7 +335,8 @@ export default function PrivacyPage() {
             <p className="mt-3">
               Vercel, GitHub, Microsoft, and Cal.com may process data in the United
               States. For eligible transfers to Vercel, GitHub, and Cal.com, we
-              rely on the frameworks listed below. The standard contractual
+              rely on the frameworks listed below. For Microsoft 365, we rely on the
+              SCCs in Microsoft&rsquo;s data protection addendum. The standard contractual
               clauses (SCCs) are those approved by the European Commission.
             </p>
             <ul className="mt-3 list-disc space-y-2 pl-5">

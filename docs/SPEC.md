@@ -226,6 +226,17 @@ Germany (AWS `eu-central-1`). For international transfers to Supabase, we rely
 on the SCCs in its data processing agreement. Copies of the safeguards are
 available via the support address.
 
+Provenance, checked 2026-11-25: Data Privacy Framework status from the official
+list at dataprivacyframework.gov (searched by participant name; Supabase not
+listed); Supabase entity from supabase.com/privacy and SCCs from
+supabase.com/legal/dpa; Vercel runtime log retention from
+vercel.com/docs/logs/runtime (1 day on Pro, 30 days with Observability Plus);
+the Pro plan, absence of log drains and the function region (`iad1`, set in the
+Vercel project settings, not in `web/vercel.json`) from the Vercel API; the
+EU tenant region from the openadminos.com Entra ID OpenID configuration
+(`tenant_region_scope: EU`); booking fields from the two public Cal.com booking
+forms. Re-check these when the privacy notice changes.
+
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
 outside click, Escape, or link activation.
