@@ -440,48 +440,61 @@ describe("a Nova follow-up run", () => {
     }
   });
 
-  it("stops a follow-up whose Chat call ignores its signal, so later follow-ups still run", async () => {
-    let now = new Date();
-    let calls = 0;
-    let firstId: string | undefined;
-    const { store, dir } = await makeStore({
-      clock: () => now,
-      extra: {
-        providerListFactory: providers,
-        graphFactory: graph([]),
-        // Only the hung call gets a short bound. The healthy one gets a bound
-        // no loaded runner reaches, so its result never depends on timing.
-        novaFollowUpRunMs: (followUp: { id: string }) => (followUp.id === firstId ? 50 : 120_000),
-        llmFactory: () => ({
-          available: true,
-          complete: async () => ({ text: "Nothing.", model: "test" }),
-          async *stream() {
-            calls += 1;
-            // The first call never settles and ignores its abort signal.
-            if (calls === 1) await new Promise(() => undefined);
-            yield { delta: "Device A is noncompliant.", accumulated: "Device A is noncompliant.", done: true, model: "test" };
+  for (const form of ["number", "function"] as const) {
+    it(`stops a follow-up whose Chat call ignores its signal with a ${form} deadline`, { timeout: 20_000 }, async (test) => {
+      let now = new Date();
+      let calls = 0;
+      const evaluatedIds: string[] = [];
+      let notifyFirstStream!: () => void;
+      const firstStreamStarted = new Promise<void>((resolve) => { notifyFirstStream = resolve; });
+      const { store, dir } = await makeStore({
+        clock: () => now,
+        extra: {
+          providerListFactory: providers,
+          graphFactory: graph([]),
+          novaFollowUpRunMs: form === "number" ? 50 : (followUp) => {
+            evaluatedIds.push(followUp.id);
+            return 50;
           },
-        }) as never,
-      },
+          llmFactory: () => ({
+            available: true,
+            complete: async () => ({ text: "Nothing.", model: "test" }),
+            async *stream() {
+              calls += 1;
+              // The first call never settles and ignores its abort signal.
+              if (calls === 1) {
+                notifyFirstStream();
+                await new Promise(() => undefined);
+              }
+              yield { delta: "Device A is noncompliant.", accumulated: "Device A is noncompliant.", done: true, model: "test" };
+            },
+          }) as never,
+        },
+      });
+      try {
+        const first = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
+        const second = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check app installs", providerId: "ollama", model: "test", delayMinutes: 2 });
+        now = new Date(now.getTime() + 121_000);
+        // Move the deadline only after Chat reaches the call that ignores its signal.
+        test.mock.timers.enable({ apis: ["setTimeout"] });
+        const fired = store.fireDueNovaFollowUps();
+        await Promise.race([firstStreamStarted, fired.then(() => assert.fail("The first stream never started."))]);
+        test.mock.timers.tick(50);
+        await fired;
+        const list = (await store.handleNovaRecords({ action: "list" })).followUps;
+        const one = list.find((entry) => entry.id === first.id);
+        assert.equal(one?.status, "failed");
+        assert.equal(one?.reason, NOVA_FOLLOW_UP_TIMED_OUT);
+        assert.equal(list.find((entry) => entry.id === second.id)?.status, "completed");
+        // The hung call did not hold the next one: both were asked in the same pass.
+        assert.equal(calls, 2);
+        if (form === "function") assert.deepEqual(evaluatedIds, [first.id, second.id]);
+      } finally {
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
     });
-    try {
-      const first = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check device compliance", providerId: "ollama", model: "test", delayMinutes: 1 });
-      firstId = first.id;
-      const second = await store.novaFollowUpsHost().create({ tenantId: contoso.id, question: "Check app installs", providerId: "ollama", model: "test", delayMinutes: 2 });
-      now = new Date(now.getTime() + 121_000);
-      await store.fireDueNovaFollowUps();
-      const list = (await store.handleNovaRecords({ action: "list" })).followUps;
-      const one = list.find((entry) => entry.id === first.id);
-      assert.equal(one?.status, "failed");
-      assert.equal(one?.reason, NOVA_FOLLOW_UP_TIMED_OUT);
-      assert.equal(list.find((entry) => entry.id === second.id)?.status, "completed");
-      // The hung call did not hold the next one: both were asked in the same pass.
-      assert.equal(calls, 2);
-    } finally {
-      store.close();
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+  }
 
   it("skips a follow-up whose provider was switched between the first decision and the lease, with no started event", async () => {
     let now = new Date();

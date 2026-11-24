@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Open Nova over other apps with a configurable system-wide shortcut for voice and typed questions, including public Microsoft questions without an organization.
 - Nova answers public Microsoft feature and how-to questions without a connected organization, using the local documentation index when available and explaining when it is missing, unavailable for search, or has no matching passages.
 
 ### Changed
@@ -16,6 +17,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Removed
 
 ### Fixed
+
+- Nova keeps a live session while the floating window awaits consent, recovers when its global shortcut is unavailable, and reopens the main window for answer links and conversations.
 
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
 

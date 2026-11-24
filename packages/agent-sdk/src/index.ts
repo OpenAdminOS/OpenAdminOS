@@ -1445,6 +1445,7 @@ export interface AppState {
   managedPolicy?: ManagedPolicyStatus;
   /** Nova's settings with defaults and the IT policy applied. */
   novaProfile?: EffectiveNovaProfile;
+  novaRegisteredShortcut?: string | null;
   /** Nova follow-ups waiting to run, on this device. */
   novaFollowUpsPending?: number;
   /** Why Nova's notes and follow-ups are unavailable on this device, when openadminos.db cannot be opened. */
@@ -2505,6 +2506,7 @@ export interface NovaInstructionRevision {
 
 /** Nova's settings on this device, kept in main-process state. Absent fields use the defaults. */
 export interface NovaProfile {
+  globalShortcut?: string | null;
   voiceMode?: NovaVoiceMode;
   greetingName?: string;
   /** Standing instructions, reference data for Nova that cannot override its fixed rules. */
@@ -2525,6 +2527,7 @@ export interface NovaProfile {
 
 /** The profile with defaults and the IT policy applied, as Nova and Settings use it. */
 export interface EffectiveNovaProfile {
+  globalShortcut?: string | null;
   /** Undefined when the IT policy allows no voice mode. */
   voiceMode?: NovaVoiceMode;
   allowedVoiceModes: NovaVoiceMode[];
@@ -2563,6 +2566,7 @@ export interface NovaProfileView {
 }
 
 export interface NovaProfilePatch {
+  globalShortcut?: string | null;
   voiceMode?: NovaVoiceMode;
   greetingName?: string;
   instructions?: string;
@@ -3696,6 +3700,10 @@ export interface OpenAdminOSApi {
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
+  novaWindow(
+    action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings",
+    payload?: string,
+  ): Promise<string | undefined>;
   novaProfile(request: NovaProfileRequest): Promise<NovaProfileView>;
   novaRecords(request: NovaRecordsRequest): Promise<NovaRecordsView>;
   startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;

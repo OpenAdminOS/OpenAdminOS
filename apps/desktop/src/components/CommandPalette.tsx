@@ -1,3 +1,4 @@
+import { novaHint } from "../shared/nova-keyboard";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
@@ -288,7 +289,7 @@ export function CommandPalette({
       {
         id: "act-voice",
         label: "Open Voice",
-        hint: "Nova voice assistant · Alt+V",
+        hint: `Nova voice assistant · Shortcut ${novaHint(state.novaRegisteredShortcut)}`,
         group: "Actions",
         icon: <IconSparkle size={13} className="text-[var(--color-accent)]" />,
         action: () => {
@@ -336,7 +337,7 @@ export function CommandPalette({
           ] as PaletteItem[])
         : []),
     ];
-  }, [activeTheme, conversationSearchResult, navigate, onClose, query, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.novaProfile?.shortcuts, state.tenants.length, workspaces]);
+  }, [activeTheme, conversationSearchResult, navigate, onClose, query, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.novaProfile?.shortcuts, state.novaRegisteredShortcut, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

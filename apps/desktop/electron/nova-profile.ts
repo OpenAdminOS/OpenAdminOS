@@ -1,3 +1,4 @@
+import { DEFAULT_NOVA_KEY, NOVA_KEY_FORMAT, novaKeyProblem, parseNovaKey } from "../src/shared/nova-keyboard.js";
 import { randomUUID } from "node:crypto";
 import {
   isManagedSettingLocked,
@@ -158,6 +159,8 @@ export function sanitizeNovaProfile(value: unknown): NovaProfile | undefined {
   if (!isRecord(value)) return undefined;
   const profile: NovaProfile = {};
   if (isVoiceMode(value.voiceMode)) profile.voiceMode = value.voiceMode;
+  const globalShortcut = parseNovaKey(value.globalShortcut);
+  if (globalShortcut !== undefined && globalShortcut !== DEFAULT_NOVA_KEY) profile.globalShortcut = globalShortcut;
   const greetingName = boundedText(value.greetingName, NOVA_GREETING_NAME_MAX_LENGTH)?.trim();
   if (greetingName) profile.greetingName = greetingName;
   const instructions = boundedText(value.instructions, NOVA_INSTRUCTIONS_MAX_LENGTH);
@@ -313,6 +316,7 @@ export function effectiveNovaProfile(
   return {
     ...(voiceMode ? { voiceMode } : {}),
     allowedVoiceModes,
+    globalShortcut: profile?.globalShortcut,
     greetingName: profile?.greetingName ?? "",
     instructions: instructions.instructions,
     instructionsSource: instructions.instructionsSource,
@@ -416,6 +420,7 @@ function rejectUnknownKeys(value: Record<string, unknown>, allowed: readonly str
 const PATCH_KEYS = [
   "voiceMode",
   "greetingName",
+  "globalShortcut",
   "instructions",
   "addendum",
   "capabilities",
@@ -557,6 +562,18 @@ export function applyNovaProfilePatch(
       throw new ManagedPolicyError(novaVoiceModeNotAllowedMessage(change.voiceMode, allowedNovaVoiceModes(policy)));
     }
     profile.voiceMode = change.voiceMode;
+  }
+  // TODO(ugur): Should managed-policy.ts let IT disable or fix Nova's system shortcut?
+  if (change.globalShortcut !== undefined) {
+    if (context.via !== "settings") throw new NovaProfileError("Change the system shortcut in Settings, Nova.");
+    if (typeof change.globalShortcut === "string") {
+      const problem = novaKeyProblem(change.globalShortcut);
+      if (problem) throw new NovaProfileError(problem);
+    }
+    const shortcut = parseNovaKey(change.globalShortcut);
+    if (shortcut === undefined) throw new NovaProfileError(NOVA_KEY_FORMAT);
+    if (shortcut === DEFAULT_NOVA_KEY) delete profile.globalShortcut;
+    else profile.globalShortcut = shortcut;
   }
   if (change.greetingName !== undefined) {
     if (typeof change.greetingName !== "string") throw new NovaProfileError("The greeting name must be text.");

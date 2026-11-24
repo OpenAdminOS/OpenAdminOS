@@ -1,3 +1,4 @@
+import { DEFAULT_NOVA_KEY, NOVA_KEY_FORMAT, novaKeyLabel, novaKeyProblem, parseNovaKey, recordNovaKey } from "../shared/nova-keyboard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
@@ -94,6 +95,12 @@ function Counter({ value, max }: { value: string; max: number }) {
 export function NovaSettingsSection() {
   const { state, refresh } = useAppState();
   const api = window.openAdminOS;
+  const [keyError, setKeyError] = useState("");
+  const [recordingKey, setRecordingKey] = useState(false);
+  const updateKeyError = useCallback(() => {
+    void api?.novaWindow?.("shortcut-error").then(value => setKeyError(value ?? "")).catch(error => setKeyError(hostError(error)));
+  }, [api]);
+  useEffect(updateKeyError, [updateKeyError]);
   const [view, setView] = useState<NovaProfileView>();
   const [connectors, setConnectors] = useState<ConnectorSummary[]>();
   const [connectorsError, setConnectorsError] = useState<string | null>(null);
@@ -289,6 +296,37 @@ export function NovaSettingsSection() {
         {effective.voiceMode === "openai" ? " In hosted voice, the instructions and the organization's confirmed notes go to OpenAI with the conversation." : ""}
       </p>
       <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+        <SettingRow
+          stacked
+          id="nova-system-shortcut"
+          control={
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span>{novaKeyLabel(effective.globalShortcut)}</span>
+                <UiButton type="button" variant="secondary" disabled={blocked} onBlur={() => setRecordingKey(false)}
+                  onClick={() => setRecordingKey(true)} onKeyDown={event => {
+                    if (!recordingKey || (event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.repeat) return;
+                    if (event.key === "Escape") { setRecordingKey(false); return; }
+                    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+                    const recorded = recordNovaKey(event);
+                    const problem = novaKeyProblem(recorded);
+                    const key = parseNovaKey(recorded);
+                    if (problem || !key) { setKeyError(problem ?? NOVA_KEY_FORMAT); return; }
+                    setRecordingKey(false);
+                    void save({ globalShortcut: key }).then(updateKeyError);
+                  }}>{recordingKey ? "Press a key combination" : "Record shortcut"}</UiButton>
+                <UiButton variant="secondary" disabled={blocked} onClick={() => void save({ globalShortcut: DEFAULT_NOVA_KEY }).then(updateKeyError)}>Reset to default</UiButton>
+                <UiButton variant="secondary" disabled={blocked} onClick={() => void save({ globalShortcut: null }).then(updateKeyError)}>Turn off</UiButton>
+              </div>
+              {keyError && <p role="alert" className="text-[var(--color-danger)]">{keyError}</p>}
+              {state.novaRegisteredShortcut && state.novaRegisteredShortcut !== (effective.globalShortcut ?? DEFAULT_NOVA_KEY) &&
+                <p>Still active: {novaKeyLabel(state.novaRegisteredShortcut)}</p>}
+            </div>
+          }
+        />
         <SettingRow
           id="nova-voice"
           stacked

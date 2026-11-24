@@ -441,6 +441,24 @@ describe("Nova settings in the store", () => {
     };
   }
 
+  it("persists a system shortcut, records a configuration event, and restores the default", async () => {
+    const fixture = await makeStore();
+    try {
+      await fixture.store.handleNovaProfile({ action: "save", patch: { globalShortcut: "Alt+Control+F9" } });
+      const read = () => fixture.store.handleNovaProfile({ action: "get" });
+      assert.equal((await read()).effective.globalShortcut, "Control+Alt+F9");
+      assert.equal(JSON.parse(await readFile(fixture.statePath, "utf8")).novaProfile.globalShortcut, "Control+Alt+F9");
+      assert.deepEqual((await fixture.recorded()).find(event => event.type === "nova.settings-changed")?.details, { changed: ["globalShortcut"], via: "settings" });
+      await fixture.store.handleNovaProfile({ action: "save", patch: { globalShortcut: null } });
+      assert.equal((await read()).effective.globalShortcut, null);
+      await fixture.store.handleNovaProfile({ action: "save", patch: { globalShortcut: "Control+Alt+Space" } });
+      assert.equal((await read()).effective.globalShortcut, undefined);
+      await assert.rejects(fixture.store.handleNovaProfile({ action: "save", patch: { globalShortcut: "Space" } }), /Use Ctrl/);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("records Nova changes as configuration events and exports the full instruction text", async () => {
     const fixture = await makeStore();
     try {

@@ -942,7 +942,34 @@ window above, not every Graph property, relationship or action. Device records i
 reported encryption; deterministic aggregates include OS versions and encryption
 with unknown values retained.
 
-Nova is available across app pages through the command palette and Alt+V. Its compact
+Nova opens in the app from the voice button or command palette. The system-wide
+shortcut opens the floating Nova bubble on the pointer's display. It defaults to
+Ctrl+Option+Space on macOS and Ctrl+Alt+Space on Windows and Linux. Record another
+combination, restore the default or turn it off in Settings > Nova. The bubble
+keeps its last position per display and uses a macOS panel visible on all
+workspaces, including full-screen spaces. It can take keyboard focus without
+raising the main window. Escape closes it. The microphone starts after an
+explicit Talk action or shortcut press, once setup and any hosted consent are
+ready. With the bubble open, the shortcut toggles listening. Alt+V opens Nova inside
+OpenAdminOS even when the system-wide binding is unavailable or turned off.
+Letter bindings require two modifiers and system and editing combinations are
+reserved. On registration failure, Settings shows the reason and retains any
+working binding. Typed questions can
+start a session without opening the microphone. Only one surface owns Nova at a
+time. Once setup and consent pass, starting on the other surface ends the earlier session and shows a message
+there. Hiding the bubble releases its microphone and ends its session. The
+bubble shows the active organization or No organization, the data destination,
+and the latest answer with a compact activity line. The answer scrolls inside
+its card. Without an organization, the bubble can answer public Microsoft
+questions and offer a Connections button when a question needs tenant data. The
+Talk button takes initial focus and becomes Stop while listening. Hosted voice
+asks for per-session consent inline. Open in
+OpenAdminOS shows the full in-app panel and carries over the current conversation
+for the same organization, provider and model. It shows the last 80 items and
+labels truncated conversations. It explains when a changed context or oversized
+transcript prevents transfer. The bubble offers app pages from answers as explicit
+Open in OpenAdminOS actions.
+Nova's in-app compact
 panel can fill the app window for presentations, covering the sidebar and page.
 During an active session, the centered orb is the only visible element after three
 seconds without interaction; pointer or keyboard activity reveals the controls.
@@ -962,10 +989,9 @@ vector ribbons, a crisp spherical rim and layered highlights. Interior animation
 changes playback rate without resetting its position across speech states; muted
 and error states pause the interior. Reduced-motion
 preferences suppress animated movement. Voice settings remain available from the
-idle panel. The microphone starts only on click.
+idle panel.
 Stop, Escape, panel close, tenant/provider change and app backgrounding release
-microphone access. “Hey Nova” is handled during an active conversation; background
-wake-word detection is not implemented. Simple navigation is restricted to known
+microphone access. “Hey Nova” works during an active conversation. Background wake words remain out of scope. Simple navigation is restricted to known
 app routes. Tenant questions reuse the existing Chat tools and approval boundary;
 voice cannot approve writes. Results remain reviewable in Chat. The voice model
 receives the selected tenant identity and explicit delegation rules at session
@@ -1076,7 +1102,7 @@ is a card confirmed with a click, and a spoken "yes" only shows the card again.
 renderer's local storage), standing instructions (at most 4,000 characters),
 instructions per organization (at most 1,000, for the active organization),
 abilities (web search, opening pages, starting agents, sends per connector),
-saved shortcuts, and a pause for notes. The last 10 versions of the instructions,
+saved question shortcuts, the system-wide keyboard shortcut, and a pause for notes. The last 10 versions of the instructions,
 and of each organization's instructions, are kept and can be restored. The
 profile reaches both prompts, hosted voice and the local reasoning prompt, as a
 JSON data block that opens each prompt (the hosted voice prompt, the agentic and

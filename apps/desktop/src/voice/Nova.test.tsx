@@ -568,6 +568,48 @@ it("does not let a delayed key-status result undo a successful key save", async 
   expect(screen.getByRole("button", { name: "Remove key" })).toBeVisible();
 });
 
+it.each(["nova-bubble-hidden", "nova-bubble-toggle"])("keeps the live panel until consent and releases a delayed microphone on %s", async (stopReason) => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const stopTrack = vi.fn();
+  let grant!: (stream: MediaStream) => void;
+  const getUserMedia = vi.fn(() => new Promise<MediaStream>(resolve => { grant = resolve; }));
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+  let liveSurface: "panel" | "bubble" = "panel";
+  const bridge = makeMockBridge({
+    nova: vi.fn(async () => ({ hasKey: true })),
+    novaWindow: vi.fn(async (action) => {
+      if (action === "claim") liveSurface = "bubble";
+      return undefined;
+    }),
+  }, createMockAppState({
+    tenants: [], organizations: [], activeTenantId: undefined,
+  }));
+  renderRoute(<Nova bubble />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  const checkbox = await screen.findByRole("checkbox", { name: /Allow hosted processing/ });
+  expect(checkbox).toHaveAccessibleDescription(/No organization data is shared/);
+  expect(screen.getByText("No organization")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Talk" })).toHaveFocus();
+  const listeners = vi.mocked(bridge.onAppStateChanged!).mock.calls.map(([listener]) => listener);
+  act(() => listeners.forEach(listener => listener({ reason: "nova-bubble-toggle" })));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Confirm hosted sharing");
+  expect(checkbox).toHaveFocus();
+  expect(getUserMedia).not.toHaveBeenCalled();
+  expect(bridge.novaWindow).not.toHaveBeenCalledWith("claim");
+  expect(liveSurface).toBe("panel");
+  await user.click(checkbox);
+  await user.click(screen.getByRole("button", { name: "Talk" }));
+  expect(screen.getByRole("button", { name: "Stop" })).toBeVisible();
+  await waitFor(() => expect(getUserMedia).toHaveBeenCalledOnce());
+  expect(vi.mocked(bridge.novaWindow).mock.invocationCallOrder.at(-1)!).toBeLessThan(getUserMedia.mock.invocationCallOrder[0]!);
+  expect(liveSurface).toBe("bubble");
+  act(() => listeners.forEach(listener => listener({ reason: stopReason })));
+  expect(screen.getByRole("button", { name: "Talk" })).toBeVisible();
+  grant({ getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream);
+  await waitFor(() => expect(stopTrack).toHaveBeenCalledOnce());
+  expect(bridge.nova).not.toHaveBeenCalledWith(expect.objectContaining({ action: "start" }));
+});
+
 it("starts hosted voice without an organization and opens the documentation install block", async () => {
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   const track = { stop: vi.fn(), addEventListener: vi.fn() };
@@ -633,4 +675,86 @@ it("starts hosted voice without an organization and opens the documentation inst
   await user.click(link);
   expect(screen.getByText(NOVA_DOCUMENTATION_SETTINGS)).toBeVisible();
   expect(getGraphCacheStatus).not.toHaveBeenCalled();
+});
+
+it("offers macOS microphone privacy settings when the floating window is denied access", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const getUserMedia = vi.fn(async () => { throw new DOMException("Denied", "NotAllowedError"); });
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+  const bridge = makeMockBridge({ platform: "macos", nova: vi.fn(async () => ({ hasKey: true })) });
+  renderRoute(<Nova bubble />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Talk" }));
+  expect(await screen.findByText("Microphone denied")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Open Microphone Settings" }));
+  expect(bridge.novaWindow).toHaveBeenCalledWith("microphone-settings");
+});
+
+it("claims typed Nova without opening the microphone", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const getUserMedia = vi.fn();
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+  const makeEmptyStream = vi.fn();
+  vi.stubGlobal("MediaStream", class {
+    constructor() { makeEmptyStream(); }
+    getTracks = () => [];
+  });
+  // Stop the fixture after the typed stream is built.
+  vi.stubGlobal("AudioContext", class { constructor() { throw new Error("Fixture audio context"); } });
+  const bridge = makeMockBridge({ nova: vi.fn(async () => ({ hasKey: true })) });
+  renderRoute(<Nova bubble />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("checkbox"));
+  await user.type(screen.getByRole("textbox", { name: "Ask Nova" }), "What is Autopilot?");
+  await user.click(screen.getByRole("button", { name: "Ask" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Fixture audio context");
+  expect(bridge.novaWindow).toHaveBeenCalledWith("claim-typed");
+  expect(makeEmptyStream).toHaveBeenCalledOnce();
+  expect(getUserMedia).not.toHaveBeenCalled();
+});
+
+it("releases the bubble microphone when the organization changes", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const track = { stop: vi.fn(), addEventListener: vi.fn() };
+  const getUserMedia = vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }));
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+  vi.stubGlobal("AudioContext", class {
+    resume = async () => {};
+    close = async () => {};
+    createAnalyser = () => ({ getByteTimeDomainData: (values: Uint8Array) => values.fill(128) });
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+  });
+  const dc = {
+    readyState: "open", send: vi.fn(), close: vi.fn(), addEventListener: vi.fn(),
+    onmessage: undefined as undefined | ((event: { data: string }) => void),
+  };
+  vi.stubGlobal("RTCPeerConnection", class {
+    iceGatheringState = "complete";
+    localDescription = { sdp: "v=0" };
+    addTrack = vi.fn();
+    createDataChannel = () => dc;
+    createOffer = async () => ({ sdp: "v=0" });
+    setLocalDescription = async () => {};
+    setRemoteDescription = async () => {};
+    close = vi.fn();
+  });
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => input.action === "status" ? { hasKey: true } :
+      input.action === "start" ? { sessionId: "bubble", sdp: "v=0" } : {}),
+  });
+  renderRoute(<Nova bubble />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Talk" }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "start" })));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  expect(await screen.findByText("Listening")).toBeVisible();
+  vi.mocked(bridge.getAppState).mockResolvedValue(createMockAppState({
+    activeTenantId: undefined, activeOrganizationId: undefined, tenants: [], organizations: [],
+  }));
+  act(() => vi.mocked(bridge.onAppStateChanged!).mock.calls.forEach(([listener]) => listener({ reason: "nova-context-changed" })));
+  expect(await screen.findByText("No organization")).toBeVisible();
+  expect(track.stop).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Talk" })).toBeVisible();
 });
