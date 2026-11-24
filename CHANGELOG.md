@@ -29,7 +29,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 **Removed.** Pilot mode and its sample data, which were only in 0.7.3 nightlies.
 
-**Fixed.** Local model context and timeout errors give specific recovery steps, and gpt-oss run reports show the answer instead of the model's reasoning. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs.
+**Fixed.** Local model context and timeout errors give specific recovery steps, and gpt-oss run reports show the answer instead of the model's reasoning. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs. Model server checks for Ollama, LM Studio and Lemonade now say why a check failed and what to do next.
 
 Chat answers show cache refresh times and device last-sync dates in local time. Reset stops an in-progress index model download. A model Ollama already downloaded stays in Ollama. To remove it, run `ollama rm nomic-embed-text`.
 
