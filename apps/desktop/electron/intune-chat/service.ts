@@ -43,6 +43,7 @@ import {
   type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
   type IntuneChatToolTraceEntry,
+  type McpServerSummary,
   type ModelFitIssue,
   type IntuneChatProgressStep,
   type IntuneChatStreamEvent,
@@ -517,6 +518,7 @@ export interface ChatServiceHost {
    * used by the external gateway's read tools.
    */
   mcpChatContext?(tenant: TenantRecord): Promise<McpChatContext | undefined>;
+  listMcpServers?(): Promise<McpServerSummary[]>;
   /**
    * The Splashtop connection of the organization that holds this tenant,
    * for a Chat answer. Undefined when it has none.
@@ -2270,7 +2272,7 @@ export class IntuneChatService {
     const localCodeAnswer = provider?.isLocal === true && !roadmapQuestion && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
     const lazyRefresh = toolsOffered && (!directResources || roadmapQuestion) && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
-    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
+    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, roadmapQuestion, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
     let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
@@ -2399,6 +2401,9 @@ export class IntuneChatService {
       responseModel = undefined;
     } else if (accessBlockedMessage) {
       assistantContent = accessBlockedMessage;
+      responseModel = undefined;
+    } else if (answerPlan?.roadmapUnavailable) {
+      assistantContent = answerPlan.roadmapUnavailable;
       responseModel = undefined;
     } else if (directDeviceAnswer !== undefined) {
       assistantContent = directDeviceAnswer;
@@ -2572,12 +2577,12 @@ export class IntuneChatService {
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     answerPlan.settleKind();
     // A docs answer reads no tenant data, so nothing tenant side was left out of it.
-    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && answerPlan.sources.kind !== "docs") {
+    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !answerPlan.roadmapUnavailable && answerPlan.sources.kind !== "docs") {
       assistantContent = withOmittedNotice(assistantContent, restriction.omitted);
     }
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
-    const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
+    const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage && !answerPlan?.roadmapUnavailable;
     const tenantDataRead = readTenantData(answerPlan.sources.kind, refreshResult, toolTrace);
     provenance.add("tenant-data", tenantDataRead);
     const { followUps, tenantFollowUps } = answered
@@ -2611,7 +2616,7 @@ export class IntuneChatService {
         executedResources: executedResourcesForAnswer({
           toolTrace,
           usedDeterministic,
-          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
+          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent || Boolean(answerPlan?.roadmapUnavailable),
         }),
         toolTrace,
         refreshedResources: usedDeterministic
@@ -2886,7 +2891,7 @@ export class IntuneChatService {
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
       ? undefined
-      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
+      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, roadmapQuestion, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
     let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
@@ -3217,6 +3222,10 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else if (accessBlockedMessage) {
       assistantContent = accessBlockedMessage;
+      responseModel = undefined;
+      emitDelta(assistantContent);
+    } else if (answerPlan?.roadmapUnavailable) {
+      assistantContent = answerPlan.roadmapUnavailable;
       responseModel = undefined;
       emitDelta(assistantContent);
     } else if (directVoiceAnswer !== undefined) {
@@ -3607,13 +3616,13 @@ export class IntuneChatService {
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     answerPlan?.settleKind();
     // A docs answer reads no tenant data, so nothing tenant side was left out of it.
-    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && restriction.omitted && answerPlan?.sources.kind !== "docs") {
+    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !answerPlan?.roadmapUnavailable && restriction.omitted && answerPlan?.sources.kind !== "docs") {
       assistantContent = withOmittedNotice(assistantContent, restriction.omitted);
       emitDelta(assistantContent, "");
     }
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
-    const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
+    const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage && !answerPlan?.roadmapUnavailable;
     const tenantDataRead = readTenantData(answerPlan?.sources.kind ?? "tenant", refreshResult, toolTrace);
     provenance.add("tenant-data", tenantDataRead);
     const { followUps, tenantFollowUps } = answerPlan && answered
@@ -3666,7 +3675,7 @@ export class IntuneChatService {
         executedResources: executedResourcesForAnswer({
           toolTrace,
           usedDeterministic,
-          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
+          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent || Boolean(answerPlan?.roadmapUnavailable),
         }),
         toolTrace,
         refreshedResources: usedDeterministic
@@ -3816,19 +3825,34 @@ export class IntuneChatService {
     tenant: TenantRecord;
     conversationId: string;
     toolsOffered: boolean;
+    roadmapQuestion: boolean;
     modelClassifies: boolean;
     /** Why a docs label is not allowed, when it is not. */
     veto?: string;
     /** With nothing connected, a request to write a query or script is docs. */
     forceDocs?: boolean;
     steps: ChatStepRecorder;
-  }): Promise<{ mcp: { mcp?: McpChatContext; splashtop?: SplashtopChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
+  }): Promise<{ mcp: { mcp?: McpChatContext; splashtop?: SplashtopChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; roadmapUnavailable?: string; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
     const planStep = input.steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: ON_DEVICE });
     const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
     // A model that skips the tool loop is offered no MCP tools, so none is planned as a source.
     const mcp = input.toolsOffered ? installed : {};
     const servers = mcp.mcp?.servers ?? [];
+    let roadmapUnavailable: string | undefined;
+    if (input.roadmapQuestion && !input.planned.hasWriteIntent && !installed.mcp?.servers?.some((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID)) {
+      const catalog = await this.host.listMcpServers?.();
+      const release = catalog?.find((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID);
+      const recovery = release?.installed
+        ? release.enabled
+          ? "Microsoft Release Communications has no tools available to Chat. Check its connection in Marketplace, then ask again."
+          : "Microsoft Release Communications is turned off. Turn it on in Marketplace, then ask again."
+        : catalog && !release
+          ? "Microsoft Release Communications is unavailable in Marketplace. Check with your IT department."
+          : "Microsoft Release Communications is not installed. Add it in Marketplace, then ask again.";
+      roadmapUnavailable = `Roadmap items were not checked because ${recovery}`;
+    }
+
     const keywordKind = input.forceDocs
       ? "docs"
       : input.planned.hasWriteIntent
@@ -3842,11 +3866,11 @@ export class IntuneChatService {
       if (kind.sources.kind === "docs") input.planned.resources = [];
     };
     // The first step's time is local planning only; a model classification shows on the model step.
-    if (!input.modelClassifies) settleKind();
+    if (!input.modelClassifies || roadmapUnavailable) settleKind();
     else kind.awaitModel();
     // An MCP server offered to the model or the local docs index can answer a docs question.
     const docsSourceAvailable = servers.length > 0 || context.docsIndexAvailable;
-    return { mcp, mcpInstalled: Boolean(installed.mcp), docsSourceAvailable, get sources() { return kind.sources; }, kind, settleKind, tieInResources };
+    return { mcp, mcpInstalled: Boolean(installed.mcp), docsSourceAvailable, ...(roadmapUnavailable ? { roadmapUnavailable } : {}), get sources() { return kind.sources; }, kind, settleKind, tieInResources };
   }
 
   /**

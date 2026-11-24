@@ -163,7 +163,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
     tokenStore: { read: async () => "", write: async () => undefined },
     mcpCatalog: [
       { ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` },
-      ...(options.roadmap ? [{ ...release, url: `${baseUrl}/roadmap`, tools: ["get_recent_m365_roadmaps"] }] : []),
+      { ...release, url: `${baseUrl}/roadmap`, tools: ["get_recent_m365_roadmaps"] },
     ],
     // A hosted provider reports its model, so the window and the host resolve the same one; no CLI on this device is probed.
     ...(options.provider
@@ -256,6 +256,30 @@ const classifiedAs = (steps: readonly IntuneChatStep[] | undefined) =>
   (steps ?? []).flatMap((step) => (step.kind === "answer" ? (step.detail ?? "").split(" · ") : [])).find((part) => /^(?:Classified as|Treated as|The model gave no)/.test(part));
 
 describe("Microsoft 365 roadmap routing", () => {
+  for (const installed of [false, true]) {
+    it(`explains how to ${installed ? "enable" : "add"} the roadmap source without making a request`, async () => {
+      await withHarness(async ({ store, graphPaths, prompts, script }) => {
+        if (installed) await store.setMcpServerEnabled("release-communications", false);
+        script([{ final: true, answer: "All of the roadmap items have rolled out." }]);
+        const expected = installed
+          ? "Roadmap items were not checked because Microsoft Release Communications is turned off. Turn it on in Marketplace, then ask again."
+          : "Roadmap items were not checked because Microsoft Release Communications is not installed. Add it in Marketplace, then ask again.";
+        roadmapRequests.length = 0;
+        const input = { content: ROADMAP_QUESTION };
+        const sent = await store.sendIntuneChatMessage(input);
+        const streamed = await store.streamIntuneChatMessage(input, () => {});
+        for (const { assistantMessage } of [sent, streamed]) {
+          assert.equal(assistantMessage.content, expected);
+          assert.equal(assistantMessage.status, "completed");
+          assert.equal(assistantMessage.tenantContext, undefined);
+        }
+        assert.deepEqual(prompts, []);
+        assert.deepEqual(graphPaths, []);
+        assert.deepEqual(roadmapRequests, []);
+      }, { roadmap: installed });
+    });
+  }
+
   it("replays the failed local lookup without refreshing unrelated tenant data or publishing the stale-device answer", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, writerPrompts, script }) => {
       const staleRows = Array.from({ length: 6 }, (_, i) => ({
