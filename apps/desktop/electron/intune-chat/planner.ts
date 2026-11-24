@@ -700,6 +700,16 @@ export function isExplicitDocsRequest(question: string): boolean {
   return codeRequest || (DOCS_REFERENCE.test(lower) && !hasTenantReference(question));
 }
 
+export function asksAboutMicrosoftRoadmap(question: string): boolean {
+  const lower = question.toLowerCase().replace(/\u2019/g, "'");
+  if (!/\b(?:m365|microsoft 365|office 365|intune|entra|defender|azure|tenant|release communications)\b/.test(lower)) return false;
+  if (/\broadmaps?\b/.test(lower)) {
+    return !(asksHowTo(lower) && /\b(?:create|build|plan|draft|make|write|design|develop|put together)\b[^.?!]*\broadmaps?\b/.test(lower));
+  }
+  if (/\b(?:renew(?:s|al|als|ed|ing)?|expir(?:y|es?|ed|ing|ations?))\b/.test(lower)) return false;
+  return /\b(?:what(?:'s| is) coming|upcoming (?:features|releases)|what(?:'s| is) rolling out)\b/.test(lower);
+}
+
 export function classifyChatQuestion(
   question: string,
   input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },
@@ -707,7 +717,7 @@ export function classifyChatQuestion(
   const lower = question.trim().toLowerCase();
   const tenantReference = hasTenantReference(question);
   const planned = input.plannedResources.length > 0;
-  const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
+  const explicitDocs = input.namesSource || asksAboutMicrosoftRoadmap(question) || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
   if (explicitDocs) return tenantReference ? "mixed" : "docs";
   if (WEAK_DOCS.test(lower) || GENERAL_QUESTION_START.test(lower)) {
     if (tenantReference) return HOW_TO_OR_GUIDANCE.test(lower) ? "mixed" : "tenant";

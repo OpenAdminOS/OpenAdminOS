@@ -50,6 +50,7 @@ export function ModelFitNotice({
   const titleId = useId();
   const model = modelFitModelName(issue);
   const answered = answeredProp ?? issue.reason === "repeated-failure";
+  const reasoningOnlyRun = surface === "run" && issue.reason === "thinking-only";
   const rows = [...choices.hosted, ...choices.local];
   // A live region that mounts with its text is often not read out, so it mounts empty
   // and gets its text on the next frame, without moving focus.
@@ -73,7 +74,7 @@ export function ModelFitNotice({
       </h2>
       {/* Announced when the notice replaces the error, so a screen reader hears why and that choices follow. */}
       <span role="status" className="sr-only">{announced}</span>
-      <p className="mt-1 text-[var(--color-text-soft)] tabular-nums">{MODEL_FIT_COPY.why(issue, model, surface)}</p>
+      {reasoningOnlyRun ? null : <p className="mt-1 text-[var(--color-text-soft)] tabular-nums">{MODEL_FIT_COPY.why(issue, model, surface)}</p>}
       {answered ? null : <p className="mt-1 text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.nothingSent}</p>}
       {rows.length > 0 ? (
         <>
@@ -90,7 +91,7 @@ export function ModelFitNotice({
                     {choice.isLocal ? (
                       <>
                         <div className="text-xs text-[var(--color-success)]">{MODEL_FIT_COPY.localWhere(choice.providerName)}</div>
-                        <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface, modelSizeBillions(issue.model) !== undefined, choice.contextWindow)}</div>
+                        {issue.reason === "thinking-only" ? null : <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface, modelSizeBillions(issue.model) !== undefined, choice.contextWindow)}</div>}
                         {/* A model on this device needs no accept step, so its button sends straight away. */}
                         {surface === "chat" ? <span className="sr-only">{MODEL_FIT_COPY.localSendsNow}</span> : null}
                       </>

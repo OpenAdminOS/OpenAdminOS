@@ -2135,6 +2135,7 @@ export class AppStateStore {
       retrieveDocumentation: (query) => host.retrieveDocumentation(query),
       documentationIndexVersion: () => host.documentationIndexVersion(),
       mcpChatContext: (tenant) => host.mcpChatContext(tenant),
+      listMcpServers: () => host.listMcpServers(),
       splashtopChatContext: (tenant) => host.splashtopChatContext(tenant),
       recordHostedProviderConsent: (consent) => host.recordHostedProviderConsent(consent),
       appVersion: this.appVersion,
