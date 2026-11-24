@@ -56,6 +56,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The homepage banner highlights Organizations and Connections, Chat without Microsoft sign-in, and hosted model locations when 0.8.0 becomes the latest stable release.
 - Refresh the homepage screenshots in light and dark, with Marketplace, the Connections reach map, and an Offboarding agent waiting for typed approval in the hero.
 - Before sending to an on-device Ollama model from Chat, agent runs, schedules, Agent Team, or Nova, OpenAdminOS checks that the model still runs on this device and stops if it cannot confirm that.
 - The Splashtop Docs and Splashtop Agentic Packr Docs references name OpenAdminOS as their publisher, and the install footer of a built-in reference names the host it reads; the earlier names ending in MCP still work in Chat.

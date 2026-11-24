@@ -331,6 +331,9 @@ export default async function HomePage() {
     linux: latestRelease.linuxAppImageUrl,
   };
   const latestNote = releases.find((release) => release.version === latestRelease.version);
+  const announcementSummary = latestRelease.version === "v0.8.0"
+    ? "Organizations and Connections, Chat without Microsoft sign-in, and hosted model locations"
+    : latestNote?.summary;
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -358,8 +361,8 @@ export default async function HomePage() {
         latestRelease.version
           ? {
               href: latestRelease.releaseNotesUrl,
-              label: latestNote?.summary
-                ? `${latestRelease.version}: ${latestNote.summary}`
+              label: announcementSummary
+                ? `${latestRelease.version}: ${announcementSummary}`
                 : `${latestRelease.version} is out`,
             }
           : undefined
