@@ -10,7 +10,7 @@ import { Badge, Button } from "./ui";
 
 const connectionIssues = {
   credentials: "The Sophos Central credential may have expired or been removed. Verify or create credentials in Sophos Central, then disconnect and reconnect here.",
-  forbidden: "Sophos Central refused access. Check the credential’s service principal role in Sophos Central, then test the connection again.",
+  forbidden: "Sophos Central refused access. A credential used to change endpoints needs the Service Principal Management role. Check the role in Sophos Central, then reconnect with the appropriate credential.",
   "rate-limit": "Sophos Central is rate limiting requests. Wait a minute, then test the connection again.",
 };
 

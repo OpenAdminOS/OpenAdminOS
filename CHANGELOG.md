@@ -14,6 +14,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Sophos Central and Splashtop change failures show recovery actions in Runs. Sophos changes stop on cancel or disconnect and surface write permission issues in Connections.
+
 - Sophos Central (Preview) shows connection recovery states and rechecks endpoints before applying confirmed changes.
 
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.

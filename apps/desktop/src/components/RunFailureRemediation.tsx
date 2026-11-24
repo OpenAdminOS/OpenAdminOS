@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
@@ -160,6 +161,29 @@ export function RunFailureRemediation({
 }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
+  if (run.origin === "sophos-change" || run.origin === "splashtop-change") {
+    const sophos = run.origin === "sophos-change";
+    const vendor = sophos ? "Sophos Central" : "Splashtop";
+    const consoleUrl = sophos ? "https://central.sophos.com/" : "https://my.splashtop.com/";
+    return (
+      <section className="border-l-2 border-[var(--color-danger)] bg-[var(--color-danger-soft)] p-4">
+        <h3 className="flex items-center gap-2 text-base font-medium text-[var(--color-danger)]">
+          <IconWarning size={14} />
+          {vendor} change stopped
+        </h3>
+        <p className="mt-2 whitespace-pre-wrap break-words text-sm text-[var(--color-text)]">{run.error}</p>
+        {run.summary && <p className="mt-2 text-sm text-[var(--color-text-soft)]">{run.summary}</p>}
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-sm">
+          <Link className="underline" to={`/connections?connect=${sophos ? "sophos" : "splashtop"}`}>
+            Prepare the change again
+          </Link>
+          <Button size="sm" variant="secondary" onClick={() => void window.openAdminOS?.openExternal(consoleUrl)}>
+            {sophos ? "Check the endpoint in Sophos Central" : "Check the computer in Splashtop"}
+          </Button>
+        </div>
+      </section>
+    );
+  }
   // A typed reason is exact, so it comes first and replaces the guesses.
   const typed = run.failureReason?.code === "context-too-small" ? run.failureReason : undefined;
   // Each exclusive playbook has one cause and one recovery. An HTTP status
