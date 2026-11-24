@@ -1084,7 +1084,7 @@ function ConfirmationPage({
 
           <p className="text-sm text-[var(--color-text-muted)]">
             {dryRun ? `Proposed changes for ${tenantName}` : run.tenantId
-              ? `Applies to ${tenantName} through ${run.origin === "splashtop-change" ? `the Splashtop Open API (${splashtopRegion(run.splashtop?.region ?? "global").host})` : "Microsoft Graph"}`
+              ? `Applies to ${tenantName} through ${run.origin === "splashtop-change" ? `the Splashtop Open API (${splashtopRegion(run.splashtop?.region ?? "global").host})` : run.sophos ? `Sophos Central (${run.sophos.host})` : "Microsoft Graph"}`
               : `Simulates changes for ${tenantName} without Microsoft Graph writes`}
             {actionCount ? ` · ${actionCount} · ${destructiveCount} destructive` : ""}
           </p>
@@ -1095,7 +1095,12 @@ function ConfirmationPage({
             </div>
           ) : plan && run.tenantId ? (
             <div className="rounded-[14px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-              {run.origin === "splashtop-change" ? (
+              {run.sophos ? (
+                <>
+                  <div className="mb-1 flex items-center gap-2 font-medium"><IconWarning size={14} />Sophos Central write</div>
+                  Approving sends requests to Sophos Central at {run.sophos.host} in order. The first error stops the rest. Sophos Central reports which requests it accepted.
+                </>
+              ) : run.origin === "splashtop-change" ? (
                 <>
                   <div className="mb-1 flex items-center gap-2 font-medium"><IconWarning size={14} />Splashtop write</div>
                   Approving will call the Splashtop Open API at {splashtopRegion(run.splashtop?.region ?? "global").host} with the token of {tenantName}. {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will be applied in order, and the first error stops the rest. Reboots, deletions, disabled users and ended sessions cannot be undone from OpenAdminOS.

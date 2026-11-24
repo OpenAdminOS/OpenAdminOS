@@ -1,4 +1,4 @@
-import { providerForModel } from "@openadminos/agent-sdk";
+import { activeOrganizationOf, isSophosRegionHost, providerForModel } from "@openadminos/agent-sdk";
 import {
   createContext,
   useContext,
@@ -76,6 +76,25 @@ export function chatToolHosts(state: Pick<AppState, "mcpServers" | "chatToolUse"
   ];
 }
 
+export function sophosToolHost(state: Pick<AppState, "tenants" | "organizations" | "activeTenantId" | "sophosConnections">): string | undefined {
+  const organization = activeOrganizationOf(state);
+  const connection = state.sophosConnections?.find((entry) => entry.organizationId === organization?.id);
+  return isSophosRegionHost(connection?.host) ? connection.host : undefined;
+}
+
+function toolHostsForBoundary(state: AppState) {
+  const references = deriveToolHostsCopy(chatToolHosts(state));
+  const host = state.chatToolUse?.available === false ? undefined : sophosToolHost(state);
+  if (!host) return references;
+  const hosts = deriveToolHostsCopy([host, ...chatToolHosts(state)])!;
+  const detail = `Sophos Central tool requests send tenant identifiers and endpoint or query parameters to ${host}.`;
+  return {
+    strip: hosts.strip,
+    detail: references ? `${detail} ${references.detail}` : detail,
+    composer: references ? `${detail} ${references.composer}` : detail,
+  };
+}
+
 /**
  * The status strip's boundary for an app state: the one place that decides
  * what the strip says about the model and where prompts go. The reach map
@@ -102,7 +121,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     // A hosted chat model and references stay named alongside voice.
     const chatLocal = provider?.isLocal === true;
     const chatHosted = Boolean(provider && !provider.isLocal && ["connected", "available"].includes(provider.status));
-    const hosts = deriveToolHostsCopy(chatToolHosts(state));
+    const hosts = toolHostsForBoundary(state);
     const chatSentence = chatHosted && provider ? ` ${promptsGoTo(provider, Boolean(activeTenant))}.` : "";
     return {
       kind: "hosted",
@@ -128,22 +147,23 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     };
   }
 
+  const hosts = toolHostsForBoundary(state);
   const trust = deriveTrustCopy({
     provider,
     ...(model ? { model } : {}),
     scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
     noTenant: !activeTenant,
-    toolHosts: chatToolHosts(state),
+    toolHosts: [...chatToolHosts(state), ...(state.chatToolUse?.available === false ? [] : [sophosToolHost(state) ?? ""].filter(Boolean))],
   });
-  const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
-  const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
+  const toolHosts = hosts ? { toolHosts: hosts.strip, toolHostsNote: hosts.composer } : {};
+  const toolDetail = hosts ? ` ${hosts.detail}` : "";
   if (provider.isLocal) {
     return {
       kind: "local",
       label: `Local · ${provider.name}`,
       ...(model ? { model } : {}),
       ...toolHosts,
-      ...(trust.toolHosts ? {} : { note: NOTHING_LEAVES_COPY }),
+      ...(hosts ? {} : { note: NOTHING_LEAVES_COPY }),
       tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
       isVoiceHosted: false,
     };

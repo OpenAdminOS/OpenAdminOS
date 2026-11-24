@@ -59,6 +59,8 @@ export const CONFIGURATION_AUDIT_EVENT_TYPES = [
   "policy.changed",
   "policy.removed",
   "policy.invalid",
+  "sophos.connected",
+  "sophos.disconnected",
   "splashtop.connected",
   "splashtop.token-rotated",
   "splashtop.disconnected",
@@ -273,6 +275,30 @@ export function diffConfigurationAudit(
       ...organizationFields(organization),
       ...(tenantId ? { tenantId } : {}),
       details: {},
+    });
+  }
+
+  for (const organization of nextOrganizations) {
+    const connection = organization.connections.sophos;
+    if (!connection || previousOrganizationById.get(organization.id)?.connections.sophos) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "sophos.connected",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: { host: connection.host },
+    });
+  }
+  for (const organization of previousOrganizations) {
+    const connection = organization.connections.sophos;
+    const remaining = nextOrganizationById.get(organization.id);
+    if (!connection || remaining?.connections.sophos) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "sophos.disconnected",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: { host: connection.host, organizationRemoved: remaining === undefined },
     });
   }
 
@@ -661,6 +687,8 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "policy.changed": [...POLICY_DETAIL_KEYS, "changedKeys"],
   "policy.removed": ["previousKeys"],
   "policy.invalid": ["problemCount", "problems"],
+  "sophos.connected": ["host"],
+  "sophos.disconnected": ["host", "organizationRemoved"],
   "splashtop.connected": ["region", "host", "teamId", "account", "reconnected"],
   "splashtop.token-rotated": ["region", "host", "teamId"],
   "splashtop.disconnected": ["region", "host", "teamId", "organizationRemoved"],

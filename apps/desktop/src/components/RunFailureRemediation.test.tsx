@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { classifyGraphAccessDenied, contextTooSmallMessage, type ContextTooSmallFailure, type GraphAccessContext, type GraphAccessDenial, type RunRecord } from "@openadminos/agent-sdk";
@@ -451,4 +452,30 @@ it.each([
   expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
   expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
   expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+describe.each([
+  ["sophos-change", "Sophos Central", "sophos", "Check the endpoint in Sophos Central"],
+  ["splashtop-change", "Splashtop", "splashtop", "Check the computer in Splashtop"],
+] as const)("%s recovery", (origin, vendor, connection, check) => {
+  it.each([
+    "The target state changed. Prepare the change again.",
+    "HTTP 409. Wait for the in-progress change.",
+    "The target returned notSupported.",
+    "HTTP 403. Check the role on this credential.",
+  ])("shows the vendor recovery for %s", (error) => {
+    const run: RunRecord = {
+      id: "vendor-run", agentSlug: origin, origin, status: "failed", error,
+      queuedAt: "2026-11-24T00:00:00Z", steps: [], logs: [],
+      summary: "Stopped after 1 of 2 actions.",
+    };
+    render(<MemoryRouter><RunFailureRemediation run={run} /></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: `${vendor} change stopped` })).toBeInTheDocument();
+    expect(screen.getByText(error)).toBeInTheDocument();
+    expect(screen.getByText(run.summary!)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Prepare the change again" })).toHaveAttribute("href", `/connections?connect=${connection}`);
+    expect(screen.getByRole("button", { name: check })).toBeInTheDocument();
+    expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Report this failure" })).not.toBeInTheDocument();
+  });
 });

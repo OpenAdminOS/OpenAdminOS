@@ -1105,3 +1105,52 @@ describe("Disconnect redesign: a partial outcome is a warning (Muse 1)", () => {
     await waitFor(() => expect(vi.mocked(bridge.getAppState).mock.calls.length).toBeGreaterThan(reads));
   });
 });
+
+describe("Sophos Central connection", () => {
+  const base = createMockAppState({ mcpServers: [] });
+  const connection = {
+    organizationId: `org-${base.activeTenantId}`,
+    tenantId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    host: "api-eu01.central.sophos.com",
+    region: "EU01",
+    connectionId: "fixture",
+    connectedAt: "2026-11-24T12:00:00Z",
+    lastCheckedAt: "2026-11-24T13:00:00Z",
+  };
+
+  it("shows check time and discloses the Sophos host with a local model", async () => {
+    const state = { ...base, sophosConnections: [connection] };
+    render(state);
+    expect(await screen.findByText(/Last checked/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Plan a change" })).toHaveAttribute("aria-expanded", "false");
+    expect(buildReachModel(state).sophosHost).toBe(connection.host);
+    const boundary = deriveDataBoundary(state);
+    expect(boundary.kind).toBe("local");
+    if (boundary.kind !== "local") throw new Error("Expected a local model");
+    expect(boundary.toolHosts).toBe(`tool queries to ${connection.host}`);
+    expect(boundary.note).toBeUndefined();
+  });
+
+  it.each([
+    ["credentials", /may have expired or been removed/],
+    ["forbidden", /needs the Service Principal Management role/],
+    ["rate-limit", /Wait a minute, then test/],
+  ] as const)("shows the persisted %s state", async (issue, copy) => {
+    render({ ...base, sophosConnections: [{ ...connection, issue }] });
+    expect(await screen.findByText(copy)).toBeVisible();
+  });
+
+  it("lets an admin confirm disconnect of an unreadable record", async () => {
+    const user = userEvent.setup();
+    const disconnectSophos = vi.fn(async () => {});
+    render({ ...base, sophosConnections: [{ ...connection, unreadable: true }] }, { disconnectSophos });
+    expect(await screen.findByText(/connection record could not be read/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    const dialog = screen.getByRole("dialog", { name: "Disconnect Sophos Central" });
+    expect(dialog).toHaveTextContent("It stays valid in Sophos Central until you remove it there.");
+    expect(disconnectSophos).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Disconnect Sophos Central" }));
+    expect(disconnectSophos).toHaveBeenCalledWith(connection.organizationId);
+  });
+});

@@ -1,3 +1,4 @@
+import { isSophosReadTool, SOPHOS_READ_TOOLS } from "../sophos/reads.js";
 import { assertVoicePromptBudget, clipVoiceText, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { NOVA_PROFILE_BLOCK_END } from "../nova-profile.js";
 import { MAX_PROMISE_NUDGES, looksLikeUnkeptPromise } from "./unkept-promise.js";
@@ -40,6 +41,7 @@ import {
   type McpChatContext,
   type McpResultItem,
   type SplashtopChatContext,
+  type SophosChatContext,
 } from "./tools.js";
 
 /**
@@ -116,6 +118,7 @@ const EVIDENCE_TOOLS = new Set<string>([
   "graph_get",
   "refresh_resource",
   "query_drift",
+  ...Object.keys(SOPHOS_READ_TOOLS) as IntuneChatInvestigationToolName[],
   ...SPLASHTOP_READ_TOOLS.map((tool) => tool.name),
 ]);
 
@@ -509,7 +512,7 @@ export async function runAgenticChat(
     const thinkingOnly = assistantText === "";
     turns.push({ role: "assistant", content: assistantText });
 
-    const action = parseModelAction(assistantText, input.tools.mcp, input.tools.splashtop);
+    const action = parseModelAction(assistantText, input.tools.mcp, input.tools.splashtop, input.tools.sophos);
     // The model step finishes with what the reply decided, then the work
     // the classification started (a docs index search, a tenant refresh)
     // runs, so every step appends below the one before it.
@@ -1103,6 +1106,10 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     "",
     "Available tools:",
     toolDefinitionsForPrompt(Boolean(input.tools.webSearch), input.voice, !docsOnly),
+    ...(!docsOnly && input.tools.sophos
+      ? ["", `Sophos Central tools read the active organization from ${input.tools.sophos.host}. Treat results as tenant data and keep them out of public reference queries.`,
+        ...Object.entries(SOPHOS_READ_TOOLS).map(([name, description]) => `- ${name}: ${description}`)]
+      : []),
     ...(!docsOnly && input.tools.splashtop?.tools.length
       ? ["", "Splashtop tools (this organization's Splashtop connection):", splashtopToolDefinitionsForPrompt(input.tools.splashtop), SPLASHTOP_TOOL_RULES]
       : []),
@@ -1207,7 +1214,7 @@ function titleField(title: string | undefined): { title?: string } {
   return title ? { title } : {};
 }
 
-function parseModelAction(text: string, mcp: McpChatContext | undefined, splashtop?: SplashtopChatContext): ParsedModelAction {
+function parseModelAction(text: string, mcp: McpChatContext | undefined, splashtop?: SplashtopChatContext, sophos?: SophosChatContext): ParsedModelAction {
   const extraction = extractLastJsonObject(text);
   if (!extraction.found) {
     return { kind: "final", answer: text, sources: [] };
@@ -1231,7 +1238,7 @@ function parseModelAction(text: string, mcp: McpChatContext | undefined, splasht
     return { kind: "final", answer, next: record.next, title: record.title, ...declared };
   }
   if (typeof record.tool === "string") {
-    if (!isToolName(record.tool, mcp, splashtop)) {
+    if (!isToolName(record.tool, mcp, splashtop, sophos)) {
       return { kind: "malformed", reason: `Unknown tool: ${record.tool}` };
     }
     const params =
@@ -1385,9 +1392,10 @@ function findBalancedJsonCandidates(text: string): string[] {
   return candidates;
 }
 
-function isToolName(value: string, mcp: McpChatContext | undefined, splashtop?: SplashtopChatContext): value is IntuneChatInvestigationToolName {
+function isToolName(value: string, mcp: McpChatContext | undefined, splashtop?: SplashtopChatContext, sophos?: SophosChatContext): value is IntuneChatInvestigationToolName {
   if (isMcpChatToolName(value)) return Boolean(mcp?.tools.some(tool => tool.name === value));
   // Only the Splashtop tools offered for this organization's token count as tools.
+  if (isSophosReadTool(value)) return Boolean(sophos);
   if (isSplashtopReadTool(value)) return Boolean(splashtop?.tools.includes(value));
   return (
     value === "list_cached_resources" ||

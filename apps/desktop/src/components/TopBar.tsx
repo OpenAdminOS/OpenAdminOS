@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
 
 import { chatToolHosts, useAppState, useDataBoundary, useShellChrome } from "../state";
+import { sophosToolHost } from "../state/data-boundary";
 import { IconChat, IconChevronRight, IconCloud, IconLock, IconSettings } from "./icons";
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { Tooltip } from "./ui";
@@ -14,6 +15,7 @@ export function TopBar() {
   // The chip is one short line at every width: where prompts go and how
   // many references receive words from questions, never cut off.
   const referenceCount = boundary.kind !== "none" && boundary.toolHosts ? chatToolHosts(state).length : 0;
+  const sophosHost = boundary.kind !== "none" && boundary.toolHosts ? sophosToolHost(state) : undefined;
   const draggable = platform === "macos" || platform === "windows";
 
   const newConversation = () => {
@@ -79,6 +81,7 @@ export function TopBar() {
             >
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
               <span className="truncate">{boundary.label}</span>
+              {sophosHost ? <span className="truncate text-[var(--color-text-muted)]">{sophosHost}</span> : null}
               {/* One short line at every width: the model and the host list are in the name and tooltip. */}
               {referenceCount > 0 ? (
                 <span data-testid="boundary-reference-count" className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)]">

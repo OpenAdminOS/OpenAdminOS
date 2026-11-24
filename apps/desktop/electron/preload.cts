@@ -327,6 +327,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:uninstall-mcp-server", serverId),
   setMcpServerEnabled: (serverId: string, enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-mcp-server-enabled", serverId, enabled),
+  listSophosTargets: (organizationId: string, search: string) =>
+    ipcRenderer.invoke("openadminos:list-sophos-targets", organizationId, search),
+  prepareSophosChange: (input: unknown) => ipcRenderer.invoke("openadminos:prepare-sophos-change", input),
+  connectSophos: (input: unknown) => ipcRenderer.invoke("openadminos:connect-sophos", input),
+  testSophos: (organizationId: string) => ipcRenderer.invoke("openadminos:test-sophos", organizationId),
+  disconnectSophos: (organizationId: string) => ipcRenderer.invoke("openadminos:disconnect-sophos", organizationId),
   connectSplashtop: (input: unknown) =>
     ipcRenderer.invoke("openadminos:connect-splashtop", input),
   testSplashtop: (organizationId: string) =>

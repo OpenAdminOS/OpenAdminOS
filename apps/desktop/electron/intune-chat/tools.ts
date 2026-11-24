@@ -1,4 +1,5 @@
 import { CHAT_TABLE_ROW_CAP, COUNT_CACHED_LIST_CAP, chatCacheTable, cacheListLimitNotice, chatTableNote, describeCacheFilters, compactValue, listedCacheRow } from "./cache-table.js";
+import { isSophosReadTool, SOPHOS_READ_TOOLS, type SophosReadTool } from "../sophos/reads.js";
 import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import type { WebSearch, WebSearchResult } from "./web-search.js";
 import { randomUUID } from "node:crypto";
@@ -224,6 +225,7 @@ export const MCP_ARGS_LIMIT = 2_000;
  */
 const TENANT_RESULT_TOOLS = new Set<string>([
   "list_cached_resources", "query_cache", "count_cached", "graph_get", "refresh_resource", "query_drift",
+  ...Object.keys(SOPHOS_READ_TOOLS),
   ...SPLASHTOP_READ_TOOLS.map((tool) => tool.name),
 ]);
 
@@ -646,6 +648,7 @@ export function mcpToolDefinitionsForPrompt(tools: readonly McpChatTool[]): stri
 export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, params: unknown): string {
   const values = params && typeof params === "object" ? params as Record<string, unknown> : {};
   if (tool === "graph_get" && typeof values.path === "string") return `graph:${values.path}`;
+  if (isSophosReadTool(tool)) return `sophos:${tool}`;
   if (isSplashtopReadTool(tool)) return `splashtop:${tool}`;
   if ((tool === "query_cache" || tool === "count_cached") && typeof values.resource === "string") return `cache:${values.resource}`;
   return `tool:${tool}`;
@@ -680,10 +683,16 @@ export const SPLASHTOP_TOOL_RULES = [
 
 const TOOL_TIMESTAMP_NOTE = "Never show an ISO timestamp to the user. Use the date or time wording in the facts when available. Use refreshedAtText for cache freshness when provided.";
 
+export interface SophosChatContext {
+  host: string;
+  read(tool: SophosReadTool, params: unknown, signal?: AbortSignal): Promise<unknown>;
+}
+
 export interface IntuneChatToolContext {
   noteCacheList?: () => void;
   noteTableOmission?: (note: string) => void;
   attachTable?: (table: import("@openadminos/agent-sdk").ChatDataTable) => boolean | void;
+  sophos?: SophosChatContext;
   timestampLocale?: ChatDateTimeLocale;
   /** The active organization's Splashtop connection, when it has one. */
   splashtop?: SplashtopChatContext;
@@ -1059,6 +1068,12 @@ function executeToolUnchecked(
 ): Promise<unknown> {
   ctx.signal?.throwIfAborted();
   if (isMcpChatToolName(tool)) return executeMcpTool(ctx, tool, mcpHooks, written);
+  if (isSophosReadTool(tool)) {
+    if (!ctx.sophos) {
+      return Promise.reject(new Error("Connect Sophos Central for this organization in Connections."));
+    }
+    return ctx.sophos.read(tool, params, ctx.signal);
+  }
   if (isSplashtopReadTool(tool)) {
     if (!ctx.splashtop || !ctx.splashtop.tools.includes(tool)) {
       return Promise.reject(new Error("Splashtop is not connected for this organization, or its token does not reach this data. Connect or test it on Connections."));
@@ -2050,12 +2065,13 @@ function summarizeToolResult(
     if (record.empty === true) return `${answered} · no results`;
     return `${answered} · ${length.toLocaleString()} characters${record.truncated ? " · shortened" : ""}`;
   }
-  if (isSplashtopReadTool(tool)) {
+  if (isSophosReadTool(tool) || isSplashtopReadTool(tool)) {
+    const service = isSophosReadTool(tool) ? "Sophos Central" : "Splashtop";
     const records = Array.isArray(record.records) ? record.records.length : 0;
     const page = record.page && typeof record.page === "object" ? record.page as Record<string, unknown> : {};
     const total = typeof page.total === "number" ? page.total : undefined;
     const counted = total === undefined ? records.toLocaleString() : `${records.toLocaleString()} of ${total.toLocaleString()}`;
-    return `${counted} Splashtop ${(total ?? records) === 1 ? "record" : "records"} returned${page.next ? " · more available" : ""}`;
+    return `${counted} ${service} ${(total ?? records) === 1 ? "record" : "records"} returned${page.next ? " · more available" : ""}`;
   }
   if (tool === "web_search") return `Public web research completed · ${Array.isArray(record.sources) ? record.sources.length : 0} sources · ${String(record.searchedAt ?? "")}`;
   if (tool === "list_cached_resources") {
@@ -2115,6 +2131,7 @@ export function summarizeToolCallForProgress(
   const record = params && typeof params === "object" ? params as Record<string, unknown> : {};
   if (isMcpChatToolName(tool)) return mcp ? `Asking ${mcp.serverName} at ${mcp.host}: ${mcp.tool}.` : `Calling ${tool}.`;
   if (tool === "web_search") return "Researching public sources with OpenAI.";
+  if (isSophosReadTool(tool)) return "Reading Sophos Central.";
   if (isSplashtopReadTool(tool)) return `Reading Splashtop: ${tool.replace(/^splashtop_/, "").replace(/_/g, " ")}.`;
   if (tool === "list_cached_resources") return "Inspecting cache inventory.";
   if (tool === "query_cache") {

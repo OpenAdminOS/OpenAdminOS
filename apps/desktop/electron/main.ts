@@ -6618,6 +6618,47 @@ function registerIpcHandlers() {
       return store.setMcpServerEnabled(requireBoundedString(serverId, "serverId", 64), enabled);
     }),
   );
+  ipcMain.handle(
+    "openadminos:connect-sophos",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) throw new Error("Reopen Connections and enter the Sophos Central credentials.");
+      return store.connectSophos({
+        organizationId: requireBoundedString(input.organizationId, "organizationId", 400),
+        clientId: requireBoundedString(input.clientId, "clientId", 512),
+        clientSecret: requireBoundedString(input.clientSecret, "clientSecret", 4096),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:test-sophos",
+    handleTrusted((_event, id: unknown) => store.testSophos(requireBoundedString(id, "organizationId", 400))),
+  );
+  ipcMain.handle(
+    "openadminos:disconnect-sophos",
+    handleTrusted((_event, id: unknown) => store.disconnectSophos(requireBoundedString(id, "organizationId", 400))),
+  );
+  ipcMain.handle(
+    "openadminos:list-sophos-targets",
+    handleTrusted((_event, id: unknown, search: unknown) => {
+      if (typeof search !== "string" || search.length > 200) throw new Error("Enter a search of up to 200 characters.");
+      return store.listSophosTargets(requireBoundedString(id, "organizationId", 400), search);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:prepare-sophos-change",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input) || !Array.isArray(input.targetIds) || input.targetIds.length > 50 ||
+          (input.kind !== "isolate" && input.kind !== "release" && input.kind !== "scan")) {
+        throw new Error("Choose a Sophos Central change and up to 50 endpoints.");
+      }
+      return store.prepareSophosChange({
+        organizationId: requireBoundedString(input.organizationId, "organizationId", 400),
+        kind: input.kind,
+        targetIds: input.targetIds.map((id) => requireBoundedString(id, "endpoint ID", 36)),
+        ...(input.kind === "scan" ? {} : { comment: requireBoundedString(input.comment, "isolation reason", 400) }),
+      });
+    }),
+  );
   // Splashtop: the token arrives once with connect or rotate and never goes back to the renderer.
   ipcMain.handle(
     "openadminos:connect-splashtop",

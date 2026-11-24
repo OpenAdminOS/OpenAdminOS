@@ -340,13 +340,18 @@ import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } fr
 import { mcpChatServerOf, mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
+import type { ConnectSophosInput, PrepareSophosChangeInput } from "@openadminos/agent-sdk";
+import { listSophosTargets, prepareSophosPlan, recheckSophosTarget, verifySophosAcceptance } from "./sophos/plans.js";
+import { isSophosId, isSophosRegionHost } from "@openadminos/agent-sdk";
+import { readSophos } from "./sophos/reads.js";
+import { SophosService } from "./sophos/service.js";
 import { SplashtopApiError, type SplashtopFetch } from "./splashtop/api.js";
 import { buildSplashtopChangePlan, isPlannedSplashtopRequest, validateSplashtopChangeRequest } from "./splashtop/plans.js";
 import { runSplashtopRead } from "./splashtop/reads.js";
 import { SplashtopService } from "./splashtop/service.js";
 import { listSplashtopChangeTargets } from "./splashtop/targets.js";
 import { MemorySplashtopTokenStore, SafeStorageSplashtopTokenStore, type SplashtopTokenStore } from "./splashtop/token-store.js";
-import type { SplashtopChatContext } from "./intune-chat/tools.js";
+import type { SplashtopChatContext, SophosChatContext } from "./intune-chat/tools.js";
 import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
@@ -1065,6 +1070,7 @@ function runAuditDetails(
     ...(run.providerId ? { providerId: run.providerId } : {}),
     ...(run.model ? { model: run.model } : {}),
     ...(run.trigger ? { trigger: run.trigger } : {}),
+    ...(run.sophos ? { service: "sophos", serviceHost: run.sophos.host, changeKind: run.sophos.kind } : {}),
     ...(run.changeState ? { changeState: run.changeState } : {}),
     stepCount: run.steps.length,
     logCount: run.logs.length,
@@ -1748,6 +1754,8 @@ export interface AppStateStoreOptions {
   mcpCatalog?: readonly McpCatalogEntry[];
   /** The IT policy file read at launch (managed-policy.ts). Enforced here, whatever the renderer shows. */
   managedPolicy?: ManagedPolicyStatus;
+  /** Test hook: fixture transport for the Sophos Central API. */
+  sophosFetch?: typeof fetch;
   /** Test hook: where Splashtop tokens are kept. Defaults to safeStorage under the user data folder. */
   splashtopTokens?: SplashtopTokenStore;
   /** Test hook: the fetch Splashtop Open API calls use. */
@@ -1935,6 +1943,7 @@ export class AppStateStore {
   private readonly mcpCatalog: readonly McpCatalogEntry[];
   private readonly managedPolicy: ManagedPolicyStatus | undefined;
   /** The Splashtop connection of each organization; see splashtop/service.ts. */
+  private readonly sophos: SophosService<PersistedState>;
   private readonly splashtop: SplashtopService<PersistedState>;
   /** Organizations whose Splashtop disconnect is running, with how many; no apply starts for them. */
   private readonly splashtopDisconnecting = new Map<string, number>();
@@ -2089,6 +2098,18 @@ export class AppStateStore {
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
     this.managedPolicy = typeof options === "string" ? undefined : options.managedPolicy;
     const splashtopOptions: Partial<AppStateStoreOptions> = typeof options === "string" ? {} : options;
+    this.sophos = new SophosService<PersistedState>({
+      read: () => this.read(),
+      write: (state) => this.write(state),
+      serialize: (work) => this.serialize(work),
+      clock: () => this.clock(),
+      changed: () => this.emitStateChanged("sophos-changed"),
+      stopApplies: (id) => this.runService.stopVendorApplies(
+        "sophos-change", id, "Sophos Central was disconnected while this plan applied. Check the endpoint in Sophos Central before trying again.",
+      ),
+      ...(splashtopOptions.userDataPath ? { secretsRoot: join(splashtopOptions.userDataPath, "services", "secrets") } : {}),
+      ...(splashtopOptions.sophosFetch ? { fetch: splashtopOptions.sophosFetch } : {}),
+    });
     this.splashtop = new SplashtopService<PersistedState>({
       read: () => this.read(),
       serialize: (work) => this.serialize(work),
@@ -2136,6 +2157,7 @@ export class AppStateStore {
       documentationIndexVersion: () => host.documentationIndexVersion(),
       mcpChatContext: (tenant) => host.mcpChatContext(tenant),
       listMcpServers: () => host.listMcpServers(),
+      sophosChatContext: (tenant) => host.sophosChatContext(tenant),
       splashtopChatContext: (tenant) => host.splashtopChatContext(tenant),
       recordHostedProviderConsent: (consent) => host.recordHostedProviderConsent(consent),
       appVersion: this.appVersion,
@@ -2225,6 +2247,7 @@ export class AppStateStore {
         host.selfTrainingPromptOverlay(tenantId, agentSlug),
       recordLearningEventSafely: (input) => host.recordLearningEventSafely(input),
       notifyRunFinished: (run) => host.notifyRunFinished(run),
+      applySophosAction: (run, action, signal) => host.applySophosAction(run, action, signal),
       splashtopForRun: (run) => host.splashtopForRun(run),
       agentManifestError: (agent) => host.agentManifestError(agent),
       emitStateChanged: (reason, runId) => host.emitStateChanged(reason, runId),
@@ -2876,6 +2899,79 @@ export class AppStateStore {
     }
   }
 
+  listSophosTargets(organizationId: string, search: string) {
+    return this.localResetGatedWork(async () => {
+      const state = await this.read();
+      const record = organizationForTenant(state.organizations ?? [], state.activeTenantId)?.connections.sophos;
+      if (!record) throw new Error("Connect Sophos Central for this organization in Connections.");
+      this.sophos.requireBinding(state, organizationId, record.connectionId);
+      return this.sophos.check(organizationId, record.connectionId, async () => {
+        const { api } = await this.sophos.binding(state, organizationId);
+        return listSophosTargets(api, record, search);
+      });
+    });
+  }
+
+  prepareSophosChange(input: PrepareSophosChangeInput) {
+    return this.localResetGatedWork(async () => {
+      const state = await this.read();
+      const tenantId = state.activeTenantId;
+      if (!tenantId) throw new OrganizationBoundaryError("Select the organization before preparing a Sophos Central change.");
+      const record = organizationForTenant(state.organizations ?? [], tenantId)?.connections.sophos;
+      if (!record) throw new Error("Connect Sophos Central for this organization in Connections.");
+      this.sophos.requireBinding(state, input.organizationId, record.connectionId);
+      const plan = await this.sophos.check(input.organizationId, record.connectionId, async () => {
+        const { api } = await this.sophos.binding(state, input.organizationId);
+        return prepareSophosPlan(api, record, input);
+      });
+      return this.runService.startSophosChangeRun(tenantId, {
+        organizationId: input.organizationId,
+        connectionId: record.connectionId,
+        host: record.host,
+        kind: input.kind,
+        ...(input.kind !== "scan" && typeof input.comment === "string" ? { comment: input.comment.trim() } : {}),
+      }, plan, (current) => this.sophos.requireBinding(current, input.organizationId, record.connectionId));
+    });
+  }
+
+  private applySophosAction(run: RunRecord, action: import("@openadminos/agent-sdk").WriteAction, signal: AbortSignal) {
+    return this.localResetGatedWork(async () => {
+      signal.throwIfAborted();
+      const plan = run.sophos;
+      const state = await this.read();
+      if (!plan || run.tenantId !== state.activeTenantId || action.kind !== "sophos-write" || !isSophosId(action.id)) {
+        throw new Error("Open the plan in its organization and prepare the Sophos Central change again.");
+      }
+      if (plan.kind !== "isolate" && plan.kind !== "release" && plan.kind !== "scan") {
+        throw new Error("Prepare a new Sophos Central plan in Connections.");
+      }
+      const { api, record } = await this.sophos.binding(state, plan.organizationId);
+      if (record.connectionId !== plan.connectionId || record.host !== plan.host) {
+        throw new Error("The Sophos Central connection changed. Prepare the plan again in Connections.");
+      }
+      const before = action.metadata?.before as { isolation?: unknown } | undefined;
+      await this.sophos.check(plan.organizationId, record.connectionId, async () => {
+        await recheckSophosTarget(api, record, plan.kind, action.id, before?.isolation, signal);
+        await this.serialize(async () => this.sophos.requireBinding(await this.read(), plan.organizationId, record.connectionId));
+        signal.throwIfAborted();
+        const result = await api.change(record, plan.kind, [action.id], plan.comment, signal);
+        verifySophosAcceptance(result, plan.kind, action.id);
+      }, false);
+    });
+  }
+
+  connectSophos(input: ConnectSophosInput) {
+    return this.localResetGatedWork(() => this.sophos.connect(input));
+  }
+
+  testSophos(organizationId: string) {
+    return this.localResetGatedWork(() => this.sophos.test(organizationId));
+  }
+
+  disconnectSophos(organizationId: string) {
+    return this.localResetGatedWork(() => this.sophos.disconnect(organizationId));
+  }
+
   async connectSplashtop(input: ConnectSplashtopInput): Promise<SplashtopConnectionSummary> {
     return this.localResetGatedWork(async () => {
       this.requireActiveOrganization(await this.read(), input.organizationId);
@@ -2906,7 +3002,8 @@ export class AppStateStore {
   private async disconnectSplashtopNow(organizationId: string): Promise<void> {
     this.splashtopDisconnecting.set(organizationId, (this.splashtopDisconnecting.get(organizationId) ?? 0) + 1);
     try {
-      await this.runService.stopSplashtopApplies(
+      await this.runService.stopVendorApplies(
+        "splashtop-change",
         organizationId,
         "Splashtop was disconnected while this plan applied. Nothing more was sent.",
       );
@@ -3004,6 +3101,25 @@ export class AppStateStore {
    * that holds this tenant. Every call checks again that the connection
    * and its token are the ones the answer started with.
    */
+  private async sophosChatContext(tenant: TenantRecord): Promise<SophosChatContext | undefined> {
+    const state = await this.read();
+    const organization = organizationForTenant(state.organizations ?? [], tenant.id);
+    const started = organization?.connections.sophos;
+    if (!organization || !started || !isSophosRegionHost(started.host) || state.activeTenantId !== tenant.id) return undefined;
+    return {
+      host: started.host,
+      read: async (tool, params, signal) => this.localResetGatedWork(async () => {
+        const currentState = await this.read();
+        this.sophos.requireBinding(currentState, organization.id, started.connectionId);
+        return this.sophos.check(organization.id, started.connectionId, async () => {
+          const current = await this.sophos.binding(currentState, organization.id);
+          signal?.throwIfAborted();
+          return readSophos(current.api, current.record, tool, params, signal);
+        });
+      }),
+    };
+  }
+
   private async splashtopChatContext(tenant: TenantRecord): Promise<SplashtopChatContext | undefined> {
     const started = await this.splashtop.bindingForTenant(await this.read(), tenant.id);
     if (!started) return undefined;
@@ -4111,6 +4227,7 @@ export class AppStateStore {
       schedulerStatus: this.deriveSchedulerStatus(persisted),
       office: this.officeService.state(),
       mcpServers: this.mcpServerSummaries(persisted),
+      sophosConnections: this.sophos.summaries(persisted),
       splashtopConnections: this.splashtop.summaries(persisted),
       chatToolUse: chatToolUseStatus({
         mode: this.intelligenceStore?.getChatInvestigationSettings().mode ?? "auto",
@@ -9139,8 +9256,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // says so); otherwise the record would outlive its tenant.
       if (persisted.organizations) {
         next.organizations = persisted.organizations.map((organization) => {
-          if (organization.connections.microsoft365?.tenantId !== id || !("splashtop" in organization.connections)) return organization;
-          const { splashtop: _removed, ...connections } = organization.connections;
+          if (organization.connections.microsoft365?.tenantId !== id) return organization;
+          const { splashtop: _removed, sophos: _sophos, ...connections } = organization.connections;
           return { ...organization, connections };
         });
       }
@@ -9274,8 +9391,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // 4. Tokens of other services of the removed organization, such as Splashtop.
       try {
         await this.splashtop.sweep(await this.read());
+        await this.sophos.sweep();
       } catch (cause) {
-        throw new Error(`Its Splashtop API token could not be deleted. ${errorText(cause)}`, { cause });
+        throw new Error(`A vendor service credential could not be deleted. ${errorText(cause)}`, { cause });
       }
     } catch (cause) {
       failure = errorText(cause);
@@ -9306,7 +9424,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async resumeTenantCleanups(): Promise<void> {
     const removals = (await this.read()).tenantRemovals ?? [];
     for (const removal of removals) await this.runTenantCleanup(removal.tenantId);
-    // A token whose organization went away while the app was closed is deleted too.
+    // Delete credentials whose organization went away while the app was closed.
+    await this.sophos.sweep().catch(() => {
+      console.warn("[sophos] A removed organization's credential could not be deleted. Cleanup will retry next launch.");
+    });
     await this.splashtop.sweep(await this.read()).catch((error: unknown) => {
       console.warn("[splashtop] could not delete the token of a removed organization:", errorText(error));
     });

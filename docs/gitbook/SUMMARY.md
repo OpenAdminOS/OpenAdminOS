@@ -18,6 +18,7 @@
 - [Entra](generated/services/entra.md)
 - [Defender](generated/services/defender.md)
 - [Splashtop](services/splashtop.md)
+- [Sophos Central (Preview)](services/sophos-central.md)
 - [Planned services](services/planned.md)
 - [Permissions by service](generated/reference/permissions-by-service.md)
 - [Roles](guides/roles.md)

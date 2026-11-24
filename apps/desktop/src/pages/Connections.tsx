@@ -52,8 +52,10 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { MicrosoftStepButton, useOpenMicrosoftStep } from "../setup/FirstRunScan";
 import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
+import { sophosToolHost } from "../state/data-boundary";
 import { ConnectorsSettingsSection } from "./Connectors";
 import { TenantCleanupNotice } from "../components/TenantCleanupNotice";
+import { SophosConnection } from "../components/SophosConnection";
 import { SplashtopServiceRow } from "../components/SplashtopConnection";
 import { SPLASHTOP_COPY } from "../copy/splashtop";
 
@@ -89,6 +91,7 @@ export interface ReachModel {
     locationDetail?: string;
   };
   referenceHosts: string[];
+  sophosHost?: string;
   /** The owner's logo for a reference host whose listing has one, such as the Splashtop Help Centers. */
   referenceLogos: Readonly<Record<string, string>>;
   /** null while the connector list loads or when it could not be loaded. */
@@ -129,7 +132,9 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     : boundary.kind === "local"
       ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerId: provider.id, providerName: provider.name }
       : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerId: provider.id, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization)), location: providerDataLocation(provider), ...(hostedDetail(provider, boundary.kind === "hosted" ? boundary.modelNote : undefined)) };
+  const sophosHost = sophosToolHost(state);
   return {
+    ...(sophosHost ? { sophosHost } : {}),
     ...(organization ? { organizationName: organization.name } : {}),
     services,
     model,
@@ -180,6 +185,7 @@ export function reachDescription(model: ReachModel): string {
       : model.model.kind === "hosted"
         ? `The model is hosted: ${model.model.name}. ${model.model.promptsSentence ?? "Prompts go to the provider"}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."}${model.model.locationDetail ? ` ${model.model.locationDetail}` : ""}`
         : "No model is ready.";
+  const sophos = model.sophosHost ? ` Sophos Central tool requests go to ${model.sophosHost}.` : "";
   const words = model.referenceHosts.length > 0
     ? `Words from questions go to ${listText(model.referenceHosts)}.`
     : "Words from questions go nowhere: no public reference is on.";
@@ -193,7 +199,7 @@ export function reachDescription(model: ReachModel): string {
   const voice = model.voice
     ? ` ${novaVoiceSentence(Boolean(model.organizationName))}${model.voice.model ? ` The voice model is ${model.voice.model}.` : ""}`
     : "";
-  return `${services} ${device} ${words} ${reports}${voice}`;
+  return `${services} ${device} ${words}${sophos} ${reports}${voice}`;
 }
 
 /** Below this content width the map stacks and draws no connectors. */
@@ -226,6 +232,7 @@ export function reachLinks(model: ReachModel): ReachLink[] {
     })),
     ...(model.model.kind === "hosted" ? [{ id: "prompts", direction: "out", tone: "hosted" } satisfies ReachLink] : []),
     ...(model.voice ? [{ id: "voice", direction: "out", tone: "hosted" } satisfies ReachLink] : []),
+    ...(model.sophosHost ? [{ id: "sophos", direction: "out", tone: "default" } as const] : []),
     ...model.referenceHosts.map((host): ReachLink => ({ id: `host:${host}`, direction: "out", tone: "default" })),
     ...(model.reportDestinations ?? []).map((name): ReachLink => ({ id: `report:${name}`, direction: "out", tone: "default" })),
   ];
@@ -508,6 +515,14 @@ function ReachMap({ model }: { model: ReachModel }) {
             </ul>
           </div>
         ) : null}
+        {model.sophosHost && (
+          <div className="reach-group">
+            <h4>Sophos Central requests</h4>
+            <ul className="reach-rows">
+              <ReachRow linkId="sophos" mark={<ReferenceMark name="Sophos Central" />} title={model.sophosHost} />
+            </ul>
+          </div>
+        )}
         <div className="reach-group">
           <h4>{CONNECTIONS_COPY.map.questionWords}</h4>
           <ul className="reach-rows">
@@ -1388,6 +1403,9 @@ export default function Connections() {
               <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
                 {!organization ? (
                   <>
+                    {searchParams.get("connect") === "sophos" ? (
+                      <p role="status" className="mb-4 text-sm text-[var(--color-text-soft)]">Set up an organization before connecting Sophos Central.</p>
+                    ) : null}
                     {connectSplashtop ? (
                       <div role="status" className="mb-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
                         {SPLASHTOP_COPY.needsMicrosoft365}
@@ -1406,6 +1424,12 @@ export default function Connections() {
                         <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.otherServicesHeading}</strong>
                         <span className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.otherServicesBody}</span>
                       </div>
+                      <SophosConnection
+                        key={organization.id}
+                        organizationId={organization.id}
+                        connection={state.sophosConnections?.find((entry) => entry.organizationId === organization.id)}
+                        focus={searchParams.get("connect") === "sophos"}
+                      />
                       <SplashtopServiceRow
                         organization={organization}
                         connection={splashtopConnection}

@@ -1,3 +1,4 @@
+import { SOPHOS_PREVIEW_NOTE } from "../shared/openAdminOS";
 import { useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -38,6 +39,7 @@ export default function Marketplace() {
   const openServer = servers.find((server) => server.id === openServerId);
   const filtering = kind !== "discover" || query.trim() !== "";
   const shownServers = servers.filter((server) => matchesServer(server, query));
+  const showSophos = matchesListing(["sophos central", "sophos fusion", "endpoint security", "connection"], query);
   const showSplashtopApi = matchesListing(SPLASHTOP_API_LISTING.terms, query);
   const toolUse = state.chatToolUse;
 
@@ -146,7 +148,7 @@ export default function Marketplace() {
             <Shelf
               title="MCP tools"
               note="Public, read-only servers. Chat calls their tools with any provider."
-              hidden={searching && shownServers.length === 0 && !showSplashtopApi}
+              hidden={searching && shownServers.length === 0 && !showSplashtopApi && !showSophos}
             >
               {toolUse?.available === false && toolUse.notice ? (
                 <div role="note" className="mb-4 flex gap-2.5 rounded-xl bg-[var(--color-warning-soft)] px-4 py-3 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
@@ -164,6 +166,7 @@ export default function Marketplace() {
                   />
                 ))}
                 {showSplashtopApi ? <ConnectionListingCard /> : null}
+                {showSophos ? <SophosListingCard /> : null}
               </div>
               {servers.length === 0 ? (
                 <p role="status" className="text-sm text-[var(--color-text-muted)]">The MCP catalog is not available in this build.</p>
@@ -218,6 +221,25 @@ function matchesListing(terms: readonly string[], query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   return terms.some((term) => term.includes(needle) || needle.includes(term));
+}
+
+function SophosListingCard() {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      onClick={() => navigate("/connections?connect=sophos")}
+      className="flex flex-col gap-3 rounded-2xl bg-[var(--color-surface)] p-4 text-left ring-1 ring-[var(--color-border-soft)] hover:ring-[var(--color-border)] focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+    >
+      <ListingTags tags={["Connection", "Preview"]} />
+      <span className="flex items-center gap-2.5">
+        <span aria-hidden="true" className="svc-mark" data-size="lg">SC</span>
+        <span className="text-base font-semibold">Sophos Central</span>
+      </span>
+      <span className="text-sm text-[var(--color-text-muted)]">{SOPHOS_PREVIEW_NOTE}</span>
+      <span className="mt-auto text-sm">Connect on Connections</span>
+    </button>
+  );
 }
 
 function ConnectionListingCard() {
