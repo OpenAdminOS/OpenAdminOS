@@ -3004,6 +3004,11 @@ claiming local-only trust. Microsoft Graph, login, registry, and hosted-provider
 traffic should flow through the main process unless a renderer-owned external
 endpoint is explicitly approved and documented.
 
+On Linux the desktop clears Electron's spellchecker dictionary languages
+before opening a window. This disables spellchecking and prevents Chromium's
+Google dictionary download, which runs outside the renderer's CSP. Repeat the
+[startup network capture](network-capture.md) when upgrading Electron.
+
 Desktop copy actions should use the bounded Electron clipboard bridge exposed by
 preload instead of relying on sandboxed renderer clipboard permissions. Browser
 clipboard fallbacks are acceptable only for renderer-only development.

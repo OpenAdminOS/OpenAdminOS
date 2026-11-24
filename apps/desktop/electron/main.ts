@@ -4873,6 +4873,12 @@ function validateResetSelfTrainingInput(value: unknown): ResetSelfTrainingInput 
 }
 
 function installSecurityGuards(): void {
+  if (process.platform === "linux") {
+    // TODO(ugur): Restore Linux spellchecking when dictionaries can be supplied offline.
+    // Electron can still download the configured dictionaries with spellcheck disabled.
+    session.defaultSession.setSpellCheckerLanguages([]);
+  }
+
   // Only trusted app frames may request microphone audio. Camera and all
   // unrelated browser permissions remain denied.
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {

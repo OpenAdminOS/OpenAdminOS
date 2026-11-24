@@ -20,6 +20,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Security
 
 - The website uses a nonce-based Content Security Policy, blocks framing and unused browser permissions, and enforces HTTPS with HSTS.
+- Linux no longer downloads spelling dictionaries from Google. Built-in spellchecking is disabled on Linux.
 
 ## [0.8.0] - 2026-11-24
 
