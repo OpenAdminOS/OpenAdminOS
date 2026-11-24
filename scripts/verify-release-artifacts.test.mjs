@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dump as toYaml } from "js-yaml";
+import { dump as toYaml, load as parseYaml } from "js-yaml";
 
 const script = fileURLToPath(new URL("./verify-release-artifacts.mjs", import.meta.url));
 const hasDpkg = spawnSync("dpkg-deb", ["--version"]).status === 0;
@@ -79,7 +79,7 @@ function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false
     assert.match(result.stderr, message);
     assert.equal(existsSync(stage), false);
   };
-  return { deb, dmg, exe, pkg, appImage, expected, files, prepare, expectFailure, stage };
+  return { deb, dmg, exe, pkg, appImage, expected, files, prepare, expectFailure, record, stage };
 }
 
 for (const channel of ["stable", "nightly"]) {
@@ -163,6 +163,27 @@ test("checks the digest of the update manifest itself", (t) => {
   const { files, expectFailure } = fixture(t);
   truncateSync(files["nightly-linux.yml"], 16);
   expectFailure(/::error::.*nightly-linux\.yml SHA-256 mismatch/);
+});
+
+test("requires the Linux manifest's top-level path to name the AppImage", (t) => {
+  const { deb, files, expectFailure, record } = fixture(t, { linuxManifestIncludesPackages: true });
+  const path = files["nightly-linux.yml"];
+  const manifest = parseYaml(readFileSync(path, "utf8"));
+  manifest.path = deb;
+  manifest.sha512 = manifest.files.find(({ url }) => url === deb).sha512;
+  writeFileSync(path, toYaml(manifest));
+  record("linux-x64");
+  expectFailure(/::error::.*nightly-linux\.yml top-level path must name an expected update file/);
+});
+
+test("requires the manifest's top-level SHA-512 to match the selected file", (t) => {
+  const { files, expectFailure, record } = fixture(t);
+  const path = files["nightly-mac.yml"];
+  const manifest = parseYaml(readFileSync(path, "utf8"));
+  manifest.sha512 = manifest.files[1].sha512;
+  writeFileSync(path, toYaml(manifest));
+  record("macos-arm64");
+  expectFailure(/::error::.*nightly-mac\.yml top-level SHA-512 mismatch for .*arm64-mac\.zip/);
 });
 
 test("rejects a truncated .deb with valid control metadata and matching checksums", { skip: !hasDpkg && "requires dpkg-deb" }, (t) => {

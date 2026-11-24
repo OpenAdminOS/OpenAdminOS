@@ -112,17 +112,23 @@ async function verifyPlatform(platform, channel, version, directory) {
 
   const manifestPath = join(directory, manifest);
   const metadata = await readUpdateManifest(manifestPath, version);
-  const seen = new Set();
+  const hashes = new Map();
   for (const entry of metadata.files) {
     const name = entry?.url;
-    if (!binaries.includes(name) || seen.has(name)) {
+    if (!binaries.includes(name) || hashes.has(name)) {
       throw new Error(`${manifestPath} lists an unexpected or duplicate file ${JSON.stringify(name)}.`);
     }
-    seen.add(name);
     await verifyUpdateEntry(join(directory, name), sizes.get(name), entry, manifestPath);
+    hashes.set(name, entry.sha512);
   }
   for (const name of updateFiles) {
-    if (!seen.has(name)) throw new Error(`${manifestPath} is missing the update entry for ${name}.`);
+    if (!hashes.has(name)) throw new Error(`${manifestPath} is missing the update entry for ${name}.`);
+  }
+  if (!updateFiles.includes(metadata.path)) {
+    throw new Error(`${manifestPath} top-level path must name an expected update file.`);
+  }
+  if (metadata.sha512 !== hashes.get(metadata.path)) {
+    throw new Error(`${manifestPath} top-level SHA-512 mismatch for ${metadata.path}.`);
   }
 
   if (platform === "linux-x64") {
