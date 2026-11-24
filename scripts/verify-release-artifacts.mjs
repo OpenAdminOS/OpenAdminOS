@@ -127,7 +127,7 @@ async function verifyPlatform(platform, channel, version, directory) {
 
   if (platform === "linux-x64") {
     const deb = join(directory, binaries.find((name) => name.endsWith(".deb")));
-    execFileSync("dpkg-deb", ["--info", deb], { stdio: ["ignore", "ignore", "inherit"] });
+    execFileSync("dpkg-deb", ["--fsys-tarfile", deb], { stdio: ["ignore", "ignore", "inherit"] });
   }
 
   return [...binaries, manifest].map((name) => ({ name, path: join(directory, name) }));

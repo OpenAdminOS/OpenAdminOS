@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -12,7 +12,7 @@ const script = fileURLToPath(new URL("./verify-release-artifacts.mjs", import.me
 const hasDpkg = spawnSync("dpkg-deb", ["--version"]).status === 0;
 const digest = (bytes) => createHash("sha512").update(bytes).digest("base64");
 
-function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false, validDeb = false } = {}) {
+function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false, validDeb = false, truncateDeb = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "release-artifacts-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const stage = join(root, "staged");
@@ -54,6 +54,10 @@ function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false
           "Package: openadminos", "Version: 0.8.0", "Architecture: amd64", "Maintainer: Test", "Description: Test package", "",
         ].join("\n"));
         execFileSync("dpkg-deb", ["--build", "--root-owner-group", packageDir, files[name]]);
+        if (truncateDeb) {
+          // Record matching checksums for the truncated file so the data check must catch it.
+          truncateSync(files[name], statSync(files[name]).size - 32);
+        }
       } else {
         writeFileSync(files[name], `Fixture bytes for ${name}\n`);
       }
@@ -161,7 +165,10 @@ test("checks the digest of the update manifest itself", (t) => {
   expectFailure(/::error::.*nightly-linux\.yml SHA-256 mismatch/);
 });
 
-test("runs dpkg-deb on the verified bytes", { skip: !hasDpkg && "requires dpkg-deb" }, (t) => {
-  const { expectFailure } = fixture(t);
-  expectFailure(/::error::.*dpkg-deb --info .*linux-amd64\.deb/);
+test("rejects a truncated .deb with valid control metadata and matching checksums", { skip: !hasDpkg && "requires dpkg-deb" }, (t) => {
+  const { deb, files, expectFailure } = fixture(t, {
+    validDeb: true, truncateDeb: true, linuxManifestIncludesPackages: true,
+  });
+  execFileSync("dpkg-deb", ["--info", files[deb]]);
+  expectFailure(/::error::.*dpkg-deb --fsys-tarfile .*linux-amd64\.deb/);
 });

@@ -10,7 +10,7 @@ The release surface publishes Windows, macOS, and Linux binaries:
 
 A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
 
-Before publishing either channel, the release job downloads each platform artifact by name and verifies the expected installers and manifests. It checks updater asset sizes and SHA-512 hashes against the update manifests, and checks build-time SHA-256 hashes for the manifests, Linux packages, and stable macOS PKG. The Linux `.deb` must also pass `dpkg-deb --info`. A failed check names the file and stops publishing. The stable apt job compares its separately downloaded `.deb` with the verified release checksum before building the repository.
+Before publishing either channel, the release job downloads each platform artifact by name and verifies the expected installers and manifests. It checks updater asset sizes and SHA-512 hashes against the update manifests, and checks build-time SHA-256 hashes for the manifests, Linux packages, and stable macOS PKG. The release job also reads the Linux `.deb` data archive with `dpkg-deb --fsys-tarfile`. A failed check names the file and stops publishing. The stable apt job compares its separately downloaded `.deb` with the verified release checksum before building the repository.
 
 Every merge to `main` that changes the app also ships a signed **nightly** prerelease. Nightlies need no maintainer action; see [Nightly builds](#nightly-builds).
 
