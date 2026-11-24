@@ -14,10 +14,6 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-- Sophos Central and Splashtop change failures show recovery actions in Runs. Sophos changes stop on cancel or disconnect and surface write permission issues in Connections.
-
-- Sophos Central (Preview) shows connection recovery states and rechecks endpoints before applying confirmed changes.
-
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
 
 ### Security
@@ -26,6 +22,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Highlights
 
+- Ask Chat for a complete list, such as every Windows app available in Company Portal. When more than 50 cached rows match, the full list (up to 10,000 rows) is attached to the answer as a table with CSV export, and the model only receives the count and a preview.
 - Browse the active organization's cached rows in Settings > Data or from a Chat answer. Search and page through rows, see cache coverage, and open an individual JSON preview. Open previews refresh with the cache, and the browser closes when you switch organizations.
 - Connect Sophos Central (Preview) to read endpoint, alert, SIEM, firewall and account health data in Chat and review endpoint isolation, release or scan requests before applying them. Connections and Chat show the Sophos regional host.
 - Manage each company as an organization. Use Connections to connect Intune, Entra, and Defender individually and see what each connection reads or sends.
@@ -66,6 +63,7 @@ With a model running on this device, prompts sent to that model stay on this dev
 - The homepage shows a Member of row under the quote, with the NVIDIA Inception Program badge and the KI Bundesverband logo, each linking to its owner's home page.
 - Nova profile, notes and follow-ups: Settings > Nova edits the voice, greeting, standing instructions with 10 versions, instructions per organization, abilities and read-only shortcuts; Nova keeps reviewed notes per organization (a click confirms each, unconfirmed ones expire after 30 days, Disconnect deletes them), sets one-time read-only follow-ups that answer in Chat, lists what needs the admin, and nudges answers that only promise work in Chat, Agent Team and voice; IT can restrict voice modes, instructions, abilities and notes in `policy.json`, and every change, note, follow-up and hosted voice consent is in the audit log.
 - Splashtop Agentic Packr Docs: a built-in Marketplace reference that answers Agentic Packr questions from support-splashtopagenticpackr.splashtop.com with links to the articles; both Splashtop references show the Splashtop logo in the Marketplace and on Connections.
+- Sophos Central (Preview): connect one Sophos Central tenant per organization with an API client ID and secret kept in this device's secure storage; requests go only to the tenant's regional host (for example api-eu01.central.sophos.com). Chat reads endpoints with health, tamper protection and isolation state, alerts, SIEM events and alerts from the last 24 hours, firewalls and firewall groups, and the account health check. Plan a change prepares isolate, release and scan for up to 50 endpoints that apply only after a typed phrase such as `ISOLATE 3 DEVICES`, and each endpoint is checked again right before its request is sent. Partner and organization (MSP) credentials and firewall traffic logs are not supported. Built from Sophos's API documentation; not yet tested against a live tenant.
 - Splashtop Docs: the Splashtop documentation listing answers Splashtop questions from support-splashtopbusiness.splashtop.com with links to the articles.
 - Managed configuration for IT rollouts: a local `policy.json` (machine and user path per OS, schema in `schemas/policy.schema.json`) sets allowed providers, the provider and model, allowed public references, a pre-seeded own app registration, skipping the first-run scan (straight to Connect Microsoft 365 when the policy provider is ready) and locked settings, enforced in the main process, with the scan offering only allowed providers; Settings shows "Set by your IT department" and an IT policy panel, problems name the file and line, and the configuration audit records policy load, change, removal and problems.
 - Splashtop: a built-in Splashtop Docs search in the Marketplace, off by default; the Splashtop Open API connects per organization on Connections with an Enterprise API token kept in this device's secure storage and sent only to the region's host (webapi.splashtop.com, .eu or .nr), Chat reads computers, inventory, users, groups, sessions, team history, policies and vulnerabilities, and Plan a change prepares reboots, deletions, renames, disabled users and ended sessions that apply only after a typed phrase such as `REBOOT 12 COMPUTERS`.
@@ -133,8 +131,8 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Fixed
 
-- Open and export complete cached lists from Chat when more than 50 rows match and the result fits the table limits. Expanded tables preview 200 rows, and CSV includes the full attachment. Refresh the app cache to list Windows apps available in Company Portal, including required apps. Cache queries also support paging.
-- Chat preserves ordinary list descriptions and keeps attachment instructions out of answers. App refresh completes paged assignment data and reports missing coverage without introducing drift for derived fields.
+- Chat no longer stops at 50 rows when asked to list cached data: it states the exact count and attaches every matching row, the expanded table shows the first 200, and CSV export holds them all. Cached app data now includes assignment intent, so Chat can list apps available in Company Portal (available or required assignments); refresh the app cache once after updating. MCP gateway clients can page through cached rows.
+- Sophos Central and Splashtop changes that stop or are refused show the reason, how many actions were accepted, and links to prepare the change again or check the target in the vendor console, instead of a generic failure panel.
 
 - Refine the homepage screenshots in both themes. Chat shows which devices missed the seven-day sync window and the cache used to answer, and the mobile write-confirmation hero shows the tenant and local provider.
 - Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
