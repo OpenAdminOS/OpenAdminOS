@@ -37,7 +37,7 @@ export function cacheMobileAppAssignments(row: unknown): unknown {
   const intents = assignments.map(assignment => assignment?.intent);
   if (intents.some(intent => typeof intent !== "string" || !intent)) return incomplete;
   const assignmentIntents = [...new Set<string>(intents)].sort();
-  // TODO(ugur): confirm required assignments count as available in Company Portal (current rule: yes)
+  // Required assignments count as available: required apps are listed in Company Portal too (decided 2026-11-24).
   const availableInCompanyPortal = assignmentIntents.some(intent =>
     ["available", "availableWithoutEnrollment", "required"].includes(intent),
   );
