@@ -106,7 +106,7 @@ describe("MCP results read by a catalog format", () => {
       status: "completed", title: "Release Communications found nothing", detail: "get_recent_m365_roadmaps · no results for this query", durationMs: 5,
     });
     assert.deepEqual(toolStepFinish({ ...base, error: "endoflife.ai returned an error: Error: No data for windows 11.", mcpSource: { ...mcpSource, serverName: "endoflife.ai", tool: "check_eol", toolError: true, sentToHost: true } }), {
-      status: "failed", title: "endoflife.ai returned an error", detail: "check_eol · endoflife.ai returned an error: Error: No data for windows 11.", durationMs: 5,
+      status: "failed", title: "endoflife.ai returned an error", detail: "check_eol · Error: No data for windows 11.", durationMs: 5,
     });
   });
 });

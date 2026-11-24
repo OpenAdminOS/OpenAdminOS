@@ -7,13 +7,14 @@ import type {
   IntuneChatToolTraceEntry,
 } from "@openadminos/agent-sdk";
 
-import { definitionForResource, planChatContext } from "./planner.js";
+import { asksAboutMicrosoftRoadmap, definitionForResource, planChatContext } from "./planner.js";
 import { normalizeSourceUrl } from "../../src/shared/chat-steps.js";
 import { isMcpChatToolName, isTenantTool, mcpChatServerOf, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
 import { isSplashtopReadTool } from "../splashtop/reads.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 
 export const LEARN_SERVER_ID = "microsoft-learn";
+export const RELEASE_COMMUNICATIONS_SERVER_ID = "release-communications";
 export const ON_DEVICE = "On device";
 export const MICROSOFT_GRAPH = "Microsoft Graph";
 export const SPLASHTOP_OPEN_API = "Splashtop Open API";
@@ -228,7 +229,9 @@ export function planChatSources(input: {
   lead?: string;
 }): ChatSourcePlan {
   const lower = input.question.toLowerCase().replace(/[\u2018\u2019]/g, "'");
-  const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
+  const roadmap = asksAboutMicrosoftRoadmap(input.question) ? input.servers.find((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID) : undefined;
+  const named = namedServers(input.question, input.servers);
+  const chosen = new Map((roadmap ? [roadmap, ...named] : named).map((server) => [server.id, server]));
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
       const text = questionFor(server, lower, input.servers);
@@ -267,7 +270,7 @@ export function planChatSources(input: {
  * veto, by keyword rules after the model gave no kind, or by keyword
  * rules alone on a path where the model does not classify.
  */
-export type QuestionKindReason = "model" | "veto" | "fallback" | "keywords";
+export type QuestionKindReason = "model" | "veto" | "roadmap" | "fallback" | "keywords";
 
 /**
  * The kind of one answer and the first step that shows it. The kind is
@@ -327,7 +330,8 @@ export class QuestionKindTracker {
     const phrase = kind === "docs" ? "a docs question" : kind === "tenant" ? "a tenant question" : "a docs and tenant question";
     const lead = reason === "veto"
       ? `Treated as docs and tenant: ${veto ?? "the question mentions your tenant"}.`
-      : reason === "model" ? `Classified as ${phrase}.`
+      : reason === "roadmap" ? `Treated as ${phrase} because the question asks about the roadmap.`
+        : reason === "model" ? `Classified as ${phrase}.`
         : reason === "fallback" ? `The model gave no question kind, so keyword rules decided: ${phrase}.`
           : this.planShown ? `Keyword rules decided: ${phrase}.` : undefined;
     this.plan = planChatSources({ ...context, kind, declaredServerIds, ...(lead ? { lead } : {}) });
@@ -488,7 +492,12 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry, readsItem = fals
     }
     // A call that stopped before sending (bad params, the query writer, the cache index, a server turned off) sent nothing.
     if (entry.error && !entry.mcpSource.sentToHost) return { status: "failed", title: `Did not send a ${serverName} query`, detail: `${tool} · ${entry.error}`, sent: undefined, durationMs };
-    if (entry.error && entry.mcpSource.toolError) return { status: "failed", title: `${serverName} returned an error`, detail: `${tool} · ${entry.error}`, durationMs };
+    if (entry.error && entry.mcpSource.toolError) {
+      const title = `${serverName} returned an error`;
+      const prefix = `${title}: `;
+      const detail = entry.error.startsWith(prefix) ? entry.error.slice(prefix.length) : entry.error;
+      return { status: "failed", title, detail: `${tool} · ${detail}`, durationMs };
+    }
     if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs };
     if (entry.mcpSource.empty) return { status: "completed", title: `${serverName} found nothing`, detail: `${tool} · no results for this query`, durationMs };
     const count = results?.length ?? 0;
@@ -533,7 +542,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent"; ends?: true }
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent" | "roadmap-first" | "roadmap"; ends?: true }
   /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
   | { kind: "context-limit" }
   /** The request did not reach the model: the loop ends with provider-unavailable. */
@@ -567,6 +576,8 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
   excerpts: "Answered from search excerpts",
   budget: "Lookup skipped: no model call left",
   "budget-spent": "Tool skipped: no model call left",
+  "roadmap-first": "Asked the model to check the roadmap first",
+  "roadmap": "Could not verify the roadmap answer",
 };
 
 /** A resource label inside a sentence: product names keep their capital, other labels read as plain words. */

@@ -109,6 +109,21 @@ describe("folded line", () => {
     expect(egressEntries([step({ kind: "answer", origin: "device", originLabel: "On device" })])).toEqual([]);
   });
 
+  it("records a request sent without arguments", () => {
+    expect(egressEntries([
+      step({ kind: "mcp", origin: "third-party", originLabel: "www.microsoft.com", title: "Listed roadmap items", sent: "" }),
+    ])).toEqual([{
+      where: "www.microsoft.com", origin: "third-party", what: ["a request"],
+      items: ["Listed roadmap items. The request had no arguments."],
+    }]);
+  });
+
+  it("records nothing for a blocked request", () => {
+    expect(egressEntries([
+      step({ kind: "mcp", origin: "third-party", originLabel: "www.microsoft.com", status: "blocked", sent: "" }),
+    ])).toEqual([]);
+  });
+
   it("says the tenant was not used only for a docs answer that read no tenant data", () => {
     expect(tenantNotUsed({ questionKind: "docs" })).toBe(true);
     expect(tenantNotUsed({ questionKind: "docs", toolTrace: [cacheTrace] })).toBe(false);
