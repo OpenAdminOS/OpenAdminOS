@@ -1062,14 +1062,14 @@ jobs:
             echo "::error::Run an apt backfill and a nightly build separately."
             exit 1
           fi
-          if ! printf '%s' "$BACKFILL_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$'; then
-            echo "::error::Refusing apt backfill for invalid tag '$BACKFILL_TAG'."
+          if ! printf '%s' "$BACKFILL_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Refusing apt backfill for '$BACKFILL_TAG': expected a stable vX.Y.Z tag."
             exit 1
           fi
           # The apt repository is stable-only: never backfill a nightly or
           # any other prerelease into it.
           prerelease="$(gh release view "$BACKFILL_TAG" --repo OpenAdminOS/OpenAdminOS --json isPrerelease --jq .isPrerelease)"
-          if [[ "$BACKFILL_TAG" == *-nightly.* || "$prerelease" != "false" ]]; then
+          if [ "$prerelease" != "false" ]; then
             echo "::error::Refusing apt backfill for '$BACKFILL_TAG': only stable releases go into the apt repository."
             exit 1
           fi
@@ -1079,18 +1079,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends apt-utils dpkg-dev gnupg
 
-      - name: Download release .deb
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install manifest parser from the lockfile
+        run: npm ci --ignore-scripts --omit=dev --no-audit --no-fund --workspace @openadminos/qa-graph
+
+      - name: Download and verify the release .deb
         env:
           BACKFILL_TAG: ${{ inputs.backfill_apt_tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p linux-artifacts
-          gh release download "$BACKFILL_TAG" \
+          version="${BACKFILL_TAG#v}"
+          if ! gh release download "$BACKFILL_TAG" \
             --repo OpenAdminOS/OpenAdminOS \
-            --pattern '*linux-amd64.deb' \
-            --dir linux-artifacts
-          ls -la linux-artifacts
+            --pattern "OpenAdminOS-${version}-linux-amd64.deb" \
+            --pattern 'latest-linux.yml' \
+            --dir linux-artifacts; then
+            echo "::error::Could not download the .deb and latest-linux.yml from '$BACKFILL_TAG'." >&2
+            exit 1
+          fi
+          node scripts/verify-release-artifacts.mjs verify-apt stable "$version" linux-artifacts
 
       - name: Build signed apt repository
         env:

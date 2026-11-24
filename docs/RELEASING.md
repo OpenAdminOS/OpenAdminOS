@@ -190,7 +190,9 @@ The workflow exports the public key to `https://repo.openadminos.com/debian/open
 
 To republish an existing release into apt without rebuilding the app, run the
 **Release** workflow manually from `main` and set `backfill_apt_tag` to the
-release tag, for example `v0.2.1`.
+stable release tag, for example `v0.7.2`. The workflow checks the downloaded
+`.deb` size and SHA-512 against that release's `latest-linux.yml` before
+building the repository. A missing manifest or package entry blocks the backfill.
 
 ---
 

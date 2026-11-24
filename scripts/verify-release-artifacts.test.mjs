@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { dump as toYaml } from "js-yaml";
@@ -94,6 +94,33 @@ test("blocks a truncated .deb even when the updater manifest omits it", (t) => {
   const { deb, files, expectFailure } = fixture(t);
   truncateSync(files[deb], 8);
   expectFailure(/::error::.*linux-amd64\.deb SHA-256 mismatch/);
+});
+
+test("manual apt backfill verifies the .deb against the stable Linux manifest", (t) => {
+  const { deb, files } = fixture(t, { channel: "stable", linuxManifestIncludesPackages: true });
+  const directory = dirname(files[deb]);
+  const verify = () => spawnSync(process.execPath, [script, "verify-apt", "stable", "0.8.0", directory], { encoding: "utf8" });
+  const manifest = files["latest-linux.yml"];
+  const bytes = readFileSync(files[deb]);
+
+  const valid = verify();
+  assert.equal(valid.status, 0, valid.stderr);
+
+  truncateSync(files[deb], 8);
+  const truncated = verify();
+  assert.equal(truncated.status, 1, truncated.stderr);
+  assert.match(truncated.stderr, /::error::.*linux-amd64\.deb has 8 bytes, expected/);
+
+  bytes[0] ^= 1;
+  writeFileSync(files[deb], bytes);
+  const corrupted = verify();
+  assert.equal(corrupted.status, 1, corrupted.stderr);
+  assert.match(corrupted.stderr, /::error::.*linux-amd64\.deb SHA-512 mismatch/);
+
+  rmSync(manifest);
+  const missingManifest = verify();
+  assert.equal(missingManifest.status, 1, missingManifest.stderr);
+  assert.match(missingManifest.stderr, /::error::.*latest-linux\.yml is missing/);
 });
 
 test("blocks a missing AppImage even when the nightly .deb is present", (t) => {

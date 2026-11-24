@@ -62,6 +62,38 @@ async function recordChecksums(platform, channel, version, directory) {
   await writeFile(join(directory, checksums), `${lines.join("\n")}\n`);
 }
 
+async function readUpdateManifest(path, version) {
+  fileSize(path);
+  const metadata = parseYaml(await readFile(path, "utf8"), { filename: path });
+  if (metadata?.version !== version || !Array.isArray(metadata.files)) {
+    throw new Error(`${path} must describe version ${version} and list its files.`);
+  }
+  return metadata;
+}
+
+async function verifyUpdateEntry(path, size, entry, manifestPath) {
+  if (size !== entry.size) {
+    throw new Error(`${path} has ${size} bytes, expected ${entry.size} from ${manifestPath}.`);
+  }
+  if (await hashFile(path, "sha512", "base64") !== entry.sha512) {
+    throw new Error(`${path} SHA-512 mismatch against ${manifestPath}.`);
+  }
+}
+
+async function verifyAptPackage(version, directory) {
+  const { manifest, binaries } = artifactLayout("linux-x64", "stable", version);
+  const name = binaries.find((file) => file.endsWith(".deb"));
+  const manifestPath = join(directory, manifest);
+  const metadata = await readUpdateManifest(manifestPath, version);
+  const entries = metadata.files.filter((entry) => entry?.url === name);
+  if (entries.length !== 1) {
+    throw new Error(`${manifestPath} must list exactly one entry for ${name}.`);
+  }
+  const path = join(directory, name);
+  await verifyUpdateEntry(path, fileSize(path), entries[0], manifestPath);
+  console.log(`Verified ${name} against ${manifest}.`);
+}
+
 async function verifyPlatform(platform, channel, version, directory) {
   const { manifest, updateFiles, binaries, checksums, checksumFiles } = artifactLayout(platform, channel, version);
   const sizes = new Map(binaries.map((name) => [name, fileSize(join(directory, name))]));
@@ -79,11 +111,7 @@ async function verifyPlatform(platform, channel, version, directory) {
   if (lines.length !== checksumFiles.length) throw new Error(`${checksumsPath} contains unexpected entries.`);
 
   const manifestPath = join(directory, manifest);
-  const source = await readFile(manifestPath, "utf8");
-  const metadata = parseYaml(source, { filename: manifestPath });
-  if (metadata?.version !== version || !Array.isArray(metadata.files)) {
-    throw new Error(`${manifestPath} must describe version ${version} and list its files.`);
-  }
+  const metadata = await readUpdateManifest(manifestPath, version);
   const seen = new Set();
   for (const entry of metadata.files) {
     const name = entry?.url;
@@ -91,13 +119,7 @@ async function verifyPlatform(platform, channel, version, directory) {
       throw new Error(`${manifestPath} lists an unexpected or duplicate file ${JSON.stringify(name)}.`);
     }
     seen.add(name);
-    const path = join(directory, name);
-    if (sizes.get(name) !== entry.size) {
-      throw new Error(`${path} has ${sizes.get(name)} bytes, expected ${entry.size} from ${manifest}.`);
-    }
-    if (await hashFile(path, "sha512", "base64") !== entry.sha512) {
-      throw new Error(`${path} SHA-512 mismatch against ${manifest}.`);
-    }
+    await verifyUpdateEntry(join(directory, name), sizes.get(name), entry, manifestPath);
   }
   for (const name of updateFiles) {
     if (!seen.has(name)) throw new Error(`${manifestPath} is missing the update entry for ${name}.`);
@@ -133,8 +155,10 @@ try {
     await recordChecksums(args[0], channel, version, args[1]);
   } else if (command === "prepare" && args.length === 2) {
     await prepareRelease(channel, version, args[0], args[1]);
+  } else if (command === "verify-apt" && channel === "stable" && args.length === 1) {
+    await verifyAptPackage(version, args[0]);
   } else {
-    throw new Error("Usage: record <channel> <version> <platform> <build-dir> or prepare <channel> <version> <downloads-dir> <release-dir>.");
+    throw new Error("Usage: record <channel> <version> <platform> <build-dir>, prepare <channel> <version> <downloads-dir> <release-dir>, or verify-apt stable <version> <download-dir>.");
   }
 } catch (error) {
   console.error(`::error::${error.message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")}`);
