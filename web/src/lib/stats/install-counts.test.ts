@@ -84,10 +84,17 @@ test("install and flush store only aggregate counts, including requests from leg
   });
 
   const payload = { slug, version: "0.8.0", platform: "linux" };
-  for (const body of [payload, { ...payload, installId: { ignored: "legacy-id" } }]) {
-    const response = await install(new Request("https://example.test/api/install", {
-      method: "POST", headers: { "x-real-ip": "192.0.2.1" }, body: JSON.stringify(body),
-    }));
+  const request = (body: string) => new Request("https://example.test/api/install", {
+    method: "POST", headers: { "x-real-ip": "192.0.2.1" }, body,
+  });
+  const validBodies = [
+    payload,
+    ...["legacy-id", 42, false, null, ["legacy-id"], { ignored: "legacy-id" }].map((installId) => ({
+      ...payload, installId,
+    })),
+  ];
+  for (const body of validBodies) {
+    const response = await install(request(JSON.stringify(body)));
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { counted: true });
   }
@@ -96,25 +103,49 @@ test("install and flush store only aggregate counts, including requests from leg
     ["incr", dailyKey("2027-01-03")],
     ["expire", dailyKey("2027-01-03"), 8 * 24 * 60 * 60],
   ];
-  assert.deepEqual(transactions, [increment, increment]);
-  assert.equal(rateCommands.length, 3);
+  assert.deepEqual(transactions, validBodies.map(() => increment));
+  assert.equal(rateCommands.length, validBodies.length + 1);
   assert.deepEqual(rateCommands[1]?.slice(2), [60]);
+
+  for (const [body, message] of [
+    ["{", "Body must be valid JSON."],
+    ["[]", "Body must be a JSON object."],
+    [JSON.stringify({ ...payload, slug: "INVALID" }), "`slug` must be a kebab-case string (max 64 chars)."],
+    [JSON.stringify({ ...payload, version: "invalid" }), "`version` must be a semver string (max 32 chars)."],
+    [JSON.stringify({ ...payload, platform: "invalid" }), "`platform` must be 'darwin', 'win32', or 'linux'."],
+  ] as const) {
+    const invalid = await install(request(body));
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { error: message });
+  }
+  assert.equal(rateCommands.length, validBodies.length + 1);
+
+  const unknown = await install(request(JSON.stringify({ ...payload, slug: "unknown-agent" })));
+  assert.equal(unknown.status, 404);
+  assert.deepEqual(await unknown.json(), { error: "Unknown agent: unknown-agent" });
+  const rateKey = String(rateCommands[0]?.[1]);
+  counters.set(rateKey, 30);
+  const limited = await install(request(JSON.stringify(payload)));
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "60");
+  assert.deepEqual(await limited.json(), { error: "Rate limited. Slow down." });
+  assert.equal(transactions.length, validBodies.length);
 
   const cronRequest = () => new Request("https://example.test/api/flush", { headers: { authorization: "Bearer cron-test" } });
   const first = await flush(cronRequest());
   assert.equal(first.status, 200);
   assert.equal(commits, 1);
-  assert.deepEqual(githubFile.agents[slug], { installs: 12, installs7d: 5 });
+  assert.deepEqual(githubFile.agents[slug], { installs: 10 + validBodies.length, installs7d: 3 + validBodies.length });
   assert.deepEqual(readKeys[0], [pendingKey, ...[
     "2027-01-03", "2027-01-02", "2027-01-01", "2026-12-31", "2026-12-30", "2026-12-29", "2026-12-28",
   ].map(dailyKey)]);
-  assert.deepEqual(transactions[2], [["decrby", pendingKey, 2]]);
+  assert.deepEqual(transactions[validBodies.length], [["decrby", pendingKey, validBodies.length]]);
 
   t.mock.timers.setTime(new Date("2027-01-04T00:00:00Z").getTime());
   const expired = await flush(cronRequest());
   assert.equal(expired.status, 200);
   assert.equal(commits, 2);
-  assert.deepEqual(githubFile.agents[slug], { installs: 12, installs7d: 2 });
+  assert.deepEqual(githubFile.agents[slug], { installs: 10 + validBodies.length, installs7d: validBodies.length });
 
   const unchanged = await flush(cronRequest());
   assert.equal((await unchanged.json()).flushed, false);

@@ -180,10 +180,10 @@ export default function PrivacyPage() {
                 packaged builds, the app sends an aggregate install count when
                 you install a public registry agent, unless you turn it off in
                 Settings &gt; Privacy. The event contains only the agent slug,
-                app version, and operating-system platform. The app records
-                locally which agents it has reported this UTC year. The server
-                stores aggregate counts and briefly uses your IP address for rate
-                limiting. It ignores install identifiers from older builds.
+                app version, and operating-system platform. The app records one
+                attempt per agent each UTC year on this device, even if the request
+                fails. The server stores aggregate counts and briefly uses your IP
+                address for rate limiting.
               </li>
               <li>
                 <span className="text-brand-ink">Support issue reports.</span> If

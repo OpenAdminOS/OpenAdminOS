@@ -36,6 +36,7 @@ export async function POST(req: Request) {
   }
 
   try {
+    // Version and platform are validated for client compatibility and are never stored.
     const payload = parseInstallPayload(body);
     const ip = clientIp(req);
 
