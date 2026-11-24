@@ -42,7 +42,7 @@ export default function Cache() {
 }
 
 export function DataSettingsSection() {
-  const { state } = useAppState();
+  const { state, loading } = useAppState();
   const { requireTenant } = useSetupFlow();
   const location = useLocation();
   const navigate = useNavigate();
@@ -146,14 +146,27 @@ export function DataSettingsSection() {
     [status],
   );
   const requestedResource = new URLSearchParams(location.search).get("resource");
-  const browserResource = status?.tenantId === tenantId
-    ? status?.resources.find((resource) => resource.resource === requestedResource && !resource.notGrantedService)
+  const previousTenant = useRef<{ id: string | undefined } | undefined>(undefined);
+  const tenantChanged = previousTenant.current !== undefined && previousTenant.current.id !== tenantId;
+  const browserResource = !tenantChanged && status?.tenantId === tenantId
+    ? status?.resources.find((resource) => resource.resource === requestedResource)
     : undefined;
-  const closeBrowser = () => {
+  const closeBrowser = useCallback(() => {
     const params = new URLSearchParams(location.search);
     params.delete("resource");
     navigate({ search: params.toString(), hash: location.hash }, { replace: true });
-  };
+  }, [location.search, location.hash, navigate]);
+  useEffect(() => {
+    if (loading) return;
+    if (tenantChanged) {
+      setClearTarget(null);
+      if (requestedResource) {
+        closeBrowser();
+        return;
+      }
+    }
+    previousTenant.current = { id: tenantId };
+  }, [loading, tenantId, tenantChanged, requestedResource, closeBrowser]);
   const job = status?.preload;
   const running = busy || job?.status === "running";
 
@@ -267,11 +280,9 @@ export function DataSettingsSection() {
               />
               {resource.label}
             </label>
-            {!resource.notGrantedService ? (
-              <Link className="ml-5 text-sm text-[var(--color-accent)] underline" to={`?resource=${resource.resource}`} aria-label={`Browse ${resource.label}`}>
-                Browse
-              </Link>
-            ) : null}
+            <Link className="ml-5 text-sm text-[var(--color-accent)] underline" to={`?resource=${resource.resource}`} aria-label={`Browse ${resource.label}`}>
+              Browse
+            </Link>
           </div>
         ),
       },
@@ -622,15 +633,25 @@ export function DataSettingsSection() {
         </div>
       ) : null}
 
-      {activeTenant && browserResource ? (
-        <CacheBrowser key={`${activeTenant.id}:${browserResource.resource}`} tenantId={activeTenant.id} resource={browserResource} onClose={closeBrowser} />
-      ) : requestedResource && !activeTenant ? (
+      {!loading && activeTenant && browserResource ? (
+        <CacheBrowser key={`${activeTenant.id}:${browserResource.resource}`} tenantId={activeTenant.id}
+          tenantName={activeTenant.displayName} resource={browserResource} onClose={closeBrowser}
+          onConnections={() => navigate("/connections")} onClear={() => { closeBrowser(); setClearTarget("graph"); }}
+          formatDateTime={formatDateTime} />
+      ) : !loading && !tenantChanged && requestedResource && !activeTenant ? (
         <Modal open onClose={closeBrowser}>
           <ModalHeader title="No organization is active" subtitle="Select a connected organization to browse cached data." onClose={closeBrowser} />
+          <div className="p-5"><Button onClick={() => navigate("/connections")}>Open connections</Button></div>
         </Modal>
-      ) : requestedResource && status?.tenantId === tenantId && status ? (
+      ) : requestedResource && !tenantChanged && error && !status ? (
         <Modal open onClose={closeBrowser}>
-          <ModalHeader title="Cache resource unavailable" subtitle="Close this view and choose an available resource from Data." onClose={closeBrowser} />
+          <ModalHeader title="Cache status could not be read" subtitle="Retry loading the cached resources for this organization." onClose={closeBrowser} />
+          <div className="p-5"><Button onClick={() => void runAction(() => Promise.resolve())}>Retry</Button></div>
+        </Modal>
+      ) : !tenantChanged && requestedResource && status?.tenantId === tenantId && status ? (
+        <Modal open onClose={closeBrowser}>
+          <ModalHeader title="Cache resource unavailable" subtitle="Choose an available resource from Data." onClose={closeBrowser} />
+          <div className="p-5"><Button onClick={closeBrowser}>Return to Data</Button></div>
         </Modal>
       ) : null}
       <ClearLocalDataModal

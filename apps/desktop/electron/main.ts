@@ -174,7 +174,7 @@ import {
   listRegisteredConnectors,
   probeMxcSandbox,
 } from "@openadminos/runtime";
-import { validateCachePage } from "./intune-chat/cache-page.js";
+import { validateCacheDetail, validateCachePage } from "./intune-chat/cache-page.js";
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
 import { DRIFT_TRACKED_RESOURCES } from "./intune-chat/drift/tracked-resources.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
@@ -6285,6 +6285,10 @@ function registerIpcHandlers() {
     handleTrusted((_event, options?: unknown) =>
       store.refreshGraphCache(validateRefreshGraphCacheOptions(options)),
     ),
+  );
+  ipcMain.handle(
+    "openadminos:read-graph-cache-row",
+    handleTrusted((_event, input: unknown) => store.readGraphCacheRow(validateCacheDetail(input))),
   );
   ipcMain.handle(
     "openadminos:browse-graph-cache",

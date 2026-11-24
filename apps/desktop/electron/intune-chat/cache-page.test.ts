@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppStateStore } from "../state.js";
 import { it } from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { validateCachePage } from "./cache-page.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
@@ -31,7 +32,22 @@ it("validates and pages local cache rows in stable order within one tenant", asy
     assert.equal(first.total, 201);
     assert.equal(first.rows.length, 200);
     assert.deepEqual([...first.rows, ...second.rows].map(({ id }) => id), rows.map(({ id }) => id));
-    assert.deepEqual(store.browseGraphCache(validateCachePage({ ...request, search: "UNIQUE@" })).rows.map(({ id }) => id), ["200"]);
+    const filtered = store.browseGraphCache(validateCachePage({ ...request, search: "UNIQUE@" }));
+    assert.equal(filtered.total, 1);
+    assert.deepEqual(filtered.rows.map(({ id }) => id), ["200"]);
+    assert.deepEqual(store.browseGraphCache({ ...request, offset: 9999 }), second);
+    for (const search of ["%", "' OR 1=1 --"]) {
+      assert.equal(store.browseGraphCache({ ...request, search }).total, 0);
+    }
+    const detail = { tenantId: base.tenantId, resource: base.resource, id: "200" };
+    assert.equal(store.readGraphCacheRow(detail).status, "ready");
+    assert.equal(store.readGraphCacheRow({ ...detail, tenantId: "tenant-2" }).status, "missing");
+    const db = new DatabaseSync(join(dir, "cache.db"));
+    db.prepare("UPDATE graph_resources SET raw_json = ? WHERE tenant_id = ? AND graph_id = ?").run("{", base.tenantId, detail.id);
+    db.close();
+    assert.deepEqual(store.browseGraphCache({ ...request, offset: 200 }), second);
+    assert.equal(store.readGraphCacheRow(detail).status, "unreadable");
+    assert.throws(() => validateCachePage({ ...request, limit: 0 }), /Invalid cache page range/);
     assert.throws(() => validateCachePage({ ...request, resource: "unknown" }), /Unknown cache resource/);
     assert.throws(() => validateCachePage({ ...request, offset: -1 }), /Invalid cache page range/);
   } finally {
@@ -64,6 +80,11 @@ it("rejects cache browsing for another connected organization", async () => {
         store.browseGraphCache({ ...request, tenantId: "tenant-2" }),
         /Select the connected organization/,
       );
+      store["tenantLifecycle"].close("tenant-1");
+      await assert.rejects(store.browseGraphCache({ ...request, tenantId: "tenant-1" }), /organization is disconnecting/);
+      await assert.rejects(store.readGraphCacheRow({ tenantId: "tenant-1", resource: "users", id: "a" }), /organization is disconnecting/);
+      await store.setActiveOrganization(null);
+      await assert.rejects(store.browseGraphCache({ ...request, tenantId: "tenant-1" }), /Select the connected organization/);
     } finally {
       store.close();
     }

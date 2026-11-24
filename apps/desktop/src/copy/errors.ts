@@ -43,3 +43,18 @@ export function bridgeErrorCopy(): AppErrorCopy {
     action: { label: "Reload", kind: "retry" },
   };
 }
+
+export function cacheBrowserErrorCopy(error: unknown): AppErrorCopy {
+  const reason = userFacingErrorReason(error instanceof Error ? error.message : undefined);
+  const connections = { label: "Open connections", kind: "navigate" } as const;
+  if (reason?.includes("Select the connected organization")) {
+    return { what: "Select or connect an organization to browse its cache.", action: connections };
+  }
+  if (reason?.includes("organization is disconnecting or is not ready")) {
+    return { what: "The organization is disconnecting or is not ready. Select a connected organization.", action: connections };
+  }
+  if (reason?.includes("Unknown cache resource")) {
+    return { what: "This cache resource is unavailable. Return to Data to choose another resource.", action: { label: "Return to Data", kind: "navigate" } };
+  }
+  return { what: "Local storage could not return the cached rows. Try reading them again.", action: { label: "Retry", kind: "retry" } };
+}

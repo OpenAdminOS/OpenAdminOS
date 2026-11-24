@@ -2417,8 +2417,10 @@ export class IntelligenceSqliteStore {
   ): import("@openadminos/agent-sdk").GraphCachePage {
     const search = input.search?.trim().toLowerCase() ?? "";
     const limit = Math.max(1, Math.min(200, input.limit));
-    const filter = "tenant_id = ? AND resource = ? AND instr(COALESCE(NULLIF(search_text, ''), lower(raw_json)), ?) > 0";
-    const args = [input.tenantId, input.resource, search];
+    const filter = search
+      ? "tenant_id = ? AND resource = ? AND instr(COALESCE(NULLIF(search_text, ''), lower(raw_json)), ?) > 0"
+      : "tenant_id = ? AND resource = ?";
+    const args = search ? [input.tenantId, input.resource, search] : [input.tenantId, input.resource];
     const { total } = this.db.prepare(
       `SELECT COUNT(*) AS total FROM graph_resources WHERE ${filter}`,
     ).get(...args) as { total: number };
@@ -2426,7 +2428,7 @@ export class IntelligenceSqliteStore {
       ? input.offset
       : Math.max(0, Math.floor((total - 1) / limit) * limit);
     const rows = this.db.prepare(
-      `SELECT graph_id, display_name, user_principal_name, raw_json
+      `SELECT graph_id, display_name, user_principal_name
        FROM graph_resources WHERE ${filter}
        ORDER BY lower(COALESCE(display_name, graph_id)), graph_id
        LIMIT ? OFFSET ?`,
@@ -2434,7 +2436,6 @@ export class IntelligenceSqliteStore {
       graph_id: string;
       display_name: string | null;
       user_principal_name: string | null;
-      raw_json: string;
     }>;
     return {
       offset,
@@ -2443,9 +2444,26 @@ export class IntelligenceSqliteStore {
         id: row.graph_id,
         name: row.display_name,
         user: row.user_principal_name,
-        data: JSON.parse(row.raw_json) as unknown,
       })),
     };
+  }
+
+  readGraphCacheRow(
+    input: import("@openadminos/agent-sdk").GraphCacheDetailRequest,
+  ): import("@openadminos/agent-sdk").GraphCacheDetail {
+    const row = this.db.prepare(
+      "SELECT raw_json FROM graph_resources WHERE tenant_id = ? AND resource = ? AND graph_id = ?",
+    ).get(input.tenantId, input.resource, input.id) as { raw_json: string } | undefined;
+    if (!row) return { status: "missing" };
+
+    try {
+      const data: unknown = JSON.parse(row.raw_json);
+      const maxLength = 64 * 1024;
+      const json = row.raw_json.length > maxLength ? row.raw_json : JSON.stringify(data, null, 2);
+      return { status: "ready", json: json.slice(0, maxLength), truncated: json.length > maxLength };
+    } catch {
+      return { status: "unreadable" };
+    }
   }
 
   queryGraphCache(input: {

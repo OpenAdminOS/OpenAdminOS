@@ -2377,8 +2377,7 @@ function IntuneChatContent() {
                     message.agentSuggestions,
                   );
                   const messageConversation =
-                    conversations.find((entry) => entry.id === message.conversationId) ??
-                    activeConversation;
+                    conversations.find((entry) => entry.id === message.conversationId);
                   const messageTenant = messageConversation?.tenantId
                     ? tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
@@ -2404,7 +2403,7 @@ function IntuneChatContent() {
                         copied={message.id === copiedMessageId}
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
-                        canBrowseCache={Boolean(activeTenant && messageTenant?.id === activeTenant.id)}
+                        canBrowseCache={Boolean(activeTenant && messageConversation?.tenantId === activeTenant.id)}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
                         liveModelFit={modelFitOfferShown && modelFitOffer?.assistantMessageId === message.id}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
@@ -4674,7 +4673,7 @@ function ChatMessageBubble({
   const timestamp = formatDateTime(message.createdAt);
   const cacheSources = new Map(
     (message.sources ?? [])
-      .filter((source) => !source.error && (source.refreshedAt || (source.source === "cache" && source.rows > 0)))
+      .filter((source) => !source.error && source.source === "cache" && source.rows > 0)
       .map((source) => [source.resource, source]),
   );
 

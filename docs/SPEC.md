@@ -832,8 +832,12 @@ listening barge-in session.
 
 Data lives in **Settings > Data**, with all 45 supported read-resource types
 selected by default. Browse opens a read-only view of the active organization's
-local rows with search, pagination, refresh time, partial coverage and full row
-JSON. Chat links to the same view for resources used in an answer.
+local rows with search, pagination, refresh time, and partial coverage. List pages
+return identifying fields. Selecting a row loads its JSON on demand, capped at
+65,536 characters for display. Rows stay browsable after service access is
+removed, with a link to clear the local cache. Switching organizations closes
+the browser. Chat links to the view for non-empty cached sources in an answer
+from the active organization.
 Search and attention filters do not change the selected
 refresh scope. Manual preloads expose progress, cancellation and incomplete-result
 retry. Scheduled refresh uses the same complete collection path. It follows all

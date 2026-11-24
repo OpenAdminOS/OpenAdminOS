@@ -2751,3 +2751,27 @@ it("exports 10,000 cached rows beyond the general text-file size limit", async (
   expect(exported.content.trimEnd().split("\n")).toHaveLength(10_001);
   expect(exported.content).toContain("app-9999,");
 });
+
+it.each([
+  ["cache", 3, true],
+  ["live", 3, false],
+  ["cache", 0, false],
+] as const)("offers the cached-data link for source %s with %s rows when eligible", async (source, rows, visible) => {
+  const conversation: IntuneChatConversation = {
+    id: "cache-footer", title: "Device inventory", tenantId: "tenant-1",
+    createdAt: "2026-11-24T09:00:00.000Z", updatedAt: "2026-11-24T09:00:00.000Z",
+  };
+  const bridge = makeMockBridge({
+    listIntuneChatConversations: vi.fn(async () => [conversation]),
+    getIntuneChatMessages: vi.fn(async (): Promise<IntuneChatMessage[]> => [{
+      id: "cache-answer", role: "assistant", conversationId: conversation.id, status: "completed",
+      createdAt: conversation.createdAt, content: "Device inventory is ready.",
+      sources: [{ resource: "managedDevices", label: "Managed devices", source, rows, refreshedAt: conversation.updatedAt }],
+    }]),
+  });
+  renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/cache-footer", bridge });
+  await screen.findByText("Device inventory is ready.");
+  const link = screen.queryByRole("link", { name: /View cached data/ });
+  if (visible) expect(link).toHaveAttribute("href", "/settings/data?resource=managedDevices");
+  else expect(link).not.toBeInTheDocument();
+});

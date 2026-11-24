@@ -4974,14 +4974,27 @@ export class AppStateStore {
 
   async browseGraphCache(input: import("@openadminos/agent-sdk").GraphCachePageRequest) {
     return this.serialize(async () => {
-      const persisted = await this.read();
-      if (persisted.activeTenantId !== input.tenantId ||
-          !persisted.tenants.some((tenant) => tenant.id === input.tenantId) ||
-          !this.tenantLifecycle.isWritable(input.tenantId)) {
-        throw new Error("Select the connected organization before browsing its cache.");
-      }
+      await this.assertCacheBrowserTenant(input.tenantId);
       return this.requireIntelligenceStore().browseGraphCache(input);
     });
+  }
+
+  async readGraphCacheRow(input: import("@openadminos/agent-sdk").GraphCacheDetailRequest) {
+    return this.serialize(async () => {
+      await this.assertCacheBrowserTenant(input.tenantId);
+      return this.requireIntelligenceStore().readGraphCacheRow(input);
+    });
+  }
+
+  private async assertCacheBrowserTenant(tenantId: string) {
+    const persisted = await this.read();
+    if (persisted.activeTenantId !== tenantId || !persisted.tenants.some((tenant) => tenant.id === tenantId)) {
+      throw new Error("Select the connected organization before browsing its cache.");
+    }
+    if (!this.tenantLifecycle.isWritable(tenantId)) {
+      throw new Error("The organization is disconnecting or is not ready.");
+    }
+    // TODO(ugur): confirm cached rows stay browsable after a service disconnect
   }
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
