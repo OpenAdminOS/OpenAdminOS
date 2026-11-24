@@ -14,25 +14,30 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
-## [0.8.0] - 2026-11-23
+## [0.8.0] - 2026-11-24
 
 ### Highlights
 
 - Manage each company as an organization. Use Connections to connect Intune, Entra, and Defender individually and see what each connection reads or sends.
 - Open Chat without signing in to Microsoft 365. Choose a model, ask documentation questions, and connect a service when a question needs tenant data.
-- Deploy `policy.json` to set the provider and model, allow specific public references, and lock settings for managed installs.
-- Chat and agent runs handle local model limits more clearly. When a request outgrows the selected model, model fit offers recovery options, including a larger local model, or sending that one Chat request to a hosted provider you pick after the app names where the data goes.
+- Deploy `policy.json` to set the provider and model, allow specific public references, and lock settings for managed installs. Allowing `ollama` includes Ollama Cloud with hosted confirmation. To keep Ollama local, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on this device.
+- When a request outgrows the selected model, model fit checks the context window before offering a larger local model. Chat can also send that one request to a hosted provider you choose after naming where the data goes. Chat withdraws model fit offers when they expire.
+- On a signed-in Ollama, OpenAdminOS labels Ollama Cloud models as hosted wherever they appear. Each Chat send to one requires hosted confirmation, which Chat can remember for later sends.
 - Use Lemonade Server locally or GitHub Copilot Fusion through the Copilot provider. Marketplace adds references such as Microsoft Learn, KQL Search, and Splashtop Docs.
 
-**Changed.** Runs open on a full page with live progress and data destinations. Chat shows the sources it used, and agent write plans are checked again before changes are applied.
+**Changed.** Runs open on a full page with live progress and data destinations. Chat shows the sources it used, and agent write plans are checked again before changes are applied. Schedules save the model destination and pause for review if it changes.
 
 **Removed.** Pilot mode and its sample data, which were only in 0.7.3 nightlies.
 
 **Fixed.** Local model context and timeout errors give specific recovery steps, and gpt-oss run reports show the answer instead of the model's reasoning. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs.
 
+Chat answers show cache refresh times and device last-sync dates in local time. Reset stops an in-progress index model download. A model Ollama already downloaded stays in Ollama. To remove it, run `ollama rm nomic-embed-text`.
+
 ### Upgrading from 0.7.2
 
 If you ran a nightly with pilot mode, the first launch after updating removes the pilot sample tenant and its data once. Existing schedules move to the active tenant's organization or stay paused and unassigned. Existing gateway clients need to pair again. On Windows, uninstalling now removes the user's local data folder, including a user-level `policy.json`.
+
+On first launch, existing schedules that use a hosted model and have no saved destination pause until you review them. If you previously let Chat remember consent for hosted Ollama, Chat asks again on your first send to that destination. For local Ollama, OpenAdminOS asks Ollama to confirm the model runs on this device before each send and stops if it cannot confirm.
 
 With a model running on this device, prompts sent to that model stay on this device. Connections shows which services and public references receive data.
 
