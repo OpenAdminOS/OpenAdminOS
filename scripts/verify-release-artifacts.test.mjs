@@ -12,7 +12,7 @@ const script = fileURLToPath(new URL("./verify-release-artifacts.mjs", import.me
 const hasDpkg = spawnSync("dpkg-deb", ["--version"]).status === 0;
 const digest = (bytes) => createHash("sha512").update(bytes).digest("base64");
 
-function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false, validDeb = false, truncateDeb = false } = {}) {
+function fixture(t, { channel = "nightly", linuxManifestOmitsPackages = false, validDeb = false, truncateDeb = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "release-artifacts-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const stage = join(root, "staged");
@@ -36,7 +36,7 @@ function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false
     "linux-x64": {
       manifest: `${updateChannel}-linux.yml`,
       assets: [appImage, deb, rpm],
-      entries: linuxManifestIncludesPackages ? [appImage, deb, rpm] : [appImage],
+      entries: linuxManifestOmitsPackages ? [appImage] : [appImage, deb, rpm],
     },
   };
   const expected = [];
@@ -84,9 +84,7 @@ function fixture(t, { channel = "nightly", linuxManifestIncludesPackages = false
 
 for (const channel of ["stable", "nightly"]) {
   test(`stages exactly the verified ${channel} assets`, { skip: !hasDpkg && "requires dpkg-deb" }, (t) => {
-    const { expected, files, prepare, stage, exe } = fixture(t, {
-      channel, validDeb: true, linuxManifestIncludesPackages: channel === "stable",
-    });
+    const { expected, files, prepare, stage, exe } = fixture(t, { channel, validDeb: true });
     writeFileSync(`${files[exe]}.blockmap`, "Unpublished blockmap");
     const result = prepare();
     assert.equal(result.status, 0, result.stderr);
@@ -95,13 +93,13 @@ for (const channel of ["stable", "nightly"]) {
 }
 
 test("blocks a truncated .deb even when the updater manifest omits it", (t) => {
-  const { deb, files, expectFailure } = fixture(t);
+  const { deb, files, expectFailure } = fixture(t, { linuxManifestOmitsPackages: true });
   truncateSync(files[deb], 8);
   expectFailure(/::error::.*linux-amd64\.deb SHA-256 mismatch/);
 });
 
 test("manual apt backfill verifies the .deb against the stable Linux manifest", (t) => {
-  const { deb, files } = fixture(t, { channel: "stable", linuxManifestIncludesPackages: true });
+  const { deb, files } = fixture(t, { channel: "stable" });
   const directory = dirname(files[deb]);
   const verify = () => spawnSync(process.execPath, [script, "verify-apt", "stable", "0.8.0", directory], { encoding: "utf8" });
   const manifest = files["latest-linux.yml"];
@@ -166,7 +164,7 @@ test("checks the digest of the update manifest itself", (t) => {
 });
 
 test("requires the Linux manifest's top-level path to name the AppImage", (t) => {
-  const { deb, files, expectFailure, record } = fixture(t, { linuxManifestIncludesPackages: true });
+  const { deb, files, expectFailure, record } = fixture(t);
   const path = files["nightly-linux.yml"];
   const manifest = parseYaml(readFileSync(path, "utf8"));
   manifest.path = deb;
@@ -187,9 +185,7 @@ test("requires the manifest's top-level SHA-512 to match the selected file", (t)
 });
 
 test("rejects a truncated .deb with valid control metadata and matching checksums", { skip: !hasDpkg && "requires dpkg-deb" }, (t) => {
-  const { deb, files, expectFailure } = fixture(t, {
-    validDeb: true, truncateDeb: true, linuxManifestIncludesPackages: true,
-  });
+  const { deb, files, expectFailure } = fixture(t, { validDeb: true, truncateDeb: true });
   execFileSync("dpkg-deb", ["--info", files[deb]]);
   expectFailure(/::error::.*dpkg-deb --fsys-tarfile .*linux-amd64\.deb/);
 });
