@@ -913,8 +913,9 @@ using a higher detection threshold during playback. Escape, close, organization 
 provider changes, window hiding and navigation away release the microphone.
 Changing focus keeps the session active. The inactivity clock runs only while
 listening with the microphone unmuted. Settings > Nova offers 500, 800 and 1400 ms
-silence presets and one, two and five minute inactivity presets for the next conversation,
-switch to Hold to talk, and reveal per-turn timings. The global shortcut toggles
+silence presets and one, two and five minute inactivity presets. Settings also
+offers Hold to talk and per-turn timings. Changes apply to the next conversation.
+The global shortcut toggles
 recording in Hold to talk because Electron only reports key presses. The warm
 small-talk target is under two seconds from end of speech to first audio on M5.
 
@@ -1116,9 +1117,10 @@ automatically. While the answer is pending, Nova keeps the original speech and
 merges a confirmed continuation even after a long pause, trimming the intervening
 silence. At the one-minute boundary Nova sends the segment and asks the admin to
 wait for the answer before continuing. Show timings reveals and logs the three
-latencies, with the silence wait included in end of speech to transcript. Hold to talk submits when the button is released or the global
-shortcut is pressed again. Nova trims
-quiet edges before transcription and preserves pauses within the recording.
+latencies, including the silence wait in the end-of-speech-to-transcript measurement.
+Hold to talk submits when the button is released or the global shortcut is pressed
+again. Nova trims quiet edges before transcription and preserves pauses within
+the recording.
 On CPU-only builds, Small uses a padded, shorter encoder window for recordings
 up to 20 seconds. It keeps the full window for longer recordings.
 
