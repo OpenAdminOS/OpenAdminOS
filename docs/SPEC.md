@@ -1950,8 +1950,9 @@ No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged builds count public registry installs by
 default. An event contains only the agent slug, app version, and OS platform.
 Before sending, the desktop records the attempt for that slug and UTC year in
-local state. An interrupted request is counted at most once, and existing
-installs are not reported retroactively. Agent Hub uses bundled counts.
+local state. A failed or interrupted request still uses that year's attempt.
+This can undercount installs. Existing installs are not reported retroactively.
+Agent Hub uses bundled counts.
 
 The stats endpoint keeps aggregate pending counters and eight-day UTC daily
 counters. The cron sums the current day and six preceding UTC days. IP addresses
@@ -1959,18 +1960,30 @@ are used briefly for rate limiting. Legacy clients can still send an install ID,
 which the endpoint ignores. The desktop removes its former identifier and usage
 telemetry preference when upgrading.
 
-Deploy the updated install endpoint before distributing the updated desktop
-app. The stats cron preserves lifetime totals and applies existing pending
-deltas. The seven-day total starts from the new counters. The cron
-ignores old keys. Maintainers can manually delete the legacy
-`oa:dedup:<installId>:<slug>` and `oa:installs7d:<slug>` keys after deployment.
-Preserve support-report deduplication and pending install keys.
+Run the install-count migration in this order.
+
+1. Deploy the web app with the updated install endpoint and stats cron.
+2. POST a valid public agent slug, app version, and platform to `/api/install`
+   without `installId`. Confirm an HTTP 200 response with `{"counted":true}`.
+3. With the web dependencies installed and `UPSTASH_REDIS_REST_URL` and
+   `UPSTASH_REDIS_REST_TOKEN` set for the deployed database, run
+   `node scripts/delete-legacy-install-keys.mjs` and review the count. Then run
+   `node scripts/delete-legacy-install-keys.mjs --apply` to remove the legacy
+   `oa:dedup:<id>:<slug>` and `oa:installs7d:<slug>` keys. The script preserves
+   support deduplication, rate limits, pending install keys and per-day counts.
+4. Release the updated desktop app.
+
+The stats cron preserves lifetime totals and applies existing pending deltas.
+The seven-day total starts from the new daily counters.
 
 Settings > Privacy offers Automatic network requests, on by default. Turning it
-off stops app update checks, startup, focus and periodic registry refreshes,
-automatic documentation index and embedding model downloads, and install-count
-pings. Manual registry refresh and documentation index installation remain
-available. The separate registry install counts and documentation auto-install
+off stops background app update checks, startup, focus and periodic registry
+refreshes, automatic documentation index and embedding model downloads, and
+install-count pings. In-flight automatic registry refreshes and documentation
+downloads are cancelled. Manual app update checks, registry refreshes and
+documentation index installations remain available. Schedules, tenant cache
+refreshes, connector deliveries and model checks you set up still run.
+The separate registry install counts and documentation auto-install
 preferences also default to on and are retained when automatic requests are
 paused. In `policy.json`, `automaticNetworkRequests` and `registryInstallCounts`
 take `"on"` or `"off"`. A locked value overrides the user's saved preference.
