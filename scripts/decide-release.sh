@@ -16,10 +16,27 @@ if ! git show-ref --verify --quiet "$ref"; then
   remote_tag="$(git ls-remote --refs --tags origin "$ref")"
   if [ -z "$remote_tag" ]; then
     if [ "${STABLE_RELEASE_APPROVED:-}" = "$version" ]; then
-      echo "channel=stable" >> "$GITHUB_OUTPUT"
+      printf '%s\n' channel=stable create_tag=true >> "$GITHUB_OUTPUT"
       exit 0
     fi
     echo "::notice::Stable $version is waiting for approval: set the STABLE_RELEASE_APPROVED repository variable to $version"
+  else
+    # Load a tag that arrived after checkout for both recovery and the nightly baseline.
+    git fetch origin "$ref:$ref"
+  fi
+fi
+
+if [ "${STABLE_RELEASE_APPROVED:-}" = "$version" ] &&
+   git show-ref --verify --quiet "$ref" &&
+   [ "$(git rev-parse "$ref^{commit}")" = "$(git rev-parse HEAD)" ]; then
+  # A draft may be left behind by an interrupted upload. Only a published
+  # release blocks recovery. Let API failures stop the decision.
+  published_release="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+    --jq ".[] | select(.tag_name == \"v$version\" and .draft == false) | .id")"
+  if [ -z "$published_release" ]; then
+    echo "::notice::Retrying the approved stable release for existing tag v$version."
+    printf '%s\n' channel=stable create_tag=false >> "$GITHUB_OUTPUT"
+    exit 0
   fi
 fi
 

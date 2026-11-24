@@ -14,6 +14,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
+
 ### Security
 
 ## [0.8.0] - 2026-11-24

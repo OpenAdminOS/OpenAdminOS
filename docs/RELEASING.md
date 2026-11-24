@@ -8,7 +8,7 @@ The release surface publishes Windows, macOS, and Linux binaries:
 - **Linux → GitHub Releases + apt** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums; the `.deb` is also published into a signed GitHub Pages-backed apt repository).
 - **Windows → GitHub Releases + electron-updater** (x64 NSIS `.exe` installer, code signed through Azure Trusted Signing; `latest.yml` is published for electron-updater). AppX packaging validation is still available as an opt-in manual job for the deferred Microsoft Store path, and that AppX is never published.
 
-A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
+Auto-tag creates an approved stable tag and dispatches Release to build Windows, macOS, and Linux, publish the release files, and refresh the apt repository from the released `.deb`.
 
 Before publishing either channel, the release job downloads each platform artifact by name and verifies the expected installers and manifests. It checks updater asset sizes and SHA-512 hashes against the update manifests, and checks build-time SHA-256 hashes for the manifests, Linux packages, and stable macOS PKG. The release job also reads the Linux `.deb` data archive with `dpkg-deb --fsys-tarfile`. A failed check names the file and stops publishing. The stable apt job compares its separately downloaded `.deb` with the verified release checksum before building the repository.
 
@@ -161,7 +161,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 
 ### Linux — apt repository
 
-The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
+The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the published stable release's `.deb`. No package repository vendor, storage bucket, or checked-in package index is required.
 The repository builder validates the `.deb` architecture from package control metadata, not from the release asset filename; Electron Builder names assets like `OpenAdminOS-X.Y.Z-linux-amd64.deb`, which is not the Debian `*_amd64.deb` suffix format.
 
 One-time GitHub setup:
@@ -217,6 +217,12 @@ documentation can require merging the generated-doc follow-up before CI is green
    - The GitHub release receives the Windows `.exe` and `latest.yml`, macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
    - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
 
+### Recover a failed stable release
+
+- If **Resolve release channel** (`meta`) passed, use **Re-run failed jobs** on the original Release run. This also covers an apt deployment failure after the release was published.
+- If the tag exists and publication has yet to succeed, keep the exact version approved and run **Auto-tag release versions** manually on `main`. After verifying green CI, Auto-tag dispatches Release again if the tag points to the current `main` commit and there is no published release for it. A draft still qualifies for recovery.
+- If `main` has advanced and the failed jobs cannot be retried, ask the repository owner how to recover. Never delete or move a release tag without the owner's approval.
+
 ### One-time branch packaging test
 
 Use this when validating release workflow changes before they land on `main`.
@@ -264,7 +270,7 @@ release-prep PR. They are fully automatic.
 
 | | Stable | Nightly |
 |---|---|---|
-| Trigger | Green `main` with an approved, untagged package version | Green `main` with app changes when stable is not due |
+| Trigger | Green `main` with an approved package version that is untagged or tagged at that commit and unpublished | Green `main` with app changes when stable is not due |
 | Version | `0.8.0` | `0.8.0-nightly.20261124103910` (next stable version + UTC build time) |
 | GitHub release | Latest release, CHANGELOG notes | Prerelease, never latest, notes for that build only |
 | Update files | `latest.yml`, `latest-mac.yml`, `latest-linux.yml` | `nightly.yml`, `nightly-mac.yml`, `nightly-linux.yml` |
@@ -276,9 +282,9 @@ release-prep PR. They are fully automatic.
 
 How it runs:
 
-1. After CI succeeds on the current `main` commit, `auto-tag.yml` checks for
-   an approved, untagged stable version. If the version is already tagged or
-   waiting for approval, `scripts/nightly-app-changes.sh` diffs the commit
+1. After CI succeeds on the current `main` commit, `auto-tag.yml` checks whether
+   a newly approved or recoverable stable release is due. Otherwise,
+   `scripts/nightly-app-changes.sh` diffs the commit
    against the newest `v*` tag of either channel. If anything outside `stats/`, `web/`, `docs/`,
    `tasks/`, `model/`, `remotion/`, `.github/`, or root Markdown changed, it
    dispatches `release.yml` on `main` with `nightly_sha`. Comparing with the

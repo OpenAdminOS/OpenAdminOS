@@ -4,6 +4,8 @@ name: Auto-tag release versions
 #
 #   - Stable: the repository version has no tag and STABLE_RELEASE_APPROVED
 #     equals that version. It pushes the tag and dispatches release.yml against it.
+#     It also dispatches again for an approved tag on this commit if the release
+#     has yet to be published.
 #   - Nightly: stable is not due and an app path changed since the newest
 #     v* tag of either channel. It dispatches release.yml on main with
 #     nightly_sha set; release.yml computes the nightly version and creates the
@@ -79,11 +81,12 @@ jobs:
         id: decision
         if: ${{ steps.current.outputs.matches == 'true' }}
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STABLE_RELEASE_APPROVED: ${{ vars.STABLE_RELEASE_APPROVED }}
         run: bash scripts/decide-release.sh
 
       - name: Push tag
-        if: ${{ steps.decision.outputs.channel == 'stable' }}
+        if: ${{ steps.decision.outputs.create_tag == 'true' }}
         env:
           TAG: v${{ steps.decision.outputs.version }}
         run: |

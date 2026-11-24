@@ -86,7 +86,11 @@ test("approval selects stable while unapproved or tagged versions still evaluate
   assert.match(nightly.outputs.version, /^0\.8\.0-nightly\.2\d{13}$/);
   assert.equal(nightly.outputs.tag, `v${nightly.outputs.version}`);
   assert.equal(nightly.outputs.sha, sha);
-  assert.equal(decide("0.8.0").outputs.channel, "stable");
+  assert.deepEqual(decide("0.8.0").outputs, {
+    version: "0.8.0",
+    channel: "stable",
+    create_tag: "true",
+  });
 
   git("tag", nightly.outputs.tag);
   commit("README.md", "docs only");
@@ -99,6 +103,60 @@ test("approval selects stable while unapproved or tagged versions still evaluate
   assert.equal(decide("0.8.0").outputs.channel, "none");
   commit("apps/desktop/app.ts", "app change after stable");
   assert.equal(decide("0.8.0").outputs.channel, "nightly");
+});
+
+test("stable recovery requires approval, the current commit, and no published release", (t) => {
+  const { git, commit, run } = fixture(t);
+  commit("package.json", '{"version":"0.8.0"}');
+  git("tag", "-a", "v0.8.0", "-m", "OpenAdminOS v0.8.0");
+
+  const retry = (approval, lookupResult) => run(`
+    gh() {
+      if [ "$#" -ne 5 ] || [ "$1" != api ] || [ "$2" != --paginate ] ||
+         [ "$3" != 'repos/test/repo/releases?per_page=100' ] || [ "$4" != --jq ] ||
+         [ "$5" != '.[] | select(.tag_name == "v0.8.0" and .draft == false) | .id' ]; then
+        echo 'Unexpected release lookup' >&2
+        return 1
+      fi
+      if [ "$LOOKUP_RESULT" = error ]; then
+        echo 'Release lookup failed' >&2
+        return 1
+      fi
+      printf '%s' "$LOOKUP_RESULT"
+    }
+    export -f gh
+    ${decision}
+  `, {
+    GITHUB_REPOSITORY: "test/repo",
+    STABLE_RELEASE_APPROVED: approval,
+    LOOKUP_RESULT: lookupResult,
+  });
+
+  const unpublished = retry("0.8.0", "");
+  assert.equal(unpublished.status, 0, unpublished.stderr);
+  assert.deepEqual(unpublished.outputs, {
+    version: "0.8.0",
+    channel: "stable",
+    create_tag: "false",
+  });
+
+  const published = retry("0.8.0", "123");
+  assert.equal(published.status, 0, published.stderr);
+  assert.equal(published.outputs.channel, "none");
+
+  const unapproved = retry("0.7.2", "error");
+  assert.equal(unapproved.status, 0, unapproved.stderr);
+  assert.equal(unapproved.outputs.channel, "none");
+
+  const lookupFailed = retry("0.8.0", "error");
+  assert.equal(lookupFailed.status, 1);
+  assert.match(lookupFailed.stderr, /Release lookup failed/);
+  assert.equal(lookupFailed.outputs.channel, undefined);
+
+  commit("apps/desktop/app.ts", "app change since the tagged commit");
+  const otherCommit = retry("0.8.0", "error");
+  assert.equal(otherCommit.status, 0, otherCommit.stderr);
+  assert.equal(otherCommit.outputs.channel, "nightly");
 });
 
 test("release metadata blocks unapproved and manually dispatched stable tags", (t) => {
