@@ -282,6 +282,7 @@ test("nightly-app-changes ignores contributor tooling, npm scripts, and linguist
     commit("scripts/nightly-release-notes.mjs", "notes");
     commit("scripts/prepare-release.mjs", "prep");
     commit("scripts/check-release-compatibility.mjs", "check");
+    commit("scripts/verify-release-artifacts.mjs", "artifact checks");
     commit("package.json", manifest({ build: "npm run build -w app", test: "node --test", "docs:check": "x" }));
     const tooling = commit(".gitattributes", "agents/index.json text eol=lf\nweb/content/** linguist-generated=true\n");
     assert.equal(changes(tooling), "");
