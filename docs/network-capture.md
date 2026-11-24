@@ -74,6 +74,9 @@ env -u ELECTRON_RUN_AS_NODE LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
   --log-net-log="$capture/netlog.json" --net-log-capture-mode=Default
 ```
 
+If Chromium's sandbox cannot start on the isolated test machine, use
+`--no-sandbox` as in the desktop screenshot harness.
+
 Use the displayed CDP endpoint with Playwright's `chromium.connectOverCDP`,
 or drive the window manually. Leave model setup, choose **Not now** at
 Microsoft 365 setup, focus the Chat composer, and type a synthetic word.
@@ -93,7 +96,7 @@ start = log["constants"]["logEventTypes"]["URL_REQUEST_START_JOB"]
 requests = set()
 for event in log["events"]:
     if event["type"] == start:
-        url = urlsplit(event["params"]["url"])
+        url = urlsplit(event.get("params", {}).get("url", ""))
         if url.scheme in ("http", "https", "ws", "wss"):
             requests.add((url.netloc, url.path))
 for host, path in sorted(requests):
