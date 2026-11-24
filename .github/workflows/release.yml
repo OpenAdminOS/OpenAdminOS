@@ -485,7 +485,15 @@ jobs:
             Sort-Object Name |
             ForEach-Object { Write-Output "  $($_.FullName)" }
 
+      - name: Record Windows artifact checksums
+        if: ${{ env.RELEASE_CHANNEL != 'none' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/verify-release-artifacts.mjs record "$RELEASE_CHANNEL" "$VERSION" windows-x64 apps/desktop/release
+
       - name: Upload Windows artifacts
+        # Blockmaps are not published. The update manifest covers the installer.
         uses: actions/upload-artifact@v4
         with:
           name: windows-x64
@@ -493,6 +501,7 @@ jobs:
             apps/desktop/release/*.exe
             apps/desktop/release/latest.yml
             apps/desktop/release/nightly.yml
+            apps/desktop/release/windows-checksums.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -683,6 +692,12 @@ jobs:
             codesign --verify --strict --verbose=2 "$helper_app"
           fi
 
+      - name: Record macOS artifact checksums
+        if: ${{ env.RELEASE_CHANNEL != 'none' }}
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/verify-release-artifacts.mjs record "$RELEASE_CHANNEL" "$VERSION" macos-arm64 apps/desktop/release
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -693,6 +708,7 @@ jobs:
             apps/desktop/release/*.zip
             apps/desktop/release/latest-mac.yml
             apps/desktop/release/nightly-mac.yml
+            apps/desktop/release/macos-checksums.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -772,6 +788,13 @@ jobs:
           printf 'Built Linux artifacts:\n'
           printf '  %s\n' "${appimages[@]}" "${debs[@]}" "${rpms[@]}"
 
+      - name: Record Linux artifact checksums
+        if: ${{ needs.meta.outputs.channel != 'none' }}
+        env:
+          RELEASE_CHANNEL: ${{ needs.meta.outputs.channel }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/verify-release-artifacts.mjs record "$RELEASE_CHANNEL" "$VERSION" linux-x64 apps/desktop/release
+
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -782,6 +805,7 @@ jobs:
             apps/desktop/release/*.rpm
             apps/desktop/release/latest-linux.yml
             apps/desktop/release/nightly-linux.yml
+            apps/desktop/release/linux-checksums.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -789,6 +813,9 @@ jobs:
     name: Publish release
     needs: [meta, windows-x64, macos-arm64, linux-x64]
     runs-on: ubuntu-latest
+    outputs:
+      deb_name: ${{ steps.checksums.outputs.deb_name }}
+      deb_sha256: ${{ steps.checksums.outputs.deb_sha256 }}
     # !cancelled() plus explicit results, because the skipped release gate of
     # a nightly would otherwise skip this job through its build jobs.
     if: >-
@@ -805,46 +832,42 @@ jobs:
           # Nightly notes list the commits since the previous release tag.
           fetch-depth: 0
 
-      - name: Download artifacts
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install manifest parser from the lockfile
+        # The QA workspace already depends on js-yaml. The desktop build
+        # dependencies and install scripts are unnecessary on this runner.
+        run: npm ci --ignore-scripts --omit=dev --no-audit --no-fund --workspace @openadminos/qa-graph
+
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: windows-x64
+          path: artifacts/windows-x64
 
-      - name: List artifacts
-        run: ls -R artifacts
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: artifacts/macos-arm64
 
-      - name: Prepare release assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p release-assets
-          find artifacts -type f \( \
-            -name '*.exe' -o \
-            -name '*.dmg' -o \
-            -name '*.pkg' -o \
-            -name '*.zip' -o \
-            -name '*.AppImage' -o \
-            -name '*.deb' -o \
-            -name '*.rpm' -o \
-            -name 'latest.yml' -o \
-            -name 'latest-mac.yml' -o \
-            -name 'latest-linux.yml' -o \
-            -name 'nightly.yml' -o \
-            -name 'nightly-mac.yml' -o \
-            -name 'nightly-linux.yml' \
-          \) -print0 | while IFS= read -r -d '' file; do
-            cp "$file" "release-assets/$(basename "$file")"
-          done
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: artifacts/linux-x64
 
-          asset_count=$(find release-assets -type f | wc -l | tr -d ' ')
-          if [ "$asset_count" -eq 0 ]; then
-            echo "::error::No publishable release assets were downloaded." >&2
-            exit 1
-          fi
-
-          ls -la release-assets
+      - name: Verify and stage release assets
+        env:
+          RELEASE_CHANNEL: ${{ needs.meta.outputs.channel }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/verify-release-artifacts.mjs prepare "$RELEASE_CHANNEL" "$VERSION" artifacts release-assets
 
       - name: Generate SHA256 checksums
+        id: checksums
         shell: bash
         run: |
           set -euo pipefail
@@ -855,6 +878,9 @@ jobs:
               | xargs -0 sha256sum -- > SHA256SUMS.txt
           )
           cat release-assets/SHA256SUMS.txt
+          # The apt job downloads separately. It must receive these same bytes.
+          read -r deb_sha256 deb_name < <(grep '  .*\.deb$' release-assets/SHA256SUMS.txt)
+          printf 'deb_name=%s\ndeb_sha256=%s\n' "$deb_name" "$deb_sha256" >> "$GITHUB_OUTPUT"
 
       - name: Extract release notes from CHANGELOG
         if: ${{ needs.meta.outputs.channel == 'stable' }}
@@ -925,12 +951,6 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
-          for file in nightly.yml nightly-mac.yml; do
-            if [ ! -f "release-assets/$file" ]; then
-              echo "::error::$file is missing, so installed nightlies could not update to this build." >&2
-              exit 1
-            fi
-          done
           node scripts/nightly-release-notes.mjs "$TAG" "$SHA" release-assets > notes.md
           {
             printf '\n### SHA256 checksums\n\n```text\n'
@@ -985,6 +1005,18 @@ jobs:
         with:
           name: linux-x64
           path: linux-artifacts
+
+      - name: Verify the apt package matches the verified release package
+        shell: bash
+        env:
+          DEB_NAME: ${{ needs.publish-release.outputs.deb_name }}
+          DEB_SHA256: ${{ needs.publish-release.outputs.deb_sha256 }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s  linux-artifacts/%s\n' "$DEB_SHA256" "$DEB_NAME" | sha256sum --check --strict; then
+            echo "::error::linux-artifacts/$DEB_NAME is missing or does not match the verified release SHA-256." >&2
+            exit 1
+          fi
 
       - name: Install apt repository tools
         run: |
