@@ -5,7 +5,14 @@ import { useNavigate } from "react-router";
 import { SOPHOS_PREVIEW_NOTE, type SophosChangeKind, type SophosConnectionSummary, type SophosTarget } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { splashtopErrorText } from "./SplashtopConnection";
+import { Modal, ModalHeader } from "./Modal";
 import { Badge, Button } from "./ui";
+
+const connectionIssues = {
+  credentials: "The Sophos Central credential may have expired or been removed. Verify or create credentials in Sophos Central, then disconnect and reconnect here.",
+  forbidden: "Sophos Central refused access. Check the credential’s service principal role in Sophos Central, then test the connection again.",
+  "rate-limit": "Sophos Central is rate limiting requests. Wait a minute, then test the connection again.",
+};
 
 export function SophosConnection({ organizationId, connection, focus }: {
   organizationId: string;
@@ -15,6 +22,7 @@ export function SophosConnection({ organizationId, connection, focus }: {
   const { refresh } = useAppState();
   const api = window.openAdminOS;
   const navigate = useNavigate();
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [kind, setKind] = useState<SophosChangeKind>("isolate");
   const [search, setSearch] = useState("");
@@ -71,19 +79,48 @@ export function SophosConnection({ organizationId, connection, focus }: {
         <p className="text-sm text-[var(--color-text-muted)]">Requests go to your Sophos region. If you use a hosted model, Sophos Chat results go to that provider.</p>
         {connection ? (
           <>
-            <p className="break-words text-sm text-[var(--color-text-muted)]">Connected · {connection.region} · {connection.host}</p>
+            {connection.unreadable ? (
+              <p role="alert" className="text-sm text-[var(--color-danger)]">The Sophos Central connection record could not be read. Disconnect it, then reconnect with your tenant credentials.</p>
+            ) : (
+              <>
+                <p className="break-words text-sm text-[var(--color-text-muted)]">Connected · {connection.region} · {connection.host}</p>
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  Connected {new Date(connection.connectedAt).toLocaleString()} · Last checked {new Date(connection.lastCheckedAt).toLocaleString()}
+                </p>
+                {connection.issue && <p role="alert" className="text-sm text-[var(--color-danger)]">{connectionIssues[connection.issue]}</p>}
+              </>
+            )}
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(async () => {
+              {!connection.unreadable && <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(async () => {
                 if (!api?.testSophos) throw new Error("Open the desktop app to test Sophos Central.");
                 await api.testSophos(organizationId);
-              }, "Sophos Central connection verified.")}>Test connection</Button>
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(async () => {
-                if (!api?.disconnectSophos) throw new Error("Open the desktop app to disconnect Sophos Central.");
-                await api.disconnectSophos(organizationId);
-              }, "Sophos Central disconnected.")}>Disconnect</Button>
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => setPlanning(!planning)}>Plan a change</Button>
+              }, "Sophos Central connection verified.")}>Test connection</Button>}
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => {
+                setError("");
+                setDisconnectOpen(true);
+              }}>Disconnect</Button>
+              {!connection.unreadable && <Button size="sm" variant="secondary" disabled={busy} aria-expanded={planning} onClick={() => setPlanning(!planning)}>Plan a change</Button>}
             </div>
-            {planning && (
+            <Modal open={disconnectOpen} onClose={() => { if (!busy) setDisconnectOpen(false); }} size="md">
+              <ModalHeader title="Disconnect Sophos Central" onClose={() => { if (!busy) setDisconnectOpen(false); }} />
+              <div className="space-y-4 p-6">
+                <p className="text-sm text-[var(--color-text-soft)]">The client secret is deleted from this device. It stays valid in Sophos Central until you remove it there.</p>
+                {error && <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p>}
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" disabled={busy} onClick={() => setDisconnectOpen(false)}>Cancel</Button>
+                  <Button variant="danger" disabled={busy} onClick={() => void run(async () => {
+                    if (!api?.disconnectSophos) throw new Error("Open the desktop app to disconnect Sophos Central.");
+                    await api.disconnectSophos(organizationId);
+                    setPlanning(false);
+                    setTargets([]);
+                    setSelected([]);
+                    setComment("");
+                    setDisconnectOpen(false);
+                  }, "Sophos Central disconnected.")}>Disconnect Sophos Central</Button>
+                </div>
+              </div>
+            </Modal>
+            {!connection.unreadable && planning && (
               <div className="space-y-2 rounded border border-[var(--color-border-soft)] p-3">
                 <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => {
                   event.preventDefault();
@@ -149,7 +186,7 @@ export function SophosConnection({ organizationId, connection, focus }: {
             </form>
           </>
         )}
-        {error && <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p>}
+        {error && !disconnectOpen && <p role="alert" className="text-sm text-[var(--color-danger)]">{error}</p>}
         {message && <p role="status" className="text-sm text-[var(--color-text-muted)]">{message}</p>}
       </div>
     </section>

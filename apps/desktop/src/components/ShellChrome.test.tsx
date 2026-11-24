@@ -116,6 +116,24 @@ describe("shell chrome", () => {
     expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
   });
 
+  it("names the active Sophos Central host in the local model status", async () => {
+    const state = createMockAppState({ mcpServers: [] });
+    const host = "api-eu01.central.sophos.com";
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, { ...state, sophosConnections: [{
+        organizationId: `org-${state.activeTenantId}`,
+        tenantId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        host, region: "EU01", connectionId: "fixture",
+        connectedAt: "2026-11-24T12:00:00Z", lastCheckedAt: "2026-11-24T13:00:00Z",
+      }] }),
+    });
+    const status = await screen.findByRole("status", { name: /tool queries to api-eu01\.central\.sophos\.com/ });
+    expect(status).toHaveTextContent(host);
+    expect(status).not.toHaveAccessibleName(/no data leaves this device/i);
+  });
+
   it("names the second-wave hosts while their servers are on", async () => {
     const user = userEvent.setup();
     renderRoute(<AppShell><div /></AppShell>, {
