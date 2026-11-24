@@ -1544,3 +1544,6 @@ export { createGeminiLlm, GEMINI_DEFAULT_MODEL, probeGeminiLlm } from "./llm-gem
 export type { CliProbe, CliFailure } from "./cli-provider.js";
 export { discoverCli } from "./cli-provider.js";
 export { cliSpawn } from "./cli-invocation.js";
+
+export { classifyNetworkFailure, type NetworkFailureKind } from "./network-failure.js";
+export { describeModelServerCheckFailure, modelServerHttpFailure } from "./model-server-check-failure.js";

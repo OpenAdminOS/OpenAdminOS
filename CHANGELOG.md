@@ -88,6 +88,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Refine the homepage screenshots in both themes. Chat shows which devices missed the seven-day sync window and the cache used to answer, and the mobile write-confirmation hero shows the tenant and local provider.
+- Model checks for Ollama, LM Studio and Lemonade show why the endpoint could not be checked and how to retry after fixing it. Recovery names an environment variable only when it supplied the address.
+- Stable and nightly releases now stop if an installer, Linux package, or update manifest is missing or damaged.
+- Manual apt backfills now verify the downloaded Debian package against the stable release manifest before updating the repository.
 - Chat labels timestamps for cache data made stale by a write as "Before the last write (stale)".
 - Chat, Nova and multi-tenant dossiers use the same local date and time format for cache refreshes. Device last-sync dates omit the time and show the year for dates outside the current year.
 

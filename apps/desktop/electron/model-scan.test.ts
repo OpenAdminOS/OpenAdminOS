@@ -1538,7 +1538,7 @@ describe("Lemonade in the scan", () => {
     }) as typeof fetch;
     const provider = await checkLemonade(catalog("lemonade"));
     assert.equal(provider.status, "not-installed");
-    assert.equal(provider.detail, lemonadeStartHint());
+    assert.equal(provider.detail, `The connection to Lemonade on http://127.0.0.1:13305/v1 was refused. ${lemonadeStartHint()}`);
     assert.doesNotMatch(provider.detail ?? "", /`/, "the model choice shows the detail as plain text");
   });
 

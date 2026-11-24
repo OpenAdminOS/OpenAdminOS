@@ -11,62 +11,15 @@
  * over loopback, where no proxy is involved.
  */
 
+import { classifyNetworkFailure, type NetworkFailureKind } from "@openadminos/runtime";
+
+export { classifyNetworkFailure, type NetworkFailureKind };
+
 /** Electron's `session.resolveProxy` result: "DIRECT", or "PROXY host:port; DIRECT" and similar. */
 export type ProxyResolver = (url: string) => Promise<string>;
 
-export type NetworkFailureKind = "dns" | "refused" | "timeout" | "reset" | "unreachable" | "certificate" | "proxy-auth" | "offline";
-
 /** How the request travelled: OpenAdminOS directly, Ollama's own download, or loopback on this device. */
 export type NetworkPath = "app" | "ollama" | "loopback";
-
-const CODES: ReadonlyArray<[NetworkFailureKind, RegExp]> = [
-  ["dns", /^(ENOTFOUND|EAI_AGAIN|EAI_NONAME)$/],
-  ["refused", /^ECONNREFUSED$/],
-  ["timeout", /^(ETIMEDOUT|ESOCKETTIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)$/],
-  ["reset", /^(ECONNRESET|EPIPE|UND_ERR_SOCKET)$/],
-  ["unreachable", /^(ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAVAIL)$/],
-  ["certificate", /^(CERT_|UNABLE_TO_|SELF_SIGNED_CERT|DEPTH_ZERO_SELF_SIGNED_CERT|ERR_TLS_CERT)/],
-];
-
-/** Patterns for errors that arrive as text: Ollama's Go errors, MSAL and Chromium net errors. */
-const TEXT: ReadonlyArray<[NetworkFailureKind, RegExp]> = [
-  ["proxy-auth", /\b407\b|proxy authentication required/i],
-  ["offline", /ERR_INTERNET_DISCONNECTED/],
-  ["dns", /no such host|ENOTFOUND|EAI_AGAIN|getaddrinfo|ERR_NAME_NOT_RESOLVED|name not resolved/i],
-  ["refused", /connection refused|ECONNREFUSED|ERR_CONNECTION_REFUSED/i],
-  ["certificate", /x509|certificate|self[- ]signed|unable to verify|CERT_/i],
-  ["timeout", /i\/o timeout|context deadline exceeded|handshake timeout|timed out|ETIMEDOUT|ERR_TIMED_OUT|TimeoutError|aborted due to timeout/i],
-  ["reset", /connection reset|ECONNRESET|socket hang up|other side closed|ERR_CONNECTION_RESET/i],
-  ["unreachable", /network is unreachable|no route to host|ENETUNREACH|EHOSTUNREACH|ERR_NETWORK_CHANGED|ERR_ADDRESS_UNREACHABLE/i],
-];
-
-function codesOf(error: unknown, depth = 0): string[] {
-  if (!error || typeof error !== "object" || depth > 4) return [];
-  const { code, cause, errors } = error as { code?: unknown; cause?: unknown; errors?: unknown };
-  return [
-    ...(typeof code === "string" ? [code] : []),
-    ...codesOf(cause, depth + 1),
-    ...(Array.isArray(errors) ? errors.flatMap((entry) => codesOf(entry, depth + 1)) : []),
-  ];
-}
-
-function textOf(error: unknown, depth = 0): string {
-  if (!error || depth > 4) return "";
-  if (typeof error === "string") return error;
-  if (typeof error !== "object") return String(error);
-  const { message, name, cause, status } = error as { message?: unknown; name?: unknown; cause?: unknown; status?: unknown };
-  return [typeof name === "string" ? name : "", typeof message === "string" ? message : "", typeof status === "number" ? String(status) : "", textOf(cause, depth + 1)].join(" ");
-}
-
-/** The kind of network failure, or undefined when the error is not one (an HTTP error, a bad response). */
-export function classifyNetworkFailure(error: unknown): NetworkFailureKind | undefined {
-  for (const code of codesOf(error)) {
-    for (const [kind, pattern] of CODES) if (pattern.test(code)) return kind;
-  }
-  const text = textOf(error);
-  for (const [kind, pattern] of TEXT) if (pattern.test(text)) return kind;
-  return undefined;
-}
 
 const REASONS: Readonly<Record<NetworkFailureKind, string>> = {
   dns: "its name did not resolve",
@@ -77,6 +30,9 @@ const REASONS: Readonly<Record<NetworkFailureKind, string>> = {
   certificate: "its certificate was not trusted, which a proxy that inspects HTTPS can cause",
   "proxy-auth": "a proxy asked for credentials",
   offline: "this device is offline",
+  "blocked-port": "the request uses a blocked port",
+  proxy: "a proxy connection failed",
+  tls: "the TLS connection failed",
 };
 
 /** "proxy.contoso.com:8080" from an Electron proxy string, or undefined for a direct connection. */
