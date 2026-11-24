@@ -1982,10 +1982,12 @@ client cannot initialize from `SUPABASE_URL` and `SUPABASE_SECRET_KEY`.
 #### Website stats migration
 
 1. Apply the SQL in `web/supabase/migrations` to the shared Supabase project as
-   `postgres`. Default privileges apply to the creator role. The migration
-   removes the built-in `PUBLIC` execute default for future functions created
-   by `postgres` throughout the database. Check the other schemas for future
-   functions that need an explicit execute grant. Add `openadminos` to the Data
+   `postgres`. Default privileges apply to the creator role and are scoped to
+   the `openadminos` schema, so other apps in the shared project are not
+   affected. PostgreSQL grants `PUBLIC` execute on new functions by default and
+   that cannot be removed for one schema, so every function added to this
+   schema later must revoke execute from `public` explicitly. Never grant
+   `usage` on the schema to `anon` or `authenticated`. Add `openadminos` to the Data
    API's Exposed schemas list and confirm the website's production database URL
    and server-only secret are configured.
 2. Create a client with the publishable (anon) key and no signed-in session.

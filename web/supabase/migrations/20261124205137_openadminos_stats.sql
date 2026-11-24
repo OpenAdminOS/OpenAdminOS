@@ -2,8 +2,11 @@ begin;
 
 create schema if not exists openadminos;
 
--- Run as postgres. Schema defaults cannot subtract the built-in PUBLIC EXECUTE default.
-alter default privileges for role postgres revoke execute on functions from public;
+-- Run as postgres. These defaults are scoped to this schema only, so other apps in the
+-- shared project are unaffected. PostgreSQL still grants PUBLIC execute on new functions
+-- by default, and that cannot be removed for a single schema: every function added to
+-- this schema later must revoke execute from public explicitly. anon and authenticated
+-- have no usage on the schema, so they cannot reach such a function in the meantime.
 alter default privileges for role postgres in schema openadminos revoke execute on functions from public, anon, authenticated;
 alter default privileges for role postgres in schema openadminos revoke all on tables from public, anon, authenticated;
 alter default privileges for role postgres in schema openadminos revoke all on sequences from public, anon, authenticated;
