@@ -802,8 +802,18 @@ sent to hosted speech. Numbered Nova lists retain their numbering, including a
 single-item list; other report previews retain the existing numbered-section default.
 
 Fleet non-compliance and unencrypted-device lists use filtered SQLite fields directly,
-include snapshot freshness and coverage, and report the 50-row detail cap. Missing
-encryption is unknown. Fleet “why non-compliant” questions read live per-device
+include snapshot freshness and coverage. Larger chat lists attach a complete table with
+CSV export for up to 10,000 cached matches, subject to a 4 MiB budget per table
+and three distinct tables per answer. The expanded table shows the first 200 rows,
+and CSV includes every attached row. Partial snapshots are marked on the table.
+Cache queries support 50-row pages. Company Portal app lists use cached assignment
+intents: available, available without enrollment, and required. This is a catalog
+filter. A user-specific view depends on assignment targeting. Refresh older app
+snapshots before filtering on Company Portal availability. Refresh completes missing
+or paged assignment collections. If assignment data is still incomplete, Chat reports
+how many cached apps have assignment data and identifies affected apps. Derived
+assignment fields are excluded from drift snapshots and hashes.
+Missing encryption is unknown. Fleet “why non-compliant” questions read live per-device
 compliance policy setting states with DeviceManagementConfiguration.Read.All consent; they investigate
 at most ten matching devices and explicitly disclose the remaining coverage. Each
 collection follows validated beta continuation links with a ten-page/1,000-row bound.

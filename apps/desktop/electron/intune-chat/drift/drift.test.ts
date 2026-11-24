@@ -14,6 +14,13 @@ import {
 import { DRIFT_TRACKED_RESOURCES } from "./tracked-resources.js";
 
 describe("tenant drift tracking", () => {
+  it("keeps the pre-upgrade mobile app hash after assignment intents are cached", () => {
+    const app = { id: "app", displayName: "Example", isAssigned: true };
+    const refreshed = { ...app, assignmentIntents: ["required"], availableInCompanyPortal: true };
+    assert.equal(driftContentHash(app, "mobileApps"), driftContentHash(refreshed, "mobileApps"));
+    assert.deepEqual(diffDriftObjects(app, refreshed, "mobileApps"), []);
+  });
+
   it("canonicalizes drift JSON with stable key order and ignored OData volatility", () => {
     const resource = "deviceCompliancePolicies";
     const first = canonicalDriftJson(

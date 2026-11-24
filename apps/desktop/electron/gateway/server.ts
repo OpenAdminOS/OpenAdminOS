@@ -119,6 +119,9 @@ const READ_TOOL_INPUTS: Record<string, z.ZodRawShape> = {
     filters: z.array(z.record(z.string(), z.unknown())).optional(),
     sort: z.record(z.string(), z.unknown()).optional(),
     limit: z.number().optional(),
+    offset: z.number().int().nonnegative().optional(),
+    where: z.record(z.string(), z.unknown()).optional(),
+    select: z.array(z.string()).optional(),
   },
   graph_get: {
     path: z.string(),
@@ -165,7 +168,7 @@ function buildMcpServer(
     list_cached_resources:
       "List the connected tenant's cached Graph resources with row counts, freshness, and errors.",
     query_cache:
-      "Query cached tenant rows (filters, sort, capped limit). Read-only.",
+      "Query cached tenant rows in pages of up to 50. Use nextOffset while hasMore is true. Read-only.",
     graph_get:
       "Perform a validated read-only Microsoft Graph GET within the gateway's scope allowlist.",
     query_drift:

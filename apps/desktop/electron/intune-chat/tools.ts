@@ -1,3 +1,4 @@
+import { CHAT_TABLE_ROW_CAP, COUNT_CACHED_LIST_CAP, chatCacheTable, cacheListLimitNotice, chatTableNote, describeCacheFilters, compactValue, listedCacheRow } from "./cache-table.js";
 import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import type { WebSearch, WebSearchResult } from "./web-search.js";
 import { randomUUID } from "node:crypto";
@@ -680,6 +681,9 @@ export const SPLASHTOP_TOOL_RULES = [
 const TOOL_TIMESTAMP_NOTE = "Never show an ISO timestamp to the user. Use the date or time wording in the facts when available. Use refreshedAtText for cache freshness when provided.";
 
 export interface IntuneChatToolContext {
+  noteCacheList?: () => void;
+  noteTableOmission?: (note: string) => void;
+  attachTable?: (table: import("@openadminos/agent-sdk").ChatDataTable) => boolean | void;
   timestampLocale?: ChatDateTimeLocale;
   /** The active organization's Splashtop connection, when it has one. */
   splashtop?: SplashtopChatContext;
@@ -727,7 +731,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
   {
     name: "query_cache",
     description:
-      'Read cached rows for one resource kind. Filter with "where", for example {"resource":"managedDevices","where":{"complianceState":"noncompliant"},"limit":25}. Returns at most 50 rows.',
+      'Read cached rows for one resource kind. Filter with "where", for example {"resource":"managedDevices","where":{"complianceState":"noncompliant"},"limit":25}. Returns up to 50 rows per page. Pass nextOffset as offset to continue.',
     params: {
       type: "object",
       required: ["resource"],
@@ -751,6 +755,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
           type: "object",
           description: "{field, direction:'asc'|'desc'}",
         },
+        offset: { type: "integer", description: "Row offset, starting at zero." },
         limit: {
           type: "number",
           description: "Requested rows. Hard-capped at 50.",
@@ -761,7 +766,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
   {
     name: "count_cached",
     description:
-      'Count cached rows exactly, in code, over every cached row of one resource. Use it for every "how many", "per OS" or breakdown question instead of counting rows yourself. Filter like query_cache, group with groupBy, for example {"resource":"managedDevices","where":{"complianceState":"noncompliant"},"groupBy":["operatingSystem"],"list":true}. list:true also returns the matching rows when at most 50 match.',
+      'Count cached rows exactly, in code, over every cached row of one resource. Use it for every "how many", "per OS" or breakdown question instead of counting rows yourself. Filter like query_cache, group with groupBy, for example {"resource":"managedDevices","where":{"complianceState":"noncompliant"},"groupBy":["operatingSystem"],"list":true}. For a complete list use list:true. It returns up to 50 inline rows. The host handles table attachments. For mobileApps, availableInCompanyPortal:true covers available, availableWithoutEnrollment and required assignments.',
     params: {
       type: "object",
       required: ["resource"],
@@ -773,7 +778,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
         where: { type: "object", description: 'Field to required value, for example {"operatingSystem":"Windows"}.' },
         filters: { type: "array", description: 'Comparisons other than equality: [{"field":"complianceState","op":"neq","value":"compliant"}].' },
         groupBy: { type: "array", items: { type: "string" }, description: "Up to three fields, each counted separately within the filtered rows." },
-        list: { type: "boolean", description: "Also return the matching rows when at most 50 match." },
+        list: { type: "boolean", description: "Return up to 50 inline rows and attach a complete table for larger matches when possible." },
       },
     },
   },
@@ -876,8 +881,8 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
 export function toolDefinitionsForPrompt(webSearch = false, compact = false, tenantTools = true): string {
   if (compact) return [
     ...(tenantTools ? ["- list_cached_resources {}: list available resource names, counts, freshness and errors.",
-      '- query_cache {resource, where?:{field:value}, filters?:[{field,op,value}], select?:string[], limit?:number}: read up to 50 cached rows; default 25. Filters support eq,neq,contains,startsWith,in,lt,lte,gt,gte. Use managedDevices for Intune devices, entraDevices for directory devices. Empty matches do not prove an empty tenant.',
-      '- count_cached {resource, where?, filters?, groupBy?:string[], list?:boolean}: exact counts over every cached row, with a breakdown per groupBy field; list:true adds the matching rows when at most 50 match. Use it for every count and breakdown.'] : []),
+      '- query_cache {resource, where?:{field:value}, filters?:[{field,op,value}], select?:string[], limit?:number, offset?:number}: read a page of up to 50 cached rows; default 25. Use nextOffset while hasMore is true. Filters support eq,neq,contains,startsWith,in,lt,lte,gt,gte. Use managedDevices for Intune devices, entraDevices for directory devices. Empty matches do not prove an empty tenant.',
+      '- count_cached {resource, where?, filters?, groupBy?:string[], list?:boolean}: exact counts over every cached row, with a breakdown per groupBy field; Use list:true for complete lists. The host can add a table for larger lists within its limits. Use it for every count and breakdown. For mobileApps, appPlatform filters by cached app type (for example Windows). For Company Portal availability use availableInCompanyPortal:true, covering available, availableWithoutEnrollment and required assignments.'] : []),
     '- find_graph_endpoint {query, limit?:number}: discover permitted GET paths; do not guess unknown paths.',
     ...(tenantTools ? ['- graph_get {path, query?:object}: live Graph GET only; query may include $select,$top,$filter,$orderby,$count. At most 50 rows.',
       '- refresh_resource {resource}: refresh one cached resource before querying missing/stale data.',
@@ -1070,8 +1075,10 @@ function executeToolUnchecked(
     case "list_cached_resources":
       return Promise.resolve(listCachedResources(ctx, params));
     case "query_cache":
+      ctx.noteCacheList?.();
       return Promise.resolve(queryCache(ctx, params));
     case "count_cached":
+      if ((params as { list?: unknown } | null)?.list === true) ctx.noteCacheList?.();
       return Promise.resolve(countCached(ctx, params));
     case "find_graph_endpoint":
       return Promise.resolve(findGraphEndpoint(ctx, params));
@@ -1346,12 +1353,16 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
   assertResourceGranted(ctx, resource);
   let filters: GraphCacheQueryPredicate[] | undefined;
   let sort: ReturnType<typeof sortParam>;
+  let offset = 0;
   let selectedFields: string[] | undefined;
   const availableFields = fieldsForResource(ctx, resource);
   try {
-    const extras = Object.keys(params as Record<string, unknown>).filter(key => !['resource', 'where', 'filters', 'sort', 'limit', 'select'].includes(key));
-    if (extras.length) throw new Error(`Unsupported query_cache parameters: ${extras.join(', ')}. Use resource, where, filters, sort, select or limit; no supplied criteria were applied.`);
-    const projectionFields = [...(pathForResource(resource).select ?? []), ...ctx.store.graphCacheFields(ctx.tenantId, resource)];
+    const extras = Object.keys(params as Record<string, unknown>).filter(key => !['resource', 'where', 'filters', 'sort', 'limit', 'select', 'offset'].includes(key));
+    if (extras.length) throw new Error(`Unsupported query_cache parameters: ${extras.join(', ')}. Use resource, where, filters, sort, select, offset or limit; no supplied criteria were applied.`);
+    const rawOffset = (params as Record<string, unknown>).offset ?? 0;
+    if (typeof rawOffset !== "number" || !Number.isSafeInteger(rawOffset) || rawOffset < 0) throw new Error("offset must be a nonnegative integer.");
+    offset = rawOffset;
+    const projectionFields = [...(pathForResource(resource).select ?? []), ...ctx.store.graphCacheFields(ctx.tenantId, resource), ...(resource === "mobileApps" ? ["assignmentIntents", "availableInCompanyPortal"] : [])];
     const selection = (params as Record<string, unknown>).select;
     if (selection !== undefined) {
       if (!Array.isArray(selection) || !selection.length || selection.length > 20 || selection.some(field => typeof field !== 'string' || !projectionFields.includes(field))) throw new Error('select must contain 1–20 resource field names; normalized filter aliases cannot be projected.');
@@ -1365,6 +1376,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     throw new InvalidCacheQueryError(`${error instanceof Error ? error.message : String(error)} Use where:{"fieldName":value} or filters:[{"field":"fieldName","op":"eq","value":value}]. Values must be scalars. Available fields: ${availableFields.join(', ')}.`);
   }
   const snapshot = ctx.store.getGraphCacheStatus(ctx.tenantId, [definitionForResource(resource)])[0];
+  requireCompanyPortalCoverage(ctx, resource, [...(filters ?? []).map(filter => filter.field), ...(sort ? [sort.field] : []), ...(selectedFields ?? [])], snapshot?.refreshedAt);
   const limit = numberParam(params, "limit") ?? 25;
   const result = ctx.store.queryGraphCache({
     tenantId: ctx.tenantId,
@@ -1372,6 +1384,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     filters,
     sort,
     limit: Math.min(limit, QUERY_CACHE_ROW_CAP),
+    offset,
   });
   // A query returning nothing is the most misread result in the whole
   // tool surface: models reported "the tenant has no managed devices"
@@ -1381,7 +1394,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
   let emptyHint:
     | { cachedRowsForResource: number; availableFields?: string[]; note: string }
     | undefined;
-  if (result.returnedRows === 0) {
+  if (result.totalCount === 0) {
     let cachedRowsForResource = 0;
     try {
       cachedRowsForResource = ctx.store.aggregateGraphResource(
@@ -1417,7 +1430,9 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     timestampNote: TOOL_TIMESTAMP_NOTE,
     refreshedAtText: snapshot?.refreshedAt ? formatCacheRefreshTime(snapshot.refreshedAt, ctx.timestampLocale) : undefined,
     limit: result.limit,
-    capped: result.totalCount > result.returnedRows,
+    hasMore: result.hasMore,
+    nextOffset: result.nextOffset,
+    capped: result.hasMore,
     ...(availableFields ? { availableFields } : {}),
     ...(emptyHint ?? {}),
     rows: result.rows.map((entry) => ({
@@ -1425,6 +1440,25 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       row: compactValue(selectedFields && entry.row && typeof entry.row === 'object' ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(entry.row as object, field)).map(field => [field, (entry.row as Record<string, unknown>)[field]])) : entry.row),
     })),
   };
+}
+
+function requireCompanyPortalCoverage(ctx: IntuneChatToolContext, resource: GraphCacheResourceKind, fields: string[], refreshedAt?: string): void {
+  if (resource !== "mobileApps" || !fields.some(field => field === "availableInCompanyPortal" || field === "assignmentIntents")) return;
+  const scope = { tenantId: ctx.tenantId, resource };
+  const missing = ctx.store.countGraphCache({
+    ...scope,
+    filters: [{ field: "availableInCompanyPortal", op: "eq", value: null }],
+    listLimit: 5,
+  });
+  if (refreshedAt && missing.total === 0) return;
+  const counted = ctx.store.countGraphCache(scope).total - missing.total;
+  if (!refreshedAt || (counted === 0 && !ctx.store.graphCacheFields(ctx.tenantId, resource).includes("assignmentIntents"))) {
+    throw new InvalidCacheQueryError("Refresh the app cache to load Company Portal assignments. This cache predates assignment data. 0 apps had assignment data to count.");
+  }
+  const names = (missing.rows as Array<{ displayName?: string; id?: string }> ?? [])
+    .map(row => row.displayName || row.id || "Unnamed app");
+  const examples = names.length ? ` (${names.join(", ")}${missing.total > names.length ? ", and others" : ""})` : "";
+  throw new InvalidCacheQueryError(`Assignment data is incomplete for ${missing.total} ${missing.total === 1 ? "app" : "apps"}${examples}. Apps with assignment data counted: ${counted}. Refresh the app cache again or check these apps in Intune.`);
 }
 
 function assertCacheFields(resource: GraphCacheResourceKind, fields: readonly string[], availableFields: readonly string[]): void {
@@ -1447,22 +1481,6 @@ function assertFilterTypes(ctx: IntuneChatToolContext, resource: GraphCacheResou
 }
 
 /** The fields a listed row keeps: enough to name and place it, not the whole Graph object. */
-const LIST_FIELDS: Partial<Record<GraphCacheResourceKind, readonly string[]>> = {
-  managedDevices: ["id", "deviceName", "operatingSystem", "osVersion", "complianceState", "lastSyncDateTime", "userPrincipalName", "managedDeviceOwnerType", "isEncrypted"],
-  entraDevices: ["id", "displayName", "operatingSystem", "operatingSystemVersion", "trustType", "isManaged", "isCompliant", "approximateLastSignInDateTime"],
-  users: ["id", "displayName", "userPrincipalName", "accountEnabled", "userType"],
-};
-
-/** A listed row with its identifying fields, or the compacted row for resources without a field list. */
-export function listedCacheRow(resource: GraphCacheResourceKind, row: unknown): unknown {
-  const fields = LIST_FIELDS[resource];
-  if (!fields || !row || typeof row !== "object") return compactValue(row);
-  const record = row as Record<string, unknown>;
-  return Object.fromEntries(fields.filter((field) => Object.hasOwn(record, field)).map((field) => [field, record[field]]));
-}
-
-export const COUNT_CACHED_LIST_CAP = 50;
-
 /**
  * Exact counts for one resource under filters, computed in SQL. A small
  * local model counted sample rows and said 3 where 6 devices matched;
@@ -1500,6 +1518,7 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
       note: `Nothing is cached for ${resource}, so no count is available. Refresh the resource before concluding anything about it.`,
     };
   }
+  requireCompanyPortalCoverage(ctx, resource, [...(filters ?? []).map(filter => filter.field), ...groupBy], snapshot.refreshedAt);
   const counted = ctx.store.countGraphCache({
     tenantId: ctx.tenantId,
     resource,
@@ -1507,7 +1526,17 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
     groupBy,
     ...(list ? { listLimit: COUNT_CACHED_LIST_CAP } : {}),
   });
-  const listed = counted.rows && counted.total <= COUNT_CACHED_LIST_CAP ? counted.rows.map((row) => listedCacheRow(resource, row)) : undefined;
+  const listed = counted.rows?.map(row => listedCacheRow(resource, row));
+  const needsTable = list && counted.total > COUNT_CACHED_LIST_CAP;
+  const attachTable = ctx.attachTable;
+  let attached = false;
+  if (needsTable && counted.total <= CHAT_TABLE_ROW_CAP && attachTable) {
+    const rows = ctx.store.countGraphCache({ tenantId: ctx.tenantId, resource, filters, listLimit: counted.total }).rows ?? [];
+    const table = chatCacheTable(resource, describeCacheFilters(filters), snapshot.refreshedAt, rows, Boolean(snapshot.pageLimitReached || (snapshot.tenantTotal !== undefined && snapshot.rows < snapshot.tenantTotal)));
+    attached = Boolean(table && attachTable(table) !== false);
+  }
+  const note = needsTable ? chatTableNote(counted.total, attached, Boolean(attachTable)) : undefined;
+  if (note && !attached) ctx.noteTableOmission?.(cacheListLimitNotice(counted.total));
   return {
     resource,
     ...(snapshot ? logWindowCoverage(snapshot) : {}),
@@ -1519,10 +1548,8 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
     refreshedAtText: formatCacheRefreshTime(snapshot.refreshedAt, ctx.timestampLocale),
     ...(filters?.length ? { filters } : {}),
     ...(groupBy.length ? { groups: counted.groups } : {}),
+    note: note ?? "Counts cover every cached row of this resource. State these numbers; do not count rows yourself.",
     ...(listed ? { returnedRows: listed.length, rows: listed } : { returnedRows: 0 }),
-    note: list && !listed
-      ? `${counted.total} rows match, more than ${COUNT_CACHED_LIST_CAP}, so none are listed. Use query_cache for a capped list and say it is capped.`
-      : "Counts cover every cached row of this resource. State these numbers; do not count rows yourself.",
   };
 }
 
@@ -1531,6 +1558,7 @@ export const FIND_ENDPOINT_LIMIT_CAP = 15;
 /** Selected schema fields remain valid even when all cached values are absent. */
 function fieldsForResource(ctx: IntuneChatToolContext, resource: GraphCacheResourceKind): string[] {
   return [...new Set([
+    ...(resource === "mobileApps" ? ["appPlatform", "availableInCompanyPortal", "assignmentIntents"] : []),
     ...(pathForResource(resource).select ?? []),
     ...ctx.store.graphCacheFields(ctx.tenantId, resource),
     'id', 'graphId', 'searchText', 'displayName', 'lastSeenAt', 'refreshedAt',
@@ -2042,7 +2070,7 @@ function summarizeToolResult(
     // matched nothing used to summarise as "0 of 0 cached rows", which
     // reads as an empty cache and contradicts the result body. Report
     // the unfiltered total in that case.
-    if (Number(record.returnedRows ?? 0) === 0) {
+    if (Number(record.totalCount ?? 0) === 0) {
       const cached = Number(record.cachedRowsForResource ?? 0);
       return cached > 0
         ? `no rows matched this filter; ${cached.toLocaleString()} rows are cached for this resource`
@@ -2118,28 +2146,7 @@ export function summarizeToolCallForProgress(
   return "Running tool.";
 }
 
-function compactValue(value: unknown, depth = 0): unknown {
-  if (value === null || value === undefined) return value;
-  if (typeof value === "string") return value.length > 800 ? `${value.slice(0, 800)}...` : value;
-  if (typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) {
-    return value.slice(0, 25).map((item) => compactValue(item, depth + 1));
-  }
-  if (typeof value === "object") {
-    if (depth >= 4) return "[object truncated]";
-    const out: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) {
-      if (key === "@odata.context") continue;
-      out[key] = compactValue(child, depth + 1);
-      if (Object.keys(out).length >= 40) {
-        out.__truncatedKeys = true;
-        break;
-      }
-    }
-    return out;
-  }
-  return String(value);
-}
+
 
 function resourceParam(params: unknown, key: string): GraphCacheResourceKind {
   const value = stringParam(params, key);

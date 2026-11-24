@@ -127,6 +127,9 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Fixed
 
+- Open and export complete cached lists from Chat when more than 50 rows match and the result fits the table limits. Expanded tables preview 200 rows, and CSV includes the full attachment. Refresh the app cache to list Windows apps available in Company Portal, including required apps. Cache queries also support paging.
+- Chat preserves ordinary list descriptions and keeps attachment instructions out of answers. App refresh completes paged assignment data and reports missing coverage without introducing drift for derived fields.
+
 - Refine the homepage screenshots in both themes. Chat shows which devices missed the seven-day sync window and the cache used to answer, and the mobile write-confirmation hero shows the tenant and local provider.
 - Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
 - Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance. If the source is missing or turned off, Chat points to Marketplace.

@@ -1017,7 +1017,7 @@ const CROSS_TENANT_IGNORED_TOP_FIELDS = new Set([
 
 // Assignments target tenant-specific groups and filters; excluded from
 // cross-tenant equality by default, with a visible opt-in.
-const CROSS_TENANT_ASSIGNMENT_TOP_FIELDS = new Set(["assignments", "isAssigned"]);
+const CROSS_TENANT_ASSIGNMENT_TOP_FIELDS = new Set(["assignments", "isAssigned", "assignmentIntents", "availableInCompanyPortal"]);
 
 function crossTenantChangeRelevant(
   change: DriftFieldChange,

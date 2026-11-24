@@ -43,5 +43,5 @@ export interface DriftIgnoredFields {
 
 export const DRIFT_IGNORED_FIELDS: DriftIgnoredFields = {
   base: ["@odata.etag", "@odata.context"],
-  byResource: {},
+  byResource: { mobileApps: ["assignmentIntents", "availableInCompanyPortal"] },
 };
