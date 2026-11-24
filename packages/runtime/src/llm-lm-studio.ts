@@ -27,8 +27,7 @@ const LM_STUDIO: OpenAiCompatibleServer = {
   timeoutEnv: "OPENADMINOS_LM_STUDIO_TIMEOUT_MS",
   noModelMessage:
     "No LM Studio model available. Load a model in LM Studio and start the local server.",
-  notRunningDetail:
-    "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+  startHint: "Start the server from LM Studio's Developer tab, then try again.",
   noModelsDetail: "LM Studio server is running but no models are loaded.",
   contextOverflowMessage: lmStudioContextOverflowMessage,
   stringErrors: true,

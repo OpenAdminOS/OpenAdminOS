@@ -28,7 +28,7 @@ const LEMONADE: OpenAiCompatibleServer = {
   timeoutEnv: "OPENADMINOS_LEMONADE_TIMEOUT_MS",
   noModelMessage:
     "No Lemonade model available. Download a chat model in Lemonade, then try again.",
-  notRunningDetail: "Lemonade isn't running. Start Lemonade Server, then try again.",
+  startHint: "Start Lemonade Server, then try again.",
   noModelsDetail: "Lemonade is running but has no chat model downloaded.",
   httpStatusDetail: (status) =>
     status === 401
