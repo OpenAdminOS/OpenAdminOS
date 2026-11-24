@@ -85,6 +85,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Stable and nightly releases now stop if an installer, Linux package, or update manifest is missing or damaged.
+- Manual apt backfills now verify the downloaded Debian package against the stable release manifest before updating the repository.
 - Chat labels timestamps for cache data made stale by a write as "Before the last write (stale)".
 - Chat, Nova and multi-tenant dossiers use the same local date and time format for cache refreshes. Device last-sync dates omit the time and show the year for dates outside the current year.
 
