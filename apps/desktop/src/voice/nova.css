@@ -582,7 +582,7 @@
 }
 
 .nova-bubble[data-screen-preview="true"] {
-  overflow: hidden;
+  overflow: clip;
 }
 
 .nova-bubble[data-screen-preview="true"] > :is(.nova-bubble-header, .nova-bubble-context) {
@@ -590,6 +590,7 @@
 }
 
 .nova-bubble[data-screen-preview="true"] > .nova-screen-controls {
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
 }
