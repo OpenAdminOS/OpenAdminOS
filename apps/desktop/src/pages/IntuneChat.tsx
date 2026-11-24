@@ -1,6 +1,6 @@
 import { hasRememberedHostedChatConsent, rememberHostedChatConsent } from "../shared/hosted-chat-consent";
 import { OLLAMA_CLOUD_NAME, hostedOllamaDestination, type HostedOllamaDestination, isOnDeviceModel, isRemoteBackedModel, providerForModel, resolveRunModel } from "@openadminos/agent-sdk";
-import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -103,6 +103,7 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import { ModelFitNotice, modelFitModelName } from "../components/ModelFitNotice";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { MODEL_FIT_RESEND, modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
+import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
@@ -1289,10 +1290,26 @@ function IntuneChatContent() {
     );
   };
 
+  const expireModelFitOffer = useCallback((offer: ModelFitOffer) => {
+    if (modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
+    modelFitChoiceRef.current += 1;
+    setModelFitOffer(null);
+    setModelFitAccept(null);
+    setNotice(`This choice has expired. ${MODEL_FIT_RESEND}`);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }, []);
+
+  const checkModelFitExpiry = (offer: ModelFitOffer) => {
+    if (offer.issue.offerExpiresAt === undefined || Date.now() < offer.issue.offerExpiresAt) return false;
+    expireModelFitOffer(offer);
+    return true;
+  };
+
   // A model fit choice runs this one request on the chosen provider. A
   // local one sends at once, since nothing leaves the device; a hosted one
   // opens the accept step first and sends only from its Send button.
   const chooseModelFit = async (offer: ModelFitOffer, choice: ModelFitChoice) => {
+    if (checkModelFitExpiry(offer)) return;
     const override: ChatModelOverride = {
       offerId: offer.issue.offerId,
       providerId: choice.providerId,
@@ -1310,7 +1327,7 @@ function IntuneChatContent() {
     // Where the provider is reached as this accept step opens; the host refuses a send that goes elsewhere.
     const destination = await window.openAdminOS?.getProviderDestination?.(choice.providerId).catch(() => undefined);
     // A later choice, or a withdrawn offer, supersedes this lookup.
-    if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
+    if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId || checkModelFitExpiry(offer)) return;
     // Without a destination the host would refuse the send, so the accept step does not open.
     if (window.openAdminOS?.getProviderDestination && !destination) {
       setNotice(MODEL_FIT_COPY.destinationFailedChat(choice.providerName));
@@ -1337,7 +1354,7 @@ function IntuneChatContent() {
 
   const confirmModelFitAndSend = async () => {
     const pending = modelFitAccept;
-    if (!pending) return;
+    if (!pending || checkModelFitExpiry(pending.offer)) return;
     setModelFitAccept(null);
     // Never a remembered acknowledgement: the host refuses one for an override.
     await executeSend(
@@ -1370,6 +1387,22 @@ function IntuneChatContent() {
   // waits for its id there; any other conversation, or a change of model or
   // organization, withdraws it.
   const modelFitOfferShown = modelFitOffer !== null && activeConversationId === modelFitOffer.conversationId;
+  const { choices: fitChoices, checkingLocalContext } = useModelFitChoices({
+    issue: modelFitOfferShown ? modelFitOffer.issue : undefined,
+    providers: state.providers,
+    activeModelByProviderId: state.activeModelByProviderId,
+    managedPolicy: state.managedPolicy,
+  });
+  useEffect(() => {
+    if (!modelFitOfferShown || modelFitOffer?.issue.offerExpiresAt === undefined) return;
+    const delay = modelFitOffer.issue.offerExpiresAt - Date.now();
+    if (delay <= 0) {
+      expireModelFitOffer(modelFitOffer);
+      return;
+    }
+    const timer = window.setTimeout(() => expireModelFitOffer(modelFitOffer), delay);
+    return () => window.clearTimeout(timer);
+  }, [expireModelFitOffer, modelFitOffer, modelFitOfferShown]);
   // The accept step sends the question it shows. Editing the composer or the
   // attachments while it is open closes it unsent, so nothing changed goes out
   // under an acceptance of something else.
@@ -1950,15 +1983,11 @@ function IntuneChatContent() {
         onConfirm={() => void confirmModelFitAndSend()}
         onUseLocal={() => setModelFitAccept(null)}
       />
-    ) : modelFitOffer && modelFitOfferShown && !runInProgress ? (
+    ) : modelFitOffer && modelFitOfferShown && fitChoices && !runInProgress ? (
       <ModelFitNotice
         issue={modelFitOffer.issue}
-        choices={modelFitChoices({
-          issue: modelFitOffer.issue,
-          providers: state.providers,
-          activeModelByProviderId: state.activeModelByProviderId,
-          managedPolicy: state.managedPolicy,
-        })}
+        choices={fitChoices}
+        checkingLocalContext={checkingLocalContext}
         surface="chat"
         returnModel={modelFitReturnModel(modelFitOffer)}
         answered={modelFitOffer.answered === true}

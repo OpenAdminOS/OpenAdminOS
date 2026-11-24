@@ -98,7 +98,13 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Managed policies that allow Ollama also allow Ollama Cloud with hosted Chat confirmation. IT can lock `defaultModel` to an installed Ollama model by name. Keep that name backed by a model that runs on this device.
 
 - Ollama Cloud models show where prompts are processed and require the usual hosted Chat confirmation. On-device reruns only offer models that run on this device.
-
+- Run for real explains why the dry run provider or model needs attention and how to continue.
+- Chat and failed runs show a local alternative for a context overflow only when its reported context can fit the request, with the token limit on the row. The check leaves room for the answer when LM Studio or llama.cpp reports only the prompt size and can offer models of the same size with enough context.
+- Chat withdraws expired model fit choices and closes any open send confirmation, with a prompt to send the question again.
+- Run for real keeps the dry run provider and model through setup and links back to the agent page when you need a different provider or model.
+- Chat keeps showing the token counts for each oversized question after repeated context overflows.
+- Chat shows model fit choices when Lemonade or LM Studio reports a context overflow in the response body.
+- Model fit rechecks that an Ollama model runs on this device before the adapter resends the prompt with a larger context.
 - Chat with a local model keeps a prose answer that quotes a tool call as an example, reads a final answer that also names a tool as the answer, no longer flashes a raw tool request while the cached-data answer streams, and never shows an unreadable device sync time as a date.
 - Chat with a local model counts in code: device counts, per OS splits and not compliant lists come from SQL over every cached Intune device (a new `count_cached` tool and an authoritative computed result in the answer pack), Entra devices are no longer mixed into Intune answers, follow-ups such as "only Windows" narrow the previous result, "why is this device not compliant" says the failing rule is not in the cached data and gives the last sync (and corrects the premise for a compliant device), standing instructions earlier in a chat are no longer bypassed by direct cache answers, a local model's answer to those questions is written by code from the counts, and auto mode falls back within four model calls with a notice that says what happened.
 - Runs: only an error from a Microsoft Graph call is treated as a Graph access denial. An HTTP 403 from Ollama, LM Studio, a vendor API, Splashtop or an MCP server no longer gets "Graph consent required" or "Graph access cause unverified" advice, and such a denial stored by earlier versions is dropped from run history, the run failure panel and the scheduled run status.

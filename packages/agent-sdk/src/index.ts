@@ -1576,6 +1576,8 @@ export interface ModelFitIssue {
    * model. Absent when the request cannot be offered again (Nova, a run).
    */
   offerId?: string;
+  /** Host deadline in Unix milliseconds, present only on a live offer. */
+  offerExpiresAt?: number;
 }
 
 /**
@@ -3613,6 +3615,8 @@ export interface OpenAdminOSApi {
    * when it opens; the host refuses the send or run if it changed since.
    */
   getProviderDestination?(providerId: ProviderId): Promise<string>;
+  /** Reads metadata for a local model without loading it or sending a prompt. */
+  getModelFitContextWindow?(providerId: ProviderId, model: string): Promise<number | undefined>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
@@ -4702,6 +4706,8 @@ export interface LlmOptions {
    * of sending. Chat leaves it unset, so a provider may raise its context.
    */
   enforceContextWindow?: boolean;
+  /** Host check before an Ollama adapter resends a request internally. */
+  beforeOllamaResend?: () => Promise<void>;
 }
 
 export interface LlmTokenUsage {

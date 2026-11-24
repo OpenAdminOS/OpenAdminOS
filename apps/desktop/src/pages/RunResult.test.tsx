@@ -502,6 +502,26 @@ it("keeps a model fit dry run's safeguards when Run for real opens setup", async
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
+it("blocks Run for real when its saved on-device model is now an Ollama Cloud alias", async () => {
+  const user = userEvent.setup();
+  const alias = "original-model";
+  const run = createAwaitingConfirmationRun({
+    status: "planned", dryRun: true, providerId: "ollama", model: alias,
+    requireOnDeviceModel: true,
+    providerEndpointBinding: { endpoint: "http://127.0.0.1:11434", scope: "model-fit" },
+  });
+  const providers = mockProviders.map((provider) => provider.id === "ollama"
+    ? { ...provider, models: [alias, "other-local-model"], remoteModels: [alias] }
+    : provider);
+  const bridge = makeMockBridge({}, createMockAppState({ runs: [run], providers }));
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: "Run for real" }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the dry run provider" });
+  expect(within(dialog).getByText("The dry run model now runs in Ollama Cloud. Restore the local model, then recheck.")).toBeInTheDocument();
+  expect(readPendingIntent()).toMatchObject({ runForRealOfRunId: run.id, model: alias, safeguards: { onDevice: true } });
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});
+
 it("does not present host status text as the report while a run is live", async () => {
   const run = createAwaitingConfirmationRun({
     status: "running",
@@ -744,6 +764,44 @@ it("shows a refused Run again start inside the review (review round 3)", async (
   expect(within(dialog).getByText(/Ollama isn't reachable/)).toBeInTheDocument();
 });
 
+it.each([
+  { id: "openai", name: "Codex", readyStatus: "connected" },
+  { id: "azure-openai", name: "Azure OpenAI", readyStatus: "available" },
+] as const)("keeps Run for real on the dry run model when setup rechecks $name", async ({ id, name, readyStatus }) => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({
+    status: "planned", dryRun: true, tenantId: "tenant-1", providerId: id, model: "original-model",
+  });
+  const buildState = (checked: number) => createMockAppState({
+    providers: mockProviders.map((provider) => provider.id === id
+      ? { ...provider, status: checked ? readyStatus : "error", models: [checked >= 2 ? "original-model" : "different-model"] }
+      : provider),
+    runs: [run],
+    installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
+  });
+  let checked = 0;
+  const recheckProvider = vi.fn(async () => { checked += 1; });
+  const bridge = makeMockBridge({ recheckProvider, getAppState: vi.fn(async () => buildState(checked)) }, buildState(checked));
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: /Run for real/ }));
+  const dialog = await screen.findByRole("dialog", { name: "Check the dry run provider" });
+  expect(within(dialog).getByText(/with original-model/)).toBeInTheDocument();
+  expect(within(dialog).getByText(`Connect ${name} to continue.`)).toBeInTheDocument();
+  expect(within(dialog).queryByRole("button", { name: /Ollama|different-model|Continue/ })).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Open agent page" })).toBeInTheDocument();
+  await user.click(within(dialog).getByRole("button", { name: "Recheck" }));
+  await waitFor(() => expect(recheckProvider).toHaveBeenCalledWith(id));
+  expect(await within(dialog).findByText(`${name} no longer lists original-model. Restore the model, then recheck.`)).toBeInTheDocument();
+  const recheck = within(dialog).getByRole("button", { name: "Recheck dry run provider" });
+  expect(within(dialog).queryByRole("button", { name: /Review .* run/ })).not.toBeInTheDocument();
+  await user.click(recheck);
+  await user.click(await screen.findByRole("button", { name: /Review .* run/ }));
+  const review = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(within(review).getByText("original-model")).toBeInTheDocument();
+  expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});
+
 it("runs Run for real after Switch from No organization without opening setup (Muse round 3)", async () => {
   const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, tenantId: "tenant-1", finishedAt: "2026-10-31T12:00:00Z" });
@@ -877,9 +935,13 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, models: ["llama3.1", "gpt-oss:20b"] } : provider));
     const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "ollama", model: "openadmin-8b", tenantId: "tenant-1", error: CONTEXT_ERROR, modelFit: { ...FIT.modelFit, model: "openadmin-8b" } });
-    const bridge = makeMockBridge({}, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+    const bridge = makeMockBridge({ getModelFitContextWindow: vi.fn(async () => 65536) }, createMockAppState({ providers, installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
-    await user.click(within(await screen.findByRole("region", { name: "OpenAdmin 8B cannot fit this run" })).getByRole("button", { name: "Use gpt-oss:20b" }));
+    const notice = await screen.findByRole("region", { name: "OpenAdmin 8B cannot fit this run" });
+    const useLocalModel = await within(notice).findByRole("button", { name: "Use gpt-oss:20b" });
+    expect(within(notice).getByText("Reported context window: 65,536 tokens.")).toBeInTheDocument();
+    expect(bridge.getModelFitContextWindow).toHaveBeenCalledWith("ollama", "gpt-oss:20b");
+    await user.click(useLocalModel);
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "ollama", model: "gpt-oss:20b", requireOnDeviceModel: true })));

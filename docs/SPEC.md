@@ -2685,7 +2685,8 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   model in auto mode a context overflow no longer fails the turn (PR #215): the
   loop ends with `failureReason: "context-too-small"` and Chat answers from
   cached data, and that answer carries the offer ("Ask this again with"). A
-  `thinking-only` loop failure does the same; repeated malformed or unfinished
+  context overflow concerns the current request and does not count towards
+  disabling tool use on later questions. A `thinking-only` loop failure does the same; repeated malformed or unfinished
   loop answers give the repeated-failure offer once the failure memory takes the
   model off the loop. The issue names the model the turn ran on, the adapter's
   own default when the provider list names none. A typed runtime failure, where `kind`, `code` or `reason`
@@ -2711,8 +2712,14 @@ price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
 Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
 follows redirects; up to two installed local models with a larger parameter count in
-their name, marked as on this device and not checked against the request
-size; Split the question (a hint, and the question back in an empty
+their name. For a context overflow, local choices must report a context
+window at least as large as the request's known token count. This includes
+a 1,024-token answer margin when llama.cpp reports only the prompt size.
+A model of the same parameter count can qualify if its context fits.
+The row shows the reported window. The app reads model metadata without loading the model:
+Ollama uses the window from `/api/show` (including a pinned `num_ctx`),
+LM Studio uses the loaded instance's setting, and Lemonade uses the context
+reported for its downloaded model. Split the question (a hint, and the question back in an empty
 composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
 sent. Narrow the question ... then send again." Providers the managed policy
 does not allow are not in the provider list, so they are never offered; when
@@ -2734,10 +2741,8 @@ model that is no longer listed or is now remote-backed, or when the list
 cannot be read; for LM Studio and Lemonade it classifies the address they
 are reached at, and refuses one outside this device (Lemonade's address can
 be set to another machine, so its local choice is bound to that address too). That check runs again
-before every model call of the request, not only once. The Ollama adapter's
-own context retry inside one call goes to the same address and model name and
-is not checked again; a hook there is a follow-up for the adapter
-(packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
+before every model call of the request and before Ollama resends the prompt
+inside a call. A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
 deployment) when its accept step opens, and the host refuses the send if the destination
 changed since. The check and the binding come from one read of the
@@ -2751,8 +2756,8 @@ Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
 answer that may be run again carries a host-issued, single-use `offerId`,
 bound to its conversation, organization, the exact question, its workspace
 selection and the provider and model active at the time; offers live in
-memory for 15 minutes. The
-renderer sends `modelOverride` (`offerId`, chosen provider and model) on
+memory for 15 minutes. At the deadline Chat withdraws the choices, closes
+any open confirmation, and says to send the question again. The renderer sends `modelOverride` (`offerId`, chosen provider and model) on
 `SendIntuneChatMessageInput`. The service refuses it unless the offer exists
 for this conversation (not deleted), organization and question, the same
 provider and model are still active, the chosen provider is listed and ready,
@@ -2774,6 +2779,10 @@ data policy (PR #209 onward) applies to this send like any hosted send, since
 it goes through the same model choke point; no masking exists on main yet. The
 renderer shows an offer only in its own conversation and withdraws it when the
 organization or the active model changes.
+
+For prompt-only counts from LM Studio or llama.cpp, model fit adds 1,024
+tokens for the answer when checking whether another local model can fit the
+request.
 
 Apple Foundation reports the prompt's own tokens and the model's total; the
 helper also reserves room for the answer, so a prompt below the total reads
@@ -2825,8 +2834,13 @@ such a provider as ready for it. Start passes the provider and model the review 
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
-provider for a model fit rerun or for Run for real of a model fit dry run, and
-checks the picked provider in full the way selecting it does. A run resumed
+provider for a model fit rerun, and checks the picked provider in full the
+way selecting it does. Run for real keeps its dry run provider and model
+through setup. Setup names why it is blocked, including a missing provider,
+a disconnected provider, a missing model, a model list supplied by IT
+policy, or a required on-device model that now runs in Ollama Cloud. A configured Azure OpenAI deployment can be ready at "available".
+The admin can recheck that provider or open the agent page to
+start a new run with different settings. A run resumed
 from setup opens only its own review, and setup moves on from a provider
 picked for one run only once its full check is done. A hosted provider that
 reports no model, or only a CLI default placeholder such as Gemini's
@@ -2862,8 +2876,7 @@ was sent. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
-option; reading each local model's context length so only models that can
-take the request are offered; whether hosted rows should show a cost estimate.
+option and whether hosted rows should show a cost estimate.
 
 #### Agents as skills
 

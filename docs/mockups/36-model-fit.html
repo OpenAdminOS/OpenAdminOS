@@ -164,7 +164,7 @@
               <div>
                 <div class="name">gpt-oss:20b</div>
                 <div class="where stays">Ollama · on this device</div>
-                <div class="note">A larger model on this device. Its context size is not checked before the request.</div>
+                <div class="note">Reported context window: 65,536 tokens.</div>
               </div>
               <button class="btn" type="button">Use gpt-oss:20b</button>
             </div>
@@ -181,7 +181,8 @@
     <ul class="notes">
       <li>Numbers come from the provider's error (Ollama names both) or, once it lands, from the runtime's prompt fit check. Without numbers: "This request is larger than the context OpenAdmin 8B is set to."</li>
       <li>Hosted rows always show the production location label in amber, and a cost note: the app does not know the admin's plan or price, so it says where the cost lands.</li>
-      <li>The larger local model is chosen by the size in its name (8B, 20B). Its context window is not read, so the note says so.</li>
+      <li>A larger local model is offered only when its reported context window can fit the request.</li>
+      <li>After 15 minutes, the choices and any open confirmation close. Chat asks you to send the question again.</li>
       <li>Split the question puts the question back into the composer with a hint. Nothing is split automatically.</li>
     </ul>
   </section>
@@ -330,7 +331,7 @@
               <div>
                 <div class="name">gpt-oss:20b</div>
                 <div class="where stays">Ollama · on this device</div>
-                <div class="note">A larger model on this device. Its context size is not checked before the run.</div>
+                <div class="note">Reported context window: 65,536 tokens.</div>
               </div>
               <button class="btn" type="button">Use gpt-oss:20b</button>
             </div>

@@ -33,6 +33,11 @@ function positive(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
+function promptWithAnswerRoom(text: string | undefined): number | undefined {
+  const promptTokens = count(text);
+  return promptTokens === undefined ? undefined : positive(promptTokens + 1024);
+}
+
 /**
  * A typed failure from the runtime, read by its shape so this module does
  * not depend on one class: `kind` or `code` names the reason, with the
@@ -115,7 +120,7 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
   // The LM Studio adapter (packages/runtime/src/llm-lm-studio.ts).
   const lmStudio = /LM Studio context length too small: This request needs ([\d,]+) tokens of context, but .+? is loaded in LM Studio with a context length of ([\d,]+)\./i.exec(text);
   if (lmStudio) {
-    const neededTokens = count(lmStudio[1]);
+    const neededTokens = promptWithAnswerRoom(lmStudio[1]);
     const limitTokens = count(lmStudio[2]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
@@ -148,10 +153,9 @@ function contextIssueFromText(text: string): Omit<ModelFitIssue, "providerId" | 
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
   // llama.cpp server, which LM Studio and Lemonade run.
-  // Its error body (an `exceed_context_size_error` type, or the `n_ctx` count) is required, so a
-  // sentence that only mentions a context size does not raise the notice.
-  if (/exceed_context_size_error/i.test(text) || (/exceeds the available context size/i.test(text) && /"n_ctx"\s*:/.test(text))) {
-    const neededTokens = count(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
+  const availableContext = /exceeds the available context size/i.test(text);
+  if (/exceed_context_size_error|\b(?:request|prompt) exceeds the available context size\b/i.test(text) || (availableContext && /"n_ctx"\s*:/.test(text))) {
+    const neededTokens = promptWithAnswerRoom(/"n_prompt_tokens"\s*:\s*(\d+)/.exec(text)?.[1]);
     const limitTokens = count(/"n_ctx"\s*:\s*(\d+)/.exec(text)?.[1]);
     return { reason: "context-too-small", ...(neededTokens ? { neededTokens } : {}), ...(limitTokens ? { limitTokens } : {}) };
   }
@@ -248,6 +252,7 @@ export interface ModelFitChoice {
   isLocal: boolean;
   /** The model the request would use, the admin's pinned one for that provider when set. */
   model?: string;
+  contextWindow?: number;
 }
 
 export interface ModelFitChoices {
@@ -264,10 +269,6 @@ export interface ModelFitChoices {
  * Only providers in `providers` count, which is the list the main process
  * filtered by the managed policy, and only ready ones: a provider that
  * would fail its check is not offered.
- *
- * A larger local model is one with a larger parameter count in its name.
- * TODO(ugur): read each local model's context length (Ollama /api/show) so
- * only models that can take the request are offered for a context failure?
  */
 export function modelFitChoices(input: {
   issue: ModelFitIssue;
@@ -275,6 +276,7 @@ export function modelFitChoices(input: {
   activeModelByProviderId?: Partial<Record<ProviderId, string>> | undefined;
   /** The managed policy (policy.json), to say when it is why no hosted provider is offered. */
   managedPolicy?: ManagedPolicyStatus | undefined;
+  contextWindows?: ReadonlyMap<string, number> | undefined;
 }): ModelFitChoices {
   const { issue, providers } = input;
   // Hosted means a hosted service (a vendor CLI or Azure OpenAI). A model server outside this device
@@ -286,33 +288,13 @@ export function modelFitChoices(input: {
       const model = hostedModelFitModel(provider, input.activeModelByProviderId);
       return model ? [{ providerId: provider.id, providerName: provider.name, isLocal: false, model }] : [];
     });
-  const currentSize = modelSizeBillions(issue.model);
-  const local: ModelFitChoice[] = [];
-  // Repeated failures and reasoning budgets are about the model, so any
-  // larger model helps; a size is needed to call one larger at all. A prompt
-  // that did not fit a model whose size cannot be read from its name (Apple
-  // Foundation, a custom alias) is offered every sized model on this device,
-  // since its row already says the context size is not checked.
-  const sizeUnknownContext = currentSize === undefined && issue.reason === "context-too-small";
-  if (currentSize !== undefined || sizeUnknownContext) {
-    for (const provider of providers) {
-      if (!provider.isLocal || !isProviderReady(provider) || !managedProviderAllowed(input.managedPolicy, provider.id)) continue;
-      for (const model of provider.models) {
-        if (provider.id === issue.providerId && model === issue.model) continue;
-        if (!isOnDeviceModel(provider, model)) continue;
-        // A model the managed policy locks this provider to is the only one it may use.
-        const locked = managedLockedModel(input.managedPolicy, provider.id);
-        if (locked !== undefined && model !== locked) continue;
-        const size = modelSizeBillions(model);
-        if (size !== undefined && (currentSize === undefined || size > currentSize)) {
-          local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
-        }
-      }
-    }
-    // The next larger models first; with the failed size unknown, the largest first, since a small
-    // one is the likeliest to have the same small context.
-    local.sort((a, b) => (sizeUnknownContext ? -1 : 1) * ((modelSizeBillions(a.model) ?? 0) - (modelSizeBillions(b.model) ?? 0)));
-  }
+  const local = modelFitLocalCandidates(issue, providers, input.managedPolicy).flatMap((choice) => {
+    if (issue.reason !== "context-too-small") return [choice];
+    const contextWindow = positive(input.contextWindows?.get(modelFitContextKey(choice.providerId, choice.model)));
+    return contextWindow !== undefined && issue.neededTokens !== undefined && contextWindow >= issue.neededTokens
+      ? [{ ...choice, contextWindow }]
+      : [];
+  });
   // The main process already left out what the policy does not allow; this
   // only says so when the policy is the reason nothing hosted is offered.
   // Policy is why nothing hosted is offered when it allows no hosted provider, or when a ready hosted
@@ -322,6 +304,43 @@ export function modelFitChoices(input: {
     ([...HOSTED_PROVIDER_IDS].every((id) => !managedProviderAllowed(input.managedPolicy, id)) ||
       providers.some((provider) => !provider.isLocal && HOSTED_PROVIDER_IDS.has(provider.id) && provider.id !== issue.providerId && isProviderReady(provider) && provider.modelsFromPolicy === true));
   return { hosted, local: local.slice(0, 2), hostedBlockedByPolicy };
+}
+
+export function modelFitContextKey(providerId: ProviderId, model: string): string {
+  return JSON.stringify([providerId, model]);
+}
+
+/** Installed alternatives to consider, in the order they should be offered. */
+export function modelFitLocalCandidates(
+  issue: ModelFitIssue,
+  providers: readonly ProviderSummary[],
+  managedPolicy?: ManagedPolicyStatus,
+): Array<ModelFitChoice & { model: string }> {
+  const currentSize = modelSizeBillions(issue.model);
+  const local: Array<ModelFitChoice & { model: string }> = [];
+  // An unknown parameter count still permits candidates for a context failure,
+  // where their reported context is what establishes whether the request fits.
+  const contextFailure = issue.reason === "context-too-small";
+  const sizeUnknownContext = currentSize === undefined && contextFailure;
+  if (currentSize !== undefined || sizeUnknownContext) {
+    for (const provider of providers) {
+      if (!provider.isLocal || !isProviderReady(provider) || provider.modelsFromPolicy || !managedProviderAllowed(managedPolicy, provider.id)) continue;
+      for (const model of provider.models) {
+        if (provider.id === issue.providerId && model === issue.model) continue;
+        if (!isOnDeviceModel(provider, model)) continue;
+        // A model the managed policy locks this provider to is the only one it may use.
+        const locked = managedLockedModel(managedPolicy, provider.id);
+        if (locked !== undefined && model !== locked) continue;
+        const size = modelSizeBillions(model);
+        if (size !== undefined && (currentSize === undefined || size > currentSize || (contextFailure && size === currentSize))) {
+          local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
+        }
+      }
+    }
+    // Closest in size first. If the failed size is unknown, check the largest first.
+    local.sort((a, b) => (sizeUnknownContext ? -1 : 1) * ((modelSizeBillions(a.model) ?? 0) - (modelSizeBillions(b.model) ?? 0)));
+  }
+  return local;
 }
 
 /** Model servers OpenAdminOS reaches directly; outside this device they are never a model fit hosted choice. */

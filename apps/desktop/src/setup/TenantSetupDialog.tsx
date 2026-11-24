@@ -17,6 +17,7 @@ import {
   IconWarning,
 } from "../components/icons";
 import { POLICY_COPY, SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
+import { PROVIDER_TOOL_NAMES } from "../copy/providers";
 import { SetByItBadge } from "../components/ManagedPolicy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import type {
@@ -65,6 +66,23 @@ export type SetupStage =
   | "provider"
   | "ready";
 
+export type DryRunProviderBlock =
+  | "provider-missing"
+  | "not-connected"
+  | "policy-model-list"
+  | "model-missing"
+  | "off-device"
+  | "ollama-cloud"
+  | "no-usable-model";
+
+interface DryRunSetup {
+  provider: ProviderSummary | undefined;
+  providerId: ProviderId | undefined;
+  model: string | undefined;
+  block: DryRunProviderBlock | undefined;
+  onOpenAgent: () => void;
+}
+
 export function TenantSetupDialog({
   open,
   stage,
@@ -76,6 +94,7 @@ export function TenantSetupDialog({
   agentName,
   providers,
   activeProviderId,
+  dryRunSetup,
   savedRegistrations = [],
   registrationLocked = false,
   editOptions,
@@ -99,6 +118,7 @@ export function TenantSetupDialog({
   agentName?: string;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
+  dryRunSetup?: DryRunSetup;
   /** Custom registrations remembered on this device, most recent first. */
   savedRegistrations?: SavedAppRegistration[];
   /** The IT policy file locks sign-in to its own registration (the `managed` entry). */
@@ -117,13 +137,14 @@ export function TenantSetupDialog({
   onRecheckProviders: () => void | Promise<void>;
   onResume: () => void;
 }) {
-  const statusAnnouncement = setupAnnouncement(stage, activeTenant);
+  const checkingDryRun = stage === "provider" ? dryRunSetup : undefined;
+  const statusAnnouncement = checkingDryRun ? "Check the dry run provider" : setupAnnouncement(stage, activeTenant);
 
   return (
     <Modal open={open} onClose={onClose} size="md" closeOnScrim={stage !== "waiting"}>
       <ModalHeader
-        title={dialogTitle(stage)}
-        subtitle={dialogSubtitle(stage)}
+        title={checkingDryRun ? "Check the dry run provider" : dialogTitle(stage)}
+        subtitle={checkingDryRun ? undefined : dialogSubtitle(stage)}
         onClose={onClose}
       />
       <div className="sr-only" aria-live="polite" aria-atomic="true">
@@ -163,7 +184,8 @@ export function TenantSetupDialog({
           {...(onEditSignIn ? { onEditSignIn } : {})}
         />
       )}
-      {stage === "provider" && (
+      {checkingDryRun && <DryRunProviderStep setup={checkingDryRun} error={error} onRecheck={onRecheckProviders} onCancel={onClose} />}
+      {stage === "provider" && !checkingDryRun && (
         <ProviderStep
           providers={providers}
           activeProviderId={activeProviderId}
@@ -1048,6 +1070,44 @@ function ErrorStep({
           )}
           <Button data-autofocus variant="primary" onClick={onTryAgain}>Try again</Button>
         </div>
+      </DialogFooter>
+    </>
+  );
+}
+
+function DryRunProviderStep({ setup, error, onRecheck, onCancel }: {
+  setup: DryRunSetup;
+  error: string | null;
+  onRecheck: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const { provider, providerId, model, block, onOpenAgent } = setup;
+  const providerName = provider?.name ?? (providerId && (PROVIDER_TOOL_NAMES[providerId] ?? providerId)) ?? "the original provider";
+  const showSetup = provider && block === "not-connected";
+  const reasons: Record<DryRunProviderBlock, string> = {
+    "provider-missing": providerId
+      ? `The provider list is missing ${providerName}. Check Settings > Providers, then recheck here.`
+      : "This dry run has no saved provider.",
+    "not-connected": `Connect ${providerName} to continue.`,
+    "policy-model-list": `IT policy supplies the model list for ${providerName}. Ask IT to restore access to the dry run model, then recheck.`,
+    "model-missing": `${providerName} no longer lists ${model}. Restore the model, then recheck.`,
+    "off-device": `${providerName} now runs outside this device. Restore its local endpoint, then recheck.`,
+    "ollama-cloud": "The dry run model now runs in Ollama Cloud. Restore the local model, then recheck.",
+    "no-usable-model": `${providerName} has no usable model for this run. Check Settings > Providers, then recheck here.`,
+  };
+  return (
+    <>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6 text-sm text-[var(--color-text-soft)]">
+        <p>Run for real uses {providerName}{model ? ` with ${model}` : ""}, as the dry run did.</p>
+        {block ? <p role="status">{reasons[block]}</p> : null}
+        <p>Open the agent page to start a new run with different settings.</p>
+        {error ? <p role="alert" className="text-[var(--color-danger)]">{error}</p> : null}
+        {showSetup ? <ProviderNotReadyCard provider={provider} onRecheck={onRecheck} /> : null}
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button variant="secondary" onClick={onOpenAgent}>Open agent page</Button>
+        {providerId && !showSetup ? <Button variant="secondary" onClick={() => void onRecheck()}>Recheck dry run provider</Button> : null}
       </DialogFooter>
     </>
   );
