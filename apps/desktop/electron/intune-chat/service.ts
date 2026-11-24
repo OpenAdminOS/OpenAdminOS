@@ -2539,7 +2539,7 @@ export class IntuneChatService {
                 responseModel = undefined;
               } else {
                 assistantStatus = "failed";
-                assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
+                assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, questionKind: answerPlan?.sources.kind, failure: agentic.failureReason, local: provider.isLocal });
                 assistantContent = assistantError;
               }
             } else {
@@ -2551,7 +2551,7 @@ export class IntuneChatService {
             const failureRouted = provider.isLocal && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
             if (failureRouted || roadmapQuestion) {
               assistantStatus = "failed";
-              assistantError = incompleteChatAnswer({ steps, roadmapQuestion, skippedNotice: failureRouted ? capability.notice : undefined, local: provider.isLocal });
+              assistantError = incompleteChatAnswer({ steps, roadmapQuestion, questionKind: answerPlan?.sources.kind, skippedNotice: failureRouted ? capability.notice : undefined, local: provider.isLocal });
               assistantContent = assistantError;
             } else {
               const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan.mcpInstalled));
@@ -3520,7 +3520,7 @@ export class IntuneChatService {
                     responseModel = undefined;
                   } else {
                     assistantStatus = "failed";
-                    assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
+                    assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, questionKind: answerPlan?.sources.kind, failure: agentic.failureReason, local: provider.isLocal });
                     assistantContent = assistantError;
                   }
                   emitDelta(assistantContent);
@@ -3535,7 +3535,7 @@ export class IntuneChatService {
             const failureRouted = provider.isLocal && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
             if (failureRouted || roadmapQuestion) {
               assistantStatus = "failed";
-              assistantError = incompleteChatAnswer({ steps, roadmapQuestion, skippedNotice: failureRouted ? capability.notice : undefined, local: provider.isLocal });
+              assistantError = incompleteChatAnswer({ steps, roadmapQuestion, questionKind: answerPlan?.sources.kind, skippedNotice: failureRouted ? capability.notice : undefined, local: provider.isLocal });
               assistantContent = assistantError;
               emitDelta(assistantContent);
             } else {
@@ -4338,6 +4338,7 @@ function incompleteChatAnswer(input: {
   steps: ChatStepRecorder;
   toolTrace?: readonly IntuneChatToolTraceEntry[];
   roadmapQuestion: boolean;
+  questionKind: IntuneChatMessage["questionKind"];
   failure?: AgenticFailureReason;
   skippedNotice?: string;
   local: boolean;
@@ -4345,8 +4346,9 @@ function incompleteChatAnswer(input: {
   const reason = input.failure
     ? input.local ? LOCAL_FALLBACK_NOTICES[input.failure].replace(" Answered from cached data instead.", "") : "The model could not finish the investigation."
     : input.skippedNotice?.replace("Answered from cached data without the tool loop: ", "").replace("Chat skips the tool loop", "Chat skipped the tool loop");
+  const roadmapFailure = input.roadmapQuestion ? failedRoadmapCheck(input.toolTrace ?? []) : undefined;
   const roadmap = input.roadmapQuestion
-    ? failedRoadmapCheck(input.toolTrace ?? []) ?? ((input.toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === RELEASE_COMMUNICATIONS_SERVER_ID && !entry.error)
+    ? roadmapFailure ?? ((input.toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === RELEASE_COMMUNICATIONS_SERVER_ID && !entry.error)
       ? "Microsoft Release Communications responded. The model did not finish reviewing the results."
       : ROADMAP_NOT_CONSULTED)
     : undefined;
@@ -4354,10 +4356,11 @@ function incompleteChatAnswer(input: {
   const tenantRefreshed = input.steps.steps.some((step) => step.kind === "graph-refresh" && step.status === "completed");
   const tenant = tenantRead || tenantRefreshed
     ? "Tenant data was checked during the investigation."
-    : "Tenant data was not checked.";
+    : input.questionKind === "tenant" || input.questionKind === "mixed" ? "Tenant data was not checked." : undefined;
+  const recovery = roadmapFailure && !input.local ? "Try again later." : "Try again, or choose another model.";
   const step = input.steps.start({ kind: "answer", title: "Could not complete the answer", detail: "No verified cached answer for this question.", origin: "device", originLabel: ON_DEVICE });
   input.steps.finish(step, { status: "failed" });
-  return [reason, roadmap, tenant, "Try again, or choose another model."].filter(Boolean).join(" ");
+  return [reason, roadmap, tenant, recovery].filter(Boolean).join(" ");
 }
 
 /**

@@ -380,9 +380,39 @@ describe("Microsoft 365 roadmap routing", () => {
       roadmapRequests.length = 0;
       const message = (await store.sendIntuneChatMessage({ content: "What's on the Microsoft 365 roadmap?" })).assistantMessage;
       assert.deepEqual(roadmapRequests, [{ skip: 50, filter: "status eq 'Rolling out'" }]);
-      assert.match(message.content, /roadmap items were not checked/);
-      assert.doesNotMatch(message.content, /have rolled out/);
+      assert.equal(message.content, "The roadmap items were not checked because Microsoft Release Communications returned an error. Try again later.");
     }, { roadmap: true });
+  });
+  it("omits tenant coverage for a docs-only roadmap question when the local model also fails", async () => {
+    await withHarness(async ({ store, script }) => {
+      script([
+        { kind: "docs", tool: roadmapTool, params: {} },
+        { final: true, answer: "" },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: "What's on the Microsoft 365 roadmap?" })).assistantMessage;
+      assert.equal(message.status, "failed");
+      assert.equal(message.questionKind, "docs");
+      assert.match(message.content, /Microsoft Release Communications returned an error\. Try again, or choose another model\.$/);
+      assert.doesNotMatch(message.content, /Tenant data/);
+    }, { roadmap: true });
+  });
+
+  it("suggests trying later when the public source fails during a hosted investigation", async () => {
+    const provider = { id: "anthropic" as const, model: "claude-sonnet-4" };
+    await withHarness(async ({ store, script }) => {
+      await store.setChatInvestigationMode("always-agentic");
+      script([
+        { kind: "docs", tool: roadmapTool, params: {} },
+        { final: true, answer: "" },
+      ]);
+      const message = (await store.sendIntuneChatMessage({
+        content: "What's on the Microsoft 365 roadmap?",
+        hostedProviderConsent: { providerId: provider.id, model: provider.model, tenantId: tenant.id, acknowledgedAt: new Date().toISOString() },
+      })).assistantMessage;
+      assert.equal(message.status, "failed");
+      assert.equal(message.questionKind, "docs");
+      assert.equal(message.content, "The model could not finish the investigation. The roadmap items were not checked because Microsoft Release Communications returned an error. Try again later.");
+    }, { roadmap: true, provider });
   });
 });
 

@@ -735,8 +735,9 @@ export async function runAgenticChat(
         turns.push({ role: 'repair', content: `A failed data lookup cannot support a final answer or a zero count. Correct the query for ${[...invalidQueries.keys()].join(', ')} using the available fields before answering.` });
         continue;
       }
-      const roadmapFailure = roadmapQuestion ? failedRoadmapCheck(toolTrace) ??
-        (!roadmapServer || !attemptedServers.has(roadmapServer.id) ? ROADMAP_NOT_CONSULTED : undefined) : undefined;
+      const lookupFailure = roadmapQuestion ? failedRoadmapCheck(toolTrace) : undefined;
+      const roadmapFailure = lookupFailure ?? (roadmapServer && !attemptedServers.has(roadmapServer.id) ? ROADMAP_NOT_CONSULTED : undefined);
+      const roadmapRecovery = lookupFailure ? "Try again later." : "Retry the question or open What ran for details.";
       await settleModelStep(roadmapFailure ? { kind: "repair", reason: "roadmap", ends: true } : finalOutcome(), !roadmapFailure);
       // The repair budget for required sources is spent: the answer is kept, never silently.
       const notConsulted = missingNames.length > 0
@@ -746,7 +747,7 @@ export async function runAgenticChat(
       const excerptsNote = excerptsOnly ? "\n\nThis answer is based on search excerpts; the full article was not read." : "";
       return {
         ok: true,
-        answer: roadmapFailure ? `${roadmapFailure} Retry the question or open What ran for details.` : finalAnswer + notConsulted + excerptsNote,
+        answer: roadmapFailure ? `${roadmapFailure} ${roadmapRecovery}` : finalAnswer + notConsulted + excerptsNote,
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
