@@ -33,7 +33,7 @@ const LEMONADE: OpenAiCompatibleServer = {
   httpStatusDetail: (status) =>
     status === 401
       ? // TODO(ugur): send a Lemonade API key? Today the admin has to run the server without LEMONADE_API_KEY.
-        "Lemonade asks for an API key because LEMONADE_API_KEY is set where it runs. OpenAdminOS does not send Lemonade API keys, so start Lemonade without it, then try again."
+        "The server requires an API key. To connect from OpenAdminOS, unset LEMONADE_API_KEY, restart the server, then try again."
       : undefined,
   chatModelIds: lemonadeChatModelIds,
   unlistedModelMessage: lemonadeUnlistedModelMessage,
