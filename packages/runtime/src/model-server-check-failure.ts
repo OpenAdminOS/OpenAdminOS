@@ -25,7 +25,11 @@ export function describeModelServerCheckFailure(
     ? `Check ${endpointSetting}, then try again.`
     : "Check that the server is running at that address, then try again.";
   // JSON parse errors can contain excerpts of the answer. Never classify or display those excerpts.
-  const kind = error instanceof SyntaxError && httpStatus !== undefined ? undefined : classifyNetworkFailure(error, isLocal);
+  const transportKind = error instanceof SyntaxError && httpStatus !== undefined ? undefined : classifyNetworkFailure(error, isLocal);
+  // Loopback requests bypass the proxy and do not need an external network.
+  const kind = isLocal && (transportKind === "proxy" || transportKind === "proxy-auth" || transportKind === "offline")
+    ? undefined
+    : transportKind;
   const notRunning = kind === "refused" && isLocal && httpStatus === undefined && !stopped;
   const result = (detail: string) => ({ notRunning, detail });
 
@@ -65,9 +69,14 @@ export function describeModelServerCheckFailure(
   }
 }
 
-export function modelServerHttpFailure(name: string, endpoint: string, status: number, recovery?: string): string {
-  if (status === 407) {
+export function modelServerHttpFailure(
+  name: string,
+  endpoint: string,
+  status: number,
+  options: { isLocal?: boolean; recovery?: string } = {},
+): string {
+  if (status === 407 && !options.isLocal) {
     return proxyAuthDetail(`${name} on ${endpoint}`, status);
   }
-  return `${name} on ${endpoint} responded with HTTP ${status}. ${recovery ?? "Check the server address and configuration, then try again."}`;
+  return `${name} on ${endpoint} responded with HTTP ${status}. ${options.recovery ?? "Check the server address and configuration, then try again."}`;
 }

@@ -189,7 +189,9 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         checkFailed: true,
         detail: ollamaEndpointDetail(
           endpointTrust,
-          isRefusedRedirect(response, tagsUrl) ? redirectRefusedDetail("Ollama", tagsUrl) : modelServerHttpFailure("Ollama", endpoint, response.status),
+          isRefusedRedirect(response, tagsUrl)
+            ? redirectRefusedDetail("Ollama", tagsUrl)
+            : modelServerHttpFailure("Ollama", endpoint, response.status, { isLocal: endpointTrust.isLocal }),
         ),
         models: [],
       };

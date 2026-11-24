@@ -427,7 +427,10 @@ export async function probeOpenAiCompatibleLlm(
         isLocal: endpointTrust.isLocal,
         models: [],
         status: "error",
-        detail: modelServerHttpFailure(name, endpoint, response.status, server.httpStatusDetail?.(response.status)),
+        detail: modelServerHttpFailure(name, endpoint, response.status, {
+          isLocal: endpointTrust.isLocal,
+          recovery: server.httpStatusDetail?.(response.status),
+        }),
       };
     }
     const payload = (await response.json()) as ModelsResponse;
