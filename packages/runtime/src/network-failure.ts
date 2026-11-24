@@ -2,7 +2,7 @@ export type NetworkFailureKind = "dns" | "refused" | "timeout" | "reset" | "unre
 
 const CODES: ReadonlyArray<[NetworkFailureKind, RegExp]> = [
   ["dns", /^(ENOTFOUND|EAI_AGAIN|EAI_NONAME)$/],
-  ["timeout", /^(ETIMEDOUT|ESOCKETTIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)$/],
+  ["timeout", /^(ETIMEDOUT|ESOCKETTIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|ERR_CONNECTION_TIMED_OUT)$/],
   ["reset", /^(ECONNRESET|EPIPE|UND_ERR_SOCKET)$/],
   ["unreachable", /^(ENETUNREACH|EHOSTUNREACH|ENETDOWN|EADDRNOTAVAIL)$/],
   ["proxy", /^(UND_ERR_PROXY|UND_ERR_PRX_|ERR_PROXY|ERR_TUNNEL)/],
@@ -14,13 +14,13 @@ const CODES: ReadonlyArray<[NetworkFailureKind, RegExp]> = [
 const REQUEST_SETUP_TEXT: ReadonlyArray<[NetworkFailureKind, RegExp]> = [
   ["blocked-port", /\bbad port\b|ERR_UNSAFE_PORT/i],
   ["proxy-auth", /\bHTTP\s+407\b|proxy authentication required|proxy response.*\b407\b/i],
-  ["proxy", /proxy response|proxy (?:server|connection|tunnel|connect)|ERR_TUNNEL_CONNECTION_FAILED/i],
+  ["proxy", /proxy response|proxy (?:server|connection|tunnel|connect)|\bERR_PROXY\w*\b|ERR_TUNNEL_CONNECTION_FAILED/i],
 ];
 
 const TEXT: ReadonlyArray<[NetworkFailureKind, RegExp]> = [
   ["offline", /ERR_INTERNET_DISCONNECTED/],
   ["dns", /no such host|ENOTFOUND|EAI_AGAIN|getaddrinfo|ERR_NAME_NOT_RESOLVED|name not resolved/i],
-  ["timeout", /AbortError|i\/o timeout|context deadline exceeded|handshake timeout|timed out|ETIMEDOUT|ERR_TIMED_OUT|TimeoutError|aborted due to timeout/i],
+  ["timeout", /AbortError|i\/o timeout|context deadline exceeded|handshake timeout|timed out|ETIMEDOUT|ERR_(?:CONNECTION_)?TIMED_OUT|TimeoutError|aborted due to timeout/i],
   ["certificate", /x509|certificate|self[- ]signed|unable to verify|CERT_/i],
   ["tls", /\b(?:TLS|SSL)\b.*(?:handshake|alert|wrong version)|wrong version number/i],
   ["reset", /connection reset|ECONNRESET|socket hang up|other side closed|ERR_CONNECTION_RESET/i],

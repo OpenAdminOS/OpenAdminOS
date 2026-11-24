@@ -18,4 +18,13 @@ describe("classifyNetworkFailure", () => {
   it("reports refusal when all loopback addresses refuse the connection", () => {
     assert.equal(classifyNetworkFailure(failedAddresses("ECONNREFUSED", "ECONNREFUSED"), true), "refused");
   });
+
+  it("recognizes Chromium and proxy error names in messages and codes", () => {
+    for (const code of ["ERR_PROXY_CONNECTION_FAILED", "ERR_PROXY"]) {
+      assert.equal(classifyNetworkFailure(new Error("net::" + code, { cause: failedAddresses("ECONNRESET") })), "proxy");
+      assert.equal(classifyNetworkFailure({ code }), "proxy");
+    }
+    assert.equal(classifyNetworkFailure(new Error("net::ERR_CONNECTION_TIMED_OUT")), "timeout");
+    assert.equal(classifyNetworkFailure({ code: "ERR_CONNECTION_TIMED_OUT" }), "timeout");
+  });
 });
