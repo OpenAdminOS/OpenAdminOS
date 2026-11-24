@@ -157,7 +157,7 @@ test("Sophos tools and confirmed writes stay in their organization and records n
         });
       };
       const run = await store.prepareSophosChange({ organizationId, kind: "isolate", targetIds: [endpointId, other.id], comment: "Investigate" });
-      const count = writes.length;
+      const count: number = writes.length;
       await store.confirmRun(run.id, "ISOLATE 2 DEVICES", { activeOrganizationOnly: true });
       await sent.promise;
       if (stop === "cancel") await store.cancelRun(run.id);
