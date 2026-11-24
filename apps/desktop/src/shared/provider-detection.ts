@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_NAME, activeModelProvider } from "@openadminos/agent-sdk";
 import type { ProviderId, ProviderSummary } from "./openAdminOS.js";
 import { isProviderImplemented } from "./providers.js";
 
@@ -55,10 +56,10 @@ export function pickLocalProviderToAutoSelect(
   activeProviderId: ProviderId,
 ): ProviderSummary | undefined {
   const active = providers.find((provider) => provider.id === activeProviderId);
-  if (isProviderReady(active)) return undefined;
+  if (activeModelProvider(active)?.name !== OLLAMA_CLOUD_NAME && isProviderReady(active)) return undefined;
   for (const id of LOCAL_AUTO_SELECT_ORDER) {
     const candidate = providers.find((provider) => provider.id === id);
-    if (candidate?.isLocal === true && isProviderReady(candidate)) return candidate;
+    if (activeModelProvider(candidate)?.isLocal === true && isProviderReady(candidate)) return candidate;
   }
   return undefined;
 }
@@ -75,8 +76,9 @@ export function detectedHostedProviders(
 ): ProviderSummary[] {
   const active = providers.find((provider) => provider.id === activeProviderId);
   if (isProviderReady(active)) return [];
-  if (providers.some((provider) => provider.isLocal && isProviderReady(provider))) {
+  const candidates = providers.map((provider) => activeModelProvider(provider));
+  if (candidates.some((provider) => provider.isLocal && isProviderReady(provider))) {
     return [];
   }
-  return providers.filter((provider) => !provider.isLocal && isProviderReady(provider));
+  return candidates.filter((provider) => !provider.isLocal && isProviderReady(provider));
 }

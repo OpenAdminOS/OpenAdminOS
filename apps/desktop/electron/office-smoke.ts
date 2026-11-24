@@ -1,7 +1,38 @@
 /** Synthetic end-to-end Office checks, invoked only by the unpackaged screenshot harness. */
 import type { BrowserWindow } from "electron";
+import { once } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
+
+export async function withOfficeSmokeOllama(model: string, run: () => Promise<void>): Promise<void> {
+  // The model factory supplies answers in memory. Agent Team still reads the
+  // installed model list over HTTP before it sends to an on-device Ollama model.
+  const server = createServer((request, response) => {
+    if (request.method !== "GET" || request.url !== "/api/tags") {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ models: [{ name: model, model }] }));
+  });
+  const endpoint = process.env.OPENAGENTS_OLLAMA_URL;
+  const listening = once(server, "listening");
+  server.listen(0, "127.0.0.1");
+  await listening;
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Office smoke Ollama fixture did not bind a TCP port.");
+    process.env.OPENAGENTS_OLLAMA_URL = `http://127.0.0.1:${address.port}`;
+    await run();
+  } finally {
+    if (endpoint === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+    else process.env.OPENAGENTS_OLLAMA_URL = endpoint;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  }
+}
 
 export async function runOfficeSmoke(
   window: BrowserWindow,

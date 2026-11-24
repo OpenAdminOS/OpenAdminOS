@@ -1,5 +1,7 @@
-import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate } from "../shared/chat-date-time";
+import { hasRememberedHostedChatConsent, rememberHostedChatConsent } from "../shared/hosted-chat-consent";
+import { OLLAMA_CLOUD_NAME, hostedOllamaDestination, type HostedOllamaDestination, isOnDeviceModel, isRemoteBackedModel, providerForModel, resolveRunModel } from "@openadminos/agent-sdk";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -102,6 +104,7 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import { ModelFitNotice, modelFitModelName } from "../components/ModelFitNotice";
 import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { MODEL_FIT_RESEND, modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
+import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
@@ -141,6 +144,7 @@ type HostedChatConsentPrompt = {
   tenantId?: string;
   providerId: ProviderId;
   providerName: string;
+  ollamaDestination?: HostedOllamaDestination;
   model?: string;
   workspaceContext?: WorkspacePromptContextInput;
   workspaceContextSummary?: WorkspacePromptContextSummary;
@@ -376,11 +380,12 @@ function IntuneChatContent() {
   const activeTenant = state.activeTenantId
     ? tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
-  const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
+  const endpoint = state.providers.find((entry) => entry.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(
-    provider,
+    endpoint,
     state.activeModelByProviderId,
   ).model;
+  const provider = providerForModel(endpoint, activeModel);
   const providerReady = Boolean(
     provider && ["connected", "available"].includes(provider.status),
   );
@@ -748,7 +753,12 @@ function IntuneChatContent() {
       const requestedAgent = requestedAgentMatch.agent;
       clearChatDraft(targetConversationId);
       setInput("");
-      if (requestedAgent.mode === "write") {
+      const model = resolveRunModel({
+        provider: endpoint,
+        preferredModel: requestedAgent.preferredModel,
+        activeModelByProviderId: state.activeModelByProviderId,
+      }).model;
+      if (requestedAgent.mode === "write" || (endpoint?.id === "ollama" && isRemoteBackedModel(endpoint, model))) {
         navigate(`/agents/${encodeURIComponent(requestedAgent.slug)}/confirm`);
         return;
       }
@@ -787,8 +797,10 @@ function IntuneChatContent() {
       !blockedOnDevice &&
       (requiresHostedChatConsent(provider, activeTenant, activeModel) || Boolean(workspaceContext))
     ) {
+      const ollamaDestination = hostedOllamaDestination(provider, activeModel);
       setHostedConsentPrompt({
         content,
+        ...(ollamaDestination ? { ollamaDestination } : {}),
         ...(conversationIdOverride !== undefined
           ? { conversationId: conversationIdOverride }
           : {}),
@@ -1260,7 +1272,7 @@ function IntuneChatContent() {
     const pending = hostedConsentPrompt;
     if (!pending) return;
     if (rememberHostedConsent) {
-      rememberHostedChatConsent(pending.tenantId, pending.providerId, pending.model);
+      rememberHostedChatConsent(pending.tenantId, pending.providerId, pending.model, pending.ollamaDestination);
     }
     setHostedConsentPrompt(null);
     await executeSend(
@@ -1271,16 +1283,34 @@ function IntuneChatContent() {
         rememberHostedConsent,
         pending.workspaceContextSummary,
         pending.model,
+        undefined,
+        pending.ollamaDestination,
       ),
       pending.conversationId,
       pending.workspaceContext,
     );
   };
 
+  const expireModelFitOffer = useCallback((offer: ModelFitOffer) => {
+    if (modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
+    modelFitChoiceRef.current += 1;
+    setModelFitOffer(null);
+    setModelFitAccept(null);
+    setNotice(`This choice has expired. ${MODEL_FIT_RESEND}`);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }, []);
+
+  const checkModelFitExpiry = (offer: ModelFitOffer) => {
+    if (offer.issue.offerExpiresAt === undefined || Date.now() < offer.issue.offerExpiresAt) return false;
+    expireModelFitOffer(offer);
+    return true;
+  };
+
   // A model fit choice runs this one request on the chosen provider. A
   // local one sends at once, since nothing leaves the device; a hosted one
   // opens the accept step first and sends only from its Send button.
   const chooseModelFit = async (offer: ModelFitOffer, choice: ModelFitChoice) => {
+    if (checkModelFitExpiry(offer)) return;
     const override: ChatModelOverride = {
       offerId: offer.issue.offerId,
       providerId: choice.providerId,
@@ -1298,7 +1328,7 @@ function IntuneChatContent() {
     // Where the provider is reached as this accept step opens; the host refuses a send that goes elsewhere.
     const destination = await window.openAdminOS?.getProviderDestination?.(choice.providerId).catch(() => undefined);
     // A later choice, or a withdrawn offer, supersedes this lookup.
-    if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId) return;
+    if (choiceId !== modelFitChoiceRef.current || modelFitOfferRef.current?.issue.offerId !== offer.issue.offerId || checkModelFitExpiry(offer)) return;
     // Without a destination the host would refuse the send, so the accept step does not open.
     if (window.openAdminOS?.getProviderDestination && !destination) {
       setNotice(MODEL_FIT_COPY.destinationFailedChat(choice.providerName));
@@ -1325,7 +1355,7 @@ function IntuneChatContent() {
 
   const confirmModelFitAndSend = async () => {
     const pending = modelFitAccept;
-    if (!pending) return;
+    if (!pending || checkModelFitExpiry(pending.offer)) return;
     setModelFitAccept(null);
     // Never a remembered acknowledgement: the host refuses one for an override.
     await executeSend(
@@ -1358,6 +1388,22 @@ function IntuneChatContent() {
   // waits for its id there; any other conversation, or a change of model or
   // organization, withdraws it.
   const modelFitOfferShown = modelFitOffer !== null && activeConversationId === modelFitOffer.conversationId;
+  const { choices: fitChoices, checkingLocalContext } = useModelFitChoices({
+    issue: modelFitOfferShown ? modelFitOffer.issue : undefined,
+    providers: state.providers,
+    activeModelByProviderId: state.activeModelByProviderId,
+    managedPolicy: state.managedPolicy,
+  });
+  useEffect(() => {
+    if (!modelFitOfferShown || modelFitOffer?.issue.offerExpiresAt === undefined) return;
+    const delay = modelFitOffer.issue.offerExpiresAt - Date.now();
+    if (delay <= 0) {
+      expireModelFitOffer(modelFitOffer);
+      return;
+    }
+    const timer = window.setTimeout(() => expireModelFitOffer(modelFitOffer), delay);
+    return () => window.clearTimeout(timer);
+  }, [expireModelFitOffer, modelFitOffer, modelFitOfferShown]);
   // The accept step sends the question it shows. Editing the composer or the
   // attachments while it is open closes it unsent, so nothing changed goes out
   // under an acceptance of something else.
@@ -1938,15 +1984,11 @@ function IntuneChatContent() {
         onConfirm={() => void confirmModelFitAndSend()}
         onUseLocal={() => setModelFitAccept(null)}
       />
-    ) : modelFitOffer && modelFitOfferShown && !runInProgress ? (
+    ) : modelFitOffer && modelFitOfferShown && fitChoices && !runInProgress ? (
       <ModelFitNotice
         issue={modelFitOffer.issue}
-        choices={modelFitChoices({
-          issue: modelFitOffer.issue,
-          providers: state.providers,
-          activeModelByProviderId: state.activeModelByProviderId,
-          managedPolicy: state.managedPolicy,
-        })}
+        choices={fitChoices}
+        checkingLocalContext={checkingLocalContext}
         surface="chat"
         returnModel={modelFitReturnModel(modelFitOffer)}
         answered={modelFitOffer.answered === true}
@@ -2657,7 +2699,7 @@ function ChatComposer({
     : dataBoundary.kind === "none"
       ? FIRST_RUN_CHAT_COPY.placeholderNoModel
       : FIRST_RUN_CHAT_COPY.placeholderNoTenant;
-  const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  const activeProvider = providerForModel(providers.find((provider) => provider.id === activeProviderId), activeModel);
   // The same sentence as Connections; the shield's tooltip adds what the location depends on.
   const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
   const locationDetail = activeProvider ? providerDataLocationDetail(activeProvider) : undefined;
@@ -3005,7 +3047,7 @@ function ComposerModelPopover({
         }}
         className={`flex h-8 max-w-[240px] cursor-pointer list-none items-center gap-1.5 rounded-[9px] px-2.5 text-sm text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] [&::-webkit-details-marker]:hidden ${focusRingClass} ${disabled ? "pointer-events-none opacity-50" : ""}`}
       >
-        {activeProvider?.isLocal === false ? <IconCloud size={12} /> : <IconLock size={12} />}
+        {providerForModel(activeProvider, activeModel)?.isLocal === false ? <IconCloud size={12} /> : <IconLock size={12} />}
         <span className="truncate">{activeLabel ?? activeProvider?.name ?? "Choose model"}</span>
         <IconChevronDown size={11} className="text-[var(--color-text-muted)]" />
       </summary>
@@ -3023,7 +3065,11 @@ function ComposerModelPopover({
           </div>
         ) : null}
         {([true, false] as const).map((local, groupIndex) => {
-          const group = availableProviders.filter((provider) => provider.isLocal === local);
+          const group = availableProviders.map((provider) => ({
+            ...provider,
+            models: provider.models.filter((model) => isOnDeviceModel(provider, model) === local),
+            unavailableModels: provider.unavailableModels?.filter(({ id }) => isOnDeviceModel(provider, id) === local),
+          })).filter((provider) => provider.models.length > 0 || (provider.unavailableModels?.length ?? 0) > 0);
           if (group.length === 0) return null;
           return (
             <div key={local ? "local" : "hosted"} className={groupIndex > 0 ? "mt-1 border-t border-[var(--color-border-soft)] pt-1" : ""}>
@@ -3034,7 +3080,10 @@ function ComposerModelPopover({
                 ...provider.models.map((model) => {
                   const selected = provider.id === activeProviderId && model === activeModel;
                   const note = modelTrustNote(provider.id, model);
-                  const subtitle = note ? `${provider.name} · ${note}` : provider.name;
+                  const modelProvider = providerForModel(provider, model);
+                  const subtitle = modelProvider.name === OLLAMA_CLOUD_NAME
+                    ? providerDataLocation(modelProvider)
+                    : note ? `${provider.name} · ${note}` : provider.name;
                   return (
                     <button
                       key={`${provider.id}:${model}`}
@@ -4099,7 +4148,9 @@ function HostedBatchConsentModal({
     <Modal open={Boolean(prompt)} onClose={onClose} size="lg">
       <ModalHeader
         title="Send multi-tenant context to hosted provider"
-        subtitle={prompt?.preflight.providerName ?? "Hosted provider"}
+        subtitle={prompt?.preflight.providerName === OLLAMA_CLOUD_NAME
+          ? providerDataLocation({ id: "ollama", name: OLLAMA_CLOUD_NAME })
+          : prompt?.preflight.providerName ?? "Hosted provider"}
         badge={<Badge tone="warning">Hosted batch</Badge>}
         onClose={onClose}
       />
@@ -4307,7 +4358,7 @@ function HostedChatConsentPanel({
   }, [modelFitOfferId]);
   const noTenant = !prompt.tenantId;
   const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
-  const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
+  const tool = prompt.providerName === OLLAMA_CLOUD_NAME ? prompt.providerName : PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
   const tenant = tenantName ?? "the active tenant";
   const workspace = prompt.workspaceContextSummary
     ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
@@ -4426,22 +4477,23 @@ function modelFitReturnModel(offer: ModelFitOffer): string {
 }
 
 function requiresHostedChatConsent(
-  provider: { id: ProviderId; isLocal: boolean } | undefined,
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels"> | undefined,
   tenant: { id: string } | undefined,
   model?: string,
 ): provider is { id: ProviderId; isLocal: false } {
   if (!provider || provider.isLocal) return false;
-  return !hasRememberedHostedChatConsent(tenant?.id, provider.id, model);
+  return !hasRememberedHostedChatConsent(tenant?.id, provider.id, model, hostedOllamaDestination(provider, model));
 }
 
 function rememberedHostedProviderConsent(
-  provider: { id: ProviderId; isLocal: boolean } | undefined,
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels"> | undefined,
   tenant: { id: string } | undefined,
   model?: string,
 ): HostedProviderConsentInput | undefined {
   if (!provider || provider.isLocal) return undefined;
-  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model)) return undefined;
-  return createHostedProviderConsent(tenant?.id, provider.id, true, undefined, model);
+  const destination = hostedOllamaDestination(provider, model);
+  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model, destination)) return undefined;
+  return createHostedProviderConsent(tenant?.id, provider.id, true, undefined, model, undefined, destination);
 }
 
 /** `tenantId` undefined binds the confirmation to a send with no tenant. */
@@ -4453,10 +4505,11 @@ export function createHostedProviderConsent(
   model?: string,
   /** The model fit offer this acceptance is for; it covers that one request only. */
   modelFitOfferId?: string,
+  ollamaDestination?: HostedOllamaDestination,
 ): HostedProviderConsentInput {
   const acknowledgedAt = new Date().toISOString();
   // The model the admin saw in the confirmation; the host refuses a send that would use another.
-  const named = { ...(model ? { model } : {}), ...(modelFitOfferId ? { modelFitOfferId } : {}) };
+  const named = { ...(model ? { model } : {}), ...(modelFitOfferId ? { modelFitOfferId } : {}), ...(ollamaDestination ? { ollamaDestination } : {}) };
   if (!tenantId) {
     return { noTenant: true, providerId, ...named, acknowledgedAt, ...(remember ? { remember: true } : {}) };
   }
@@ -4479,35 +4532,6 @@ export function createHostedBatchProviderConsent(
     providerId: preflight.providerId,
     acknowledgedAt,
   };
-}
-
-function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId, model?: string): string {
-  // Tenant ids are GUIDs or the sample id, so the no-tenant key never
-  // collides with one. The no-tenant decision also names the model, so a
-  // model change asks again.
-  return tenantId
-    ? `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`
-    : `openadminos:intune-chat-hosted-consent:v2:no-tenant:${providerId}:${model ?? "default"}`;
-}
-
-function hasRememberedHostedChatConsent(
-  tenantId: string | undefined,
-  providerId: ProviderId,
-  model?: string,
-): boolean {
-  try {
-    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId, model)) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId, model?: string): void {
-  try {
-    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId, model), "true");
-  } catch {
-    // If localStorage is unavailable, the next hosted send will ask again.
-  }
 }
 
 function createInitialChatProgress(): ChatProgressState {

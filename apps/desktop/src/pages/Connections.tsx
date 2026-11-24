@@ -1,3 +1,4 @@
+import { activeModelProvider } from "@openadminos/agent-sdk";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 
@@ -121,7 +122,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
   // Hosted voice is a separate destination: the strip shows it instead of
   // the Chat model, the map shows both.
   const voiceBoundary = voiceHosted ? deriveDataBoundary(state, true) : undefined;
-  const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
+  const provider = activeModelProvider(state.providers.find((entry) => entry.id === state.activeProviderId), state.activeModelByProviderId);
   const modelName = boundary.model ?? provider?.name ?? "";
   const model: ReachModel["model"] = boundary.kind === "none" || !provider
     ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }

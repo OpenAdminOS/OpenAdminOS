@@ -122,6 +122,23 @@ it("local voice never connects to OpenAI and rejects stale tenant sessions", asy
   );
   assert.equal(chats.length, 1);
 });
+it("keeps a hosted voice session bound to an Ollama Cloud alias through the answer", async () => {
+  const { nova, state, chats, chatOptions } = fixture();
+  const alias = "writer:latest";
+  state.providers[0].models = [alias];
+  state.providers[0].remoteModels = [alias];
+  state.activeModelByProviderId = { ollama: alias };
+  await nova.handle({ action: "configure", apiKey: "test-key" });
+  const { sessionId } = await nova.handle({ action: "start", mode: "openai", tenantId: "tenant-a", consent: true, sdp: "v=0" });
+  const answer = await nova.handle({ action: "answer", sessionId: sessionId!, text: "Device count?" });
+  assert.equal(answer.text, "42 devices");
+  assert.equal(chats.length, 1);
+  assert.equal(chatOptions[0].scope?.isLocal, false);
+  state.providers[0].remoteModels = [];
+  await assert.rejects(nova.handle({ action: "answer", sessionId: sessionId!, text: "Device count?" }), /changed/);
+  assert.equal(chats.length, 1);
+});
+
 it("stop invalidates a session and local mode refuses hosted reasoning", async () => {
   const { nova, state } = fixture();
   const { sessionId } = await nova.handle({

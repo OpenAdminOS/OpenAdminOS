@@ -20,7 +20,7 @@ import {
   type AgentUpdateReview,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
-  type AgentSchedule,
+  type AgentScheduleInput,
   type AgentSignalDelivery,
   type AgentSlackDelivery,
   type AgentTeamsDelivery,
@@ -96,7 +96,7 @@ interface AppStateContextValue {
   ) => Promise<void>;
   updateAgentSchedule: (
     slug: string,
-    schedule: AgentSchedule | null,
+    schedule: AgentScheduleInput | null,
   ) => Promise<void>;
   updateAgentTeamsDelivery: (
     slug: string,
@@ -759,7 +759,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   );
 
   const updateAgentSchedule = useCallback(
-    async (slug: string, schedule: AgentSchedule | null) => {
+    async (slug: string, schedule: AgentScheduleInput | null) => {
       const api = getOpenAdminOSApi();
       if (!api) {
         const fallbackError = new Error(

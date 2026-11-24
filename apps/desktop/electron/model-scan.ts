@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_LOCATION, isOnDeviceModel, isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -154,18 +155,19 @@ export function scanOutcome(
   // admin switches to it from the scan).
   const chatModel = (provider: ProviderSummary, prefer8B: boolean) => {
     const saved = input.activeModelByProviderId?.[provider.id];
-    const openAdmin = !saved && prefer8B ? provider.models.find((model) => OPENADMIN_8B.test(model)) : undefined;
+    const openAdmin = !saved && prefer8B ? provider.models.find((model) => OPENADMIN_8B.test(model) && isOnDeviceModel(provider, model)) : undefined;
     return openAdmin ?? resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
   };
   if (active && active.isLocal && isProviderReady(active)) {
     // The scan writes a model for the active provider only for an admin who never chose one.
     const model = chatModel(active, !input.providerChosenByUser);
-    return { kind: "local-ready", providerId: active.id, ...(model ? { model } : {}) };
+    if (isOnDeviceModel(active, model)) return { kind: "local-ready", providerId: active.id, ...(model ? { model } : {}) };
   }
   for (const id of LOCAL_AUTO_SELECT_ORDER) {
     const candidate = providers.find((provider) => provider.id === id);
     if (candidate?.isLocal !== true || !isProviderReady(candidate)) continue;
     const model = chatModel(candidate, true);
+    if (!isOnDeviceModel(candidate, model)) continue;
     // The admin's own choice stays selected: a local model is only offered.
     if (input.providerChosenByUser || input.pilot) {
       return { kind: "local-available", providerId: candidate.id, ...(model ? { model } : {}), selectedProviderId: input.activeProviderId };
@@ -173,7 +175,7 @@ export function scanOutcome(
     return { kind: "local-selected", providerId: candidate.id, ...(model ? { model } : {}) };
   }
   const hosted = providers
-    .filter((provider) => !provider.isLocal && isProviderReady(provider))
+    .filter((provider) => !isOnDeviceModel(provider, chatModel(provider, false)) && isProviderReady(provider))
     .map((provider) => provider.id)
     .sort((a, b) => SCAN_ORDER.indexOf(a) - SCAN_ORDER.indexOf(b));
   return hosted.length > 0 ? { kind: "hosted-detected", providerIds: hosted } : { kind: "nothing" };
@@ -200,12 +202,15 @@ export function scanProbeFromProvider(
   provider: ProviderSummary,
   extra: { installedOnDisk?: boolean; target?: string; platform?: NodeJS.Platform } = {},
 ): ModelScanProbe {
+  const cloud = provider.id === "ollama" && isRemoteBackedModel(provider, provider.defaultModel ?? provider.models[0]);
   const base = {
     providerId: provider.id,
-    name: SCAN_NAMES[provider.id] ?? provider.name,
-    where: provider.isLocal ? ("local" as const) : ("hosted" as const),
+    name: cloud ? providerForModel(provider, provider.defaultModel ?? provider.models[0]).name : SCAN_NAMES[provider.id] ?? provider.name,
+    where: !cloud && provider.isLocal ? ("local" as const) : ("hosted" as const),
     target: extra.target ?? SCAN_TARGETS[provider.id] ?? provider.name,
-    models: provider.models,
+    models: provider.isLocal && !cloud
+      ? provider.models.filter((model) => isOnDeviceModel(provider, model))
+      : provider.models,
   };
   const ready = isProviderReady(provider);
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -217,7 +222,7 @@ export function scanProbeFromProvider(
   }
 
   if (provider.id === "ollama" || provider.id === "lm-studio" || provider.id === "lemonade") {
-    const openAdmin = provider.id === "ollama" && hasOpenAdmin8B(provider.models);
+    const openAdmin = provider.id === "ollama" && hasOpenAdmin8B(provider.models.filter((model) => isOnDeviceModel(provider, model)));
     if (ready) {
       return {
         ...base,
@@ -226,7 +231,7 @@ export function scanProbeFromProvider(
         summary: `Running, ${count(provider.models.length, "model", "models")}`,
         facts: [
           ...(openAdmin ? ["OpenAdmin 8B is on this device."] : provider.id === "ollama" ? ["OpenAdmin 8B is not pulled yet."] : []),
-          ...provider.models.slice(0, 4),
+          ...provider.models.slice(0, 4).map((model) => provider.id === "ollama" && isRemoteBackedModel(provider, model) ? `${model} · ${OLLAMA_CLOUD_LOCATION}` : model),
         ],
         ...(provider.id === "ollama" ? { hasOpenAdmin8B: openAdmin } : {}),
         ...(provider.capabilityWarning ? { warning: provider.capabilityWarning } : {}),

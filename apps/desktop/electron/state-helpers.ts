@@ -60,6 +60,7 @@ import {
 } from "./intune-chat/planner.js";
 import { DEVICE_FIELD_WORDS, deviceRowFilters, QUESTION_WORDS } from "./intune-chat/structured-question.js";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
+import { isOllamaKeptContextFailure } from "../src/shared/ollama-failure.js";
 
 
 
@@ -130,6 +131,9 @@ export function withoutMisclassifiedGraphDenial(run: RunRecord): RunRecord {
  */
 export function humanizeScheduledRunError(message: string, accessDenial?: GraphAccessDenial, checked = false): string {
   const raw = message.trim();
+  if (isOllamaKeptContextFailure(raw)) {
+    return "Ollama failed with a kept context size. Rerun the schedule to try without it. If it fails again, free memory or pick a smaller model in Settings > LLM Providers.";
+  }
   const lower = raw.toLowerCase();
   // A denial stored by an earlier version for a 403 that did not come from
   // Microsoft Graph (a model server, a vendor API, an MCP server, or a

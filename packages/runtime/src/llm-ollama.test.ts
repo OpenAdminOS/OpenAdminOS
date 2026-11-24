@@ -260,6 +260,53 @@ describe("Ollama context size", () => {
     assert.equal(parseContextOverflow('{"error":"model not found"}'), undefined);
   });
 
+  for (const method of ["complete", "stream"] as const) {
+    it(`rechecks an internal context retry from ${method} before resending the prompt`, async () => {
+      const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "m" });
+        const options = {
+          prompt: "test",
+          beforeOllamaResend: async () => {
+            assert.equal(fake.chats.length, 1);
+            throw new Error("Model now runs on another server.");
+          },
+        };
+        await assert.rejects(async () => {
+          if (method === "complete") await llm.complete(options);
+          else for await (const _chunk of llm.stream(options)) { /* drain */ }
+        }, /Model now runs on another server/);
+        assert.equal(fake.chats.length, 1);
+      } finally {
+        await fake.close();
+      }
+    });
+
+    it(`stops ${method} when the caller aborts inside the resend check`, async () => {
+      const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
+      try {
+        const llm = createOllamaLlm({ endpoint: fake.endpoint, defaultModel: "m" });
+        const controller = new AbortController();
+        const options = {
+          prompt: "test",
+          signal: controller.signal,
+          beforeOllamaResend: async () => {
+            assert.equal(fake.chats.length, 1);
+            controller.abort();
+          },
+        };
+        await assert.rejects(async () => {
+          if (method === "complete") await llm.complete(options);
+          else for await (const _chunk of llm.stream(options)) { /* drain */ }
+        }, /Ollama request stopped by user/);
+        assert.equal(controller.signal.aborted, true);
+        assert.equal(fake.chats.length, 1);
+      } finally {
+        await fake.close();
+      }
+    });
+  }
+
   it("raises num_ctx up to the model's limit, retries once, and keeps it for later requests", async () => {
     const fake = await fakeOllama({ modelMax: 131072, limit: (numCtx) => numCtx ?? 16384 });
     try {
@@ -4157,6 +4204,35 @@ describe("Ollama context for an unpinned model", () => {
           },
         );
       }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("marks an uncounted agent overflow from a kept context and drops that size", async () => {
+    const original = globalThis.fetch;
+    const ollama = scripted({ showBody: unpinned });
+    try {
+      globalThis.fetch = ollama.fetchImpl;
+      const llm = createOllamaLlm({ endpoint: "http://127.0.0.1:11434", defaultModel: "uncounted-kept" });
+      await llm.complete({ prompt: words(18000), maxTokens: 1000, enforceContextWindow: true });
+      const kept = ollama.chats.at(-1);
+      assert.ok(kept !== undefined && kept > 16_384);
+      ollama.handlers.push(() => new Response(JSON.stringify({ error: "the prompt is longer than the context length currently available" }), { status: 400 }));
+      await assert.rejects(
+        llm.complete({ prompt: "short", enforceContextWindow: true }),
+        (error: unknown) => {
+          assert.ok(error instanceof ContextTooSmallError);
+          assert.equal(error.failure.sentToProvider, true);
+          assert.equal(error.failure.limitTokens, kept);
+          assert.equal(error.failure.ollamaKeptContext, true);
+          assert.match(error.message, /token context kept from an earlier request/);
+          return true;
+        },
+      );
+      assert.equal(ollama.chats.at(-1), kept);
+      await llm.complete({ prompt: "short", enforceContextWindow: true });
+      assert.equal(ollama.chats.at(-1), undefined);
     } finally {
       globalThis.fetch = original;
     }

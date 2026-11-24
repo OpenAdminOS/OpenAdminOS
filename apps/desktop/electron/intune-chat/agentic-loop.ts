@@ -108,7 +108,7 @@ export const LOCAL_FALLBACK_NOTICES: Record<AgenticFailureReason, string> = {
 /** Provider errors that mean the prompt did not fit the model's context window. */
 /** A request that never reached the model: the server is down or refused the connection. */
 const PROVIDER_UNREACHABLE = /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|fetch failed|socket hang up|isn't running|is not running|connection refused|could not connect/i;
-const CONTEXT_TOO_SMALL = /context (?:length|window|size|limit)|num_ctx|maximum context|context_length_exceeded|too many tokens|prompt is too long|exceeds? (?:the )?(?:model'?s )?(?:maximum )?context/i;
+const CONTEXT_TOO_SMALL = /context (?:length|window|size|limit)|num_ctx|maximum context|context_length_exceeded|exceed_context_size_error|too many tokens|prompt is too long|exceeds? (?:the )?(?:model'?s )?(?:maximum )?context/i;
 
 const EVIDENCE_TOOLS = new Set<string>([
   "query_cache",

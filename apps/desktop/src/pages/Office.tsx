@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import type {
@@ -101,7 +102,8 @@ export default function Office() {
   const selected =
     office.personas.find((p) => p.id === selectedId) ?? office.personas[0];
   const selectedTenant = state.tenants.find((tenant) => tenant.id === selected?.tenantId);
-  const selectedProvider = state.providers.find((provider) => provider.id === selected?.providerId);
+  const endpoint = state.providers.find((provider) => provider.id === selected?.providerId);
+  const selectedProvider = providerForModel(endpoint, selected?.model ?? endpoint?.defaultModel ?? endpoint?.models[0]);
   const selectedMissions = office.missions.filter(
     (m) => m.personaId === selected?.id,
   );

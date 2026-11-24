@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-20T13:00:47.404Z",
+  "updatedAt": "2026-11-23T22:00:47.729Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 36,
@@ -14,7 +14,7 @@
       "installs7d": 0
     },
     "compliance-overview": {
-      "installs": 60,
+      "installs": 61,
       "installs7d": 6
     },
     "os-update-posture": {
@@ -26,24 +26,24 @@
       "installs7d": 0
     },
     "user-license-overview": {
-      "installs": 39,
+      "installs": 40,
       "installs7d": 3
     },
     "conditional-access-explainer": {
-      "installs": 61,
-      "installs7d": 1
+      "installs": 62,
+      "installs7d": 2
     },
     "dormant-app-registrations": {
       "installs": 45,
-      "installs7d": 3
+      "installs7d": 2
     },
     "risky-sign-in-triage": {
       "installs": 25,
       "installs7d": 1
     },
     "secure-score-prioritizer": {
-      "installs": 29,
-      "installs7d": 1
+      "installs": 30,
+      "installs7d": 2
     },
     "sign-in-failure-explainer": {
       "installs": 30,
@@ -51,7 +51,7 @@
     },
     "stale-guest-cleanup": {
       "installs": 26,
-      "installs7d": 1
+      "installs7d": 0
     },
     "tenant-change-audit": {
       "installs": 23,

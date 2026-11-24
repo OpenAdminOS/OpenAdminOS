@@ -1,3 +1,4 @@
+import { OLLAMA_CLOUD_LOCATION, activeModelProvider, isRemoteBackedModel } from "@openadminos/agent-sdk";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
@@ -131,6 +132,7 @@ export function RunWithMenu({
               const isActive = provider.id === activeProviderId;
               const models = provider.models ?? [];
               const pinnedModel = activeModelByProviderId?.[provider.id];
+              const headerProvider = activeModelProvider(provider, activeModelByProviderId);
 
               return (
                 <div
@@ -138,7 +140,7 @@ export function RunWithMenu({
                   className="border-b border-[var(--color-border-soft)] last:border-b-0"
                 >
                   <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-xs font-medium text-[var(--color-text-muted)]">
-                    {provider.isLocal ? (
+                    {headerProvider.isLocal ? (
                       <IconHardDrive
                         size={11}
                         className="text-[var(--color-success)]"
@@ -146,7 +148,7 @@ export function RunWithMenu({
                     ) : (
                       <IconCloud size={11} className="text-[var(--color-info)]" />
                     )}
-                    <span>{provider.name}</span>
+                    <span>{headerProvider.name}</span>
                     {isActive && enabled && (
                       <Badge tone="info">Active</Badge>
                     )}
@@ -167,6 +169,7 @@ export function RunWithMenu({
                     <div className="pb-1">
                       {models.map((model) => {
                         const isPinned = model === pinnedModel;
+                        const trustNote = isRemoteBackedModel(provider, model) ? OLLAMA_CLOUD_LOCATION : modelTrustNote(provider.id, model);
                         return (
                           <button
                             key={model}
@@ -185,8 +188,8 @@ export function RunWithMenu({
                             />
                             <span title={model} className="min-w-0 flex-1">
                               <span className="block truncate font-mono text-sm text-[var(--color-text-soft)]">{providerModelLabel(provider, model)}</span>
-                              {modelTrustNote(provider.id, model) ? (
-                                <span className="block text-xs text-[var(--color-text-muted)]">{modelTrustNote(provider.id, model)}</span>
+                              {trustNote ? (
+                                <span className="block text-xs text-[var(--color-text-muted)]">{trustNote}</span>
                               ) : null}
                             </span>
                             {isPinned && (

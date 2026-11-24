@@ -232,6 +232,28 @@ describe("contextual tenant setup", () => {
     expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
   });
 
+  it("keeps an on-device rerun in setup when Ollama lists only Cloud models", async () => {
+    const user = userEvent.setup();
+    writePendingIntent(createPendingIntent({
+      kind: "agent-run", slug: "device-offboard", providerId: "ollama",
+      safeguards: { onDevice: true }, returnTo: "/runs/run-1",
+    }));
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, status: "connected" as const, models: ["alias", "glm-4.6:cloud"], defaultModel: "alias", remoteModels: ["alias"] }
+      : provider);
+    let state = createMockAppState({ providers });
+    const bridge = makeMockBridge({ getAppState: vi.fn(async () => state) }, state);
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    expect(await screen.findByText(/Ollama has no available model for this on-device rerun/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Tenant connected" })).toBeNull();
+
+    state = { ...state, providers: providers.map((provider) => provider.id === "ollama"
+      ? { ...provider, models: [...provider.models, "llama3.1"] } : provider) };
+    await user.click(screen.getByRole("button", { name: "Recheck providers" }));
+    expect(await screen.findByRole("heading", { name: "Tenant connected" })).toBeInTheDocument();
+  });
+
   it("does not offer a self-hosted server outside this device for a model fit rerun", async () => {
     writePendingIntent(
       createPendingIntent({

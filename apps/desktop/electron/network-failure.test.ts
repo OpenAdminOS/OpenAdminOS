@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -111,8 +112,87 @@ describe("Microsoft sign-in in the setup dialog", () => {
 });
 
 describe("the local index model download", () => {
+  for (const { reason, phase } of [
+    { reason: "reset", phase: "pull" },
+    { reason: "reset", phase: "tags" },
+    { reason: "quit", phase: "pull" },
+  ]) {
+    it(`closes the Ollama connection during /api/${phase} on ${reason} and allows a later download`, { timeout: 5_000 }, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "oaos-pull-"));
+      const statePath = join(dir, "state.json");
+      await writeFile(statePath, JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+      const openStore = () => new AppStateStore({ filePath: statePath, userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+      const store = openStore();
+      let closed = false;
+      let started!: () => void;
+      let disconnected!: () => void;
+      const pullStarted = new Promise<void>((resolve) => { started = resolve; });
+      const pullDisconnected = new Promise<void>((resolve) => { disconnected = resolve; });
+      let pulls = 0;
+      let stall = true;
+      const server = createServer((request, response) => {
+        const tags = request.url === "/api/tags";
+        if (!tags) pulls += 1;
+        response.setHeader("content-type", "application/json");
+        if (stall && request.url === `/api/${phase}`) {
+          stall = false;
+          response.once("close", disconnected);
+          // Leave the response unfinished. In the quit case, stop a partial body too.
+          if (reason === "quit") response.write('{"status":');
+          started();
+          return;
+        }
+        response.end(tags ? '{"models":[]}' : '{"status":"success"}');
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const original = process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+      process.env.OPENADMINOS_EMBEDDING_ENDPOINT = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      try {
+        const download = store.autoInstallEmbeddingModel();
+        const signal = AbortSignal.timeout(3_000);
+        const deadline = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+        await Promise.race([pullStarted, deadline]);
+        if (reason === "reset") {
+          assert.equal(await store.beginLocalReset(), undefined);
+          store.markLocalResetCommitted();
+        } else {
+          store.stopEmbeddingModelDownload();
+        }
+        await Promise.race([Promise.all([download, pullDisconnected]), deadline]);
+        await store.autoInstallEmbeddingModel();
+        const abortedPulls = phase === "pull" ? 1 : 0;
+        assert.equal(pulls, abortedPulls);
+        const saved = JSON.parse(await readFile(statePath, "utf8"));
+        assert.equal(saved.embeddingModelPullError, undefined);
+        assert.equal(saved.embeddingModelPullAttemptedAt, undefined);
+        if (reason === "reset") {
+          store.cancelLocalReset();
+          await store.autoInstallEmbeddingModel();
+        } else {
+          store.close();
+          closed = true;
+          const fresh = openStore();
+          try {
+            await fresh.autoInstallEmbeddingModel();
+          } finally {
+            fresh.close();
+          }
+        }
+        assert.equal(pulls, abortedPulls + 1);
+        assert.ok(JSON.parse(await readFile(statePath, "utf8")).embeddingModelPullAttemptedAt);
+      } finally {
+        if (reason === "reset") store.cancelLocalReset();
+        if (!closed) store.close();
+        if (original === undefined) delete process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+        else process.env.OPENADMINOS_EMBEDDING_ENDPOINT = original;
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      }
+    });
+  }
+
   it("records why Ollama could not download it, naming the registry and Ollama's own proxy setting", async () => {
-    const { createServer } = await import("node:http");
     const server = createServer((request, response) => {
       if (request.url === "/api/tags") {
         response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [] }));
@@ -124,7 +204,6 @@ describe("the local index model download", () => {
     const original = process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
     process.env.OPENADMINOS_EMBEDDING_ENDPOINT = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
-    const { writeFile } = await import("node:fs/promises");
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
     const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
     try {
@@ -142,7 +221,6 @@ describe("the local index model download", () => {
   });
 
   it("says the local Ollama stopped answering, not the registry, and tries again on the next launch (PR #206 review rounds 8 and 9)", { timeout: 10_000 }, async () => {
-    const { createServer } = await import("node:http");
     const { loopbackTransport } = await import("./retrieval/direct-fetch.js");
     let pulls = 0;
     const server = createServer((request, response) => {
@@ -159,7 +237,6 @@ describe("the local index model download", () => {
     const idle = loopbackTransport.idleTimeoutMs;
     loopbackTransport.idleTimeoutMs = 100;
     const dir = await mkdtemp(join(tmpdir(), "oaos-network-"));
-    const { writeFile } = await import("node:fs/promises");
     await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
     const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
     try {

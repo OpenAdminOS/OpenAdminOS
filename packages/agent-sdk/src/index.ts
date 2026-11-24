@@ -554,6 +554,15 @@ export interface OfficeState {
   messages?: OfficeMessage[];
 }
 
+export interface ScheduleModelDestination {
+  providerId: ProviderId;
+  model?: string | undefined;
+  ollamaCloud?: boolean | undefined;
+  endpointFingerprint?: string | undefined;
+}
+
+export type AgentScheduleInput = AgentSchedule & { reviewModelDestination?: boolean };
+
 export interface AgentSchedule {
   enabled: boolean;
   intervalSeconds: number;
@@ -562,6 +571,10 @@ export interface AgentSchedule {
   notifyOnChangeOnly?: boolean;
   /** When the scheduler last fired this agent. Updated by the host. */
   lastScheduledRunAt?: string;
+  /** Host-owned model settings reviewed for this schedule. */
+  modelDestination?: ScheduleModelDestination;
+  /** A destination change pauses automatic sends until this schedule is reviewed. */
+  lastSkipReason?: string;
   /**
    * The organization this schedule runs in. A schedule never runs while
    * another organization is active. Absent means unassigned: the schedule
@@ -750,6 +763,8 @@ export interface StartRunOptions {
   bindProviderEndpoint?: boolean;
   /** `getProviderDestination` as the run review saw it; with `bindProviderEndpoint`, a changed destination refuses the start. */
   expectedProviderDestination?: string;
+  /** The reviewed Ollama model destination. Refuse admission if it changes. */
+  expectedOllamaCloud?: boolean;
   /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
@@ -1073,6 +1088,10 @@ export interface RunRecord {
   confirmedAt?: string;
   rejectedAt?: string;
   providerId?: ProviderId;
+  /** Ollama Cloud or on-device Ollama, recorded at admission to preserve the model destination. */
+  ollamaCloud?: boolean;
+  /** A reviewed Ollama server outside this device, separate from Ollama Cloud. */
+  ollamaOffDevice?: true;
   model?: string;
   trigger?: "manual" | "schedule";
   /**
@@ -1101,7 +1120,7 @@ export interface RunRecord {
    */
   modelFit?: ModelFitIssue;
   /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */
-  providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" };
+  providerEndpointBinding?: { endpoint: string | undefined; scope?: "model-fit" | "schedule" };
   /** Machine readable reason for a failed run, such as `context-too-small`. */
   failureReason?: RunFailureReason;
   /**
@@ -1557,6 +1576,8 @@ export interface ModelFitIssue {
    * model. Absent when the request cannot be offered again (Nova, a run).
    */
   offerId?: string;
+  /** Host deadline in Unix milliseconds, present only on a live offer. */
+  offerExpiresAt?: number;
 }
 
 /**
@@ -2709,11 +2730,15 @@ export interface LocalDataSummary {
  * model. The host refuses a no-tenant acknowledgement for any send that
  * includes tenant context.
  */
+export type HostedOllamaDestination = "ollama-cloud" | "ollama-endpoint";
+
 export type HostedProviderChatConsent =
   | {
       tenantId: string;
       noTenant?: undefined;
       providerId: ProviderId;
+      /** Whether Ollama sends through its configured server or uses ollama.com. */
+      ollamaDestination?: HostedOllamaDestination;
       /** The model the admin confirmed. When present, the host refuses a send that would use another model. */
       model?: string;
       acknowledgedAt: string;
@@ -2727,6 +2752,8 @@ export type HostedProviderChatConsent =
       /** The question, the conversation and reference results leave the device; no tenant data does. */
       noTenant: true;
       providerId: ProviderId;
+      /** Whether Ollama sends through its configured server or uses ollama.com. */
+      ollamaDestination?: HostedOllamaDestination;
       /** A no-tenant decision is remembered per provider and model, so the host always checks the model. */
       model?: string;
       acknowledgedAt: string;
@@ -3338,6 +3365,7 @@ export interface CompanionSnapshot {
     id: ProviderId;
     label: string;
     isLocal: boolean;
+    ollamaDestination?: HostedOllamaDestination;
     trustLabel: string;
     model?: string;
     status: ProviderStatus;
@@ -3589,6 +3617,8 @@ export interface OpenAdminOSApi {
    * when it opens; the host refuses the send or run if it changed since.
    */
   getProviderDestination?(providerId: ProviderId): Promise<string>;
+  /** Reads metadata for a local model without loading it or sending a prompt. */
+  getModelFitContextWindow?(providerId: ProviderId, model: string): Promise<number | undefined>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
@@ -4016,7 +4046,7 @@ export interface OpenAdminOSApi {
    * scheduler fires the agent every `intervalSeconds`; with OS scheduler
    * enabled, OpenAdminOS can run due schedules while the UI is closed.
   */
-  updateAgentSchedule(slug: string, schedule: AgentSchedule | null): Promise<AppState>;
+  updateAgentSchedule(slug: string, schedule: AgentScheduleInput | null): Promise<AppState>;
   /**
    * Persist per-agent Microsoft Teams delivery. Pass null to remove
    * the route. Delivery posts terminal run reports through the Teams
@@ -4678,6 +4708,8 @@ export interface LlmOptions {
    * of sending. Chat leaves it unset, so a provider may raise its context.
    */
   enforceContextWindow?: boolean;
+  /** Host check before an Ollama adapter resends a request internally. */
+  beforeOllamaResend?: () => Promise<void>;
 }
 
 export interface LlmTokenUsage {
@@ -5028,6 +5060,56 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
 ];
 
+export const OLLAMA_CLOUD_NAME = "Ollama Cloud";
+export const OLLAMA_CLOUD_LOCATION = "Ollama Cloud · prompts processed on ollama.com";
+
+/** A cloud tag can be present even if the server omitted remote metadata. */
+export function isOllamaCloudModel(model: string | undefined): boolean {
+  return Boolean(model && /[:-]cloud$/i.test(model.trim()));
+}
+
+export function isRemoteBackedModel(provider: Pick<ProviderSummary, "id" | "remoteModels">, model: string | undefined): boolean {
+  return Boolean(model && (provider.remoteModels?.includes(model) || (provider.id === "ollama" && isOllamaCloudModel(model))));
+}
+
+export function hostedOllamaDestination(
+  provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels"> | undefined,
+  model?: string,
+): HostedOllamaDestination | undefined {
+  if (provider?.id !== "ollama") return undefined;
+  if (isRemoteBackedModel(provider, model)) return "ollama-cloud";
+  return provider.isLocal ? undefined : "ollama-endpoint";
+}
+
+export function isOnDeviceModel(provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">, model: string | undefined): boolean {
+  return provider.isLocal && !isRemoteBackedModel(provider, model);
+}
+
+/** The trust identity of a selected model. The original summary describes the server. */
+export function providerForModel(provider: ProviderSummary, model?: string): ProviderSummary;
+export function providerForModel(provider: ProviderSummary | undefined, model?: string): ProviderSummary | undefined;
+export function providerForModel(provider: ProviderSummary | undefined, model?: string): ProviderSummary | undefined {
+  if (provider?.id === "ollama" && isRemoteBackedModel(provider, model)) {
+    return { ...provider, name: OLLAMA_CLOUD_NAME, isLocal: false };
+  }
+  return provider;
+}
+
+export function activeModelProvider(
+  provider: ProviderSummary,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ProviderSummary;
+export function activeModelProvider(
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ProviderSummary | undefined;
+export function activeModelProvider(
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>,
+): ProviderSummary | undefined {
+  return providerForModel(provider, resolveProviderDefaultModel(provider, activeModelByProviderId).model);
+}
+
 export interface DeriveTrustStateInput {
   provider: ProviderSummary | undefined;
   activeTenant?: TenantRecord | undefined;
@@ -5082,7 +5164,7 @@ export function deriveTrustState(
     providerOrInput !== undefined &&
     typeof providerOrInput === "object" &&
     "provider" in (providerOrInput as object);
-  const provider = isInputObject
+  const endpoint = isInputObject
     ? (providerOrInput as DeriveTrustStateInput).provider
     : (providerOrInput as ProviderSummary | undefined);
   const activeTenant = isInputObject
@@ -5091,6 +5173,7 @@ export function deriveTrustState(
   const model = isInputObject
     ? (providerOrInput as DeriveTrustStateInput).model
     : undefined;
+  const provider = providerForModel(endpoint, model);
 
   const tenantSegment = activeTenant
     ? `tenant ${activeTenant.displayName}`
@@ -5121,7 +5204,9 @@ export function deriveTrustState(
     return base;
   }
 
-  const detail = activeTenant
+  const detail = provider.id === "ollama" && provider.name === OLLAMA_CLOUD_NAME
+    ? `${activeTenant ? "Prompts and tenant data are" : "Prompts are"} sent to ollama.com for processing by Ollama Cloud.`
+    : activeTenant
     ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}${modelDetail}.`
     : `Prompts are sent to ${provider.name}${modelDetail}.`;
   const base: TrustState = {
