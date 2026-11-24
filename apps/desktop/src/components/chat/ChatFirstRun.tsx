@@ -49,8 +49,8 @@ export function ModelChoice({
   onChoiceDone?: (id: ProviderId) => void;
 }) {
   const navigate = useNavigate();
-  const { refresh } = useAppState();
-  const options = optionsFromProviders(providers);
+  const { refresh, state } = useAppState();
+  const options = optionsFromProviders(providers, state.activeModelByProviderId);
   const [selected, setSelected] = useState<ProviderId | null>(null);
   const [working, setWorking] = useState<ProviderId | null>(null);
   const [retrying, setRetrying] = useState<ProviderId | null>(null);

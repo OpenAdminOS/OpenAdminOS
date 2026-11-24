@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import {
   ConnectorNotConfiguredError,
   ConnectorValidationError,
+  isOllamaCloudModel,
+  OLLAMA_CLOUD_LOCATION,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSignalDelivery,
@@ -623,6 +625,11 @@ function reportScopeLine(run: RunRecord, tenant: TenantRecord | undefined, bold:
     : NO_ORGANIZATION_REPORT_LINE.replace("Organization:", bold("Organization:"));
 }
 
+function reportModel(run: RunRecord): string {
+  const cloud = run.providerId === "ollama" && (run.ollamaCloud ?? isOllamaCloudModel(run.model));
+  return `${run.providerId}${run.model ? ` · ${run.model}` : ""}${cloud ? ` · ${OLLAMA_CLOUD_LOCATION}` : ""}`;
+}
+
 export function formatTeamsDeliveryMessage(
   run: RunRecord,
   agent: AgentSummary,
@@ -642,7 +649,7 @@ export function formatTeamsDeliveryMessage(
   }
   if (run.providerId) {
     lines.push(
-      `**Model:** ${run.providerId}${run.model ? ` · ${run.model}` : ""}`,
+      `**Model:** ${reportModel(run)}`,
     );
   }
   if (run.error) {
@@ -681,7 +688,7 @@ export function formatWhatsAppDeliveryMessage(
     lines.push(`Finding state: ${run.changeState}`);
   }
   if (run.providerId) {
-    lines.push(`Model: ${run.providerId}${run.model ? ` · ${run.model}` : ""}`);
+    lines.push(`Model: ${reportModel(run)}`);
   }
   if (run.error) {
     lines.push("", "*Error*", truncateForDelivery(run.error, 1200));
@@ -722,7 +729,7 @@ export function formatOutlookDeliveryMessage(
   }
   if (run.providerId) {
     lines.push(
-      `**Model:** ${run.providerId}${run.model ? ` · ${run.model}` : ""}`,
+      `**Model:** ${reportModel(run)}`,
     );
   }
   if (run.error) {
@@ -764,7 +771,7 @@ export function formatChatDeliveryMessage(
     lines.push(`*Finding state:* ${run.changeState}`);
   }
   if (run.providerId) {
-    lines.push(`*Model:* ${run.providerId}${run.model ? ` · ${run.model}` : ""}`);
+    lines.push(`*Model:* ${reportModel(run)}`);
   }
   if (run.error) {
     lines.push("", "*Error*", truncateForDelivery(run.error, 1200));
@@ -805,7 +812,7 @@ export function formatPlainDeliveryMessage(
     lines.push(`Finding state: ${run.changeState}`);
   }
   if (run.providerId) {
-    lines.push(`Model: ${run.providerId}${run.model ? ` · ${run.model}` : ""}`);
+    lines.push(`Model: ${reportModel(run)}`);
   }
   if (run.error) {
     lines.push("", "Error", truncateForDelivery(run.error, 1200));

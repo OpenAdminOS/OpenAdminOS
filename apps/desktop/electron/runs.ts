@@ -1,4 +1,6 @@
+import { isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { guardModelFitLlm } from "./intune-chat/model-fit.js";
+import { isOllamaKeptContextFailure } from "../src/shared/ollama-failure.js";
 import { classifyModelFitFailure, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -41,6 +43,7 @@ import {
   type RunLlmApi,
   type RunLogLevel,
   type RunRecord,
+  type ScheduleModelDestination,
   type RunStepStatus,
   type SecretAccessor,
   type StartRunOptions,
@@ -71,6 +74,21 @@ export interface RunPersistedState {
   tenants: TenantRecord[];
   activeTenantId?: string;
   organizations?: OrganizationRecord[];
+}
+
+export function scheduleModelDestination(
+  state: Pick<RunPersistedState, "activeProviderId" | "activeModelByProviderId">,
+  agent: Pick<AgentSummary, "preferredModel">,
+  providers: readonly ProviderSummary[],
+): ScheduleModelDestination {
+  const provider = providers.find((entry) => entry.id === state.activeProviderId) ?? providers[0];
+  const model = resolveRunModel({ provider, activeModelByProviderId: state.activeModelByProviderId, preferredModel: agent.preferredModel }).model;
+  const cloud = provider?.id === "ollama" && isRemoteBackedModel(provider, model);
+  return {
+    providerId: provider?.id ?? state.activeProviderId,
+    ...(model ? { model } : {}),
+    ...(provider?.id === "ollama" && (provider.isLocal || cloud) ? { ollamaCloud: cloud } : {}),
+  };
 }
 
 /**
@@ -383,11 +401,13 @@ export interface RunServiceHost {
   listProviders(): Promise<ProviderSummary[]>;
   /** A fresh check that this provider runs this model on this device (model fit reruns). */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
+  verifyLocalOllamaModel?(model: string): Promise<boolean>;
+  readLocalOllamaModelCloud?(model: string, endpoint?: string): Promise<boolean | undefined>;
   providerCanRun(
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
   validateOfficeApproval?(run: RunRecord): Promise<void>;
-  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" }): Promise<RunLlmApi>;
+  buildLlm(providerId: ProviderId, model: string | undefined, binding?: { endpoint: string | undefined; scope?: "model-fit" | "schedule" }): Promise<RunLlmApi>;
   /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
   providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   buildGraph(
@@ -651,6 +671,7 @@ export class RunService {
         if (!active || agent.schedule.organizationId !== active.id) {
           throw new OrganizationBoundaryError(SCHEDULE_OTHER_ORGANIZATION_COPY);
         }
+        if (!agent.schedule.enabled) throw new Error("This schedule is off. Enable automatic runs on the agent page.");
       }
       if (options.dryRun && (options.office || options.officeContext)) {
         throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
@@ -702,6 +723,60 @@ export class RunService {
       }
 
       const providers = await this.host.listProviders();
+      let scheduledBinding: RunRecord["providerEndpointBinding"];
+      if (agentSchedule && agent.schedule?.enabled) {
+        const schedule = agent.schedule;
+        if (schedule.lastSkipReason) throw new Error(schedule.lastSkipReason);
+
+        const current = scheduleModelDestination(persisted, agent, providers);
+        const target = await this.host.providerTarget?.(current.providerId);
+        const expected = schedule.modelDestination ?? current;
+        // A provider scan can be cached. Check the saved alias at the actual local endpoint.
+        const liveCloud = current.model && current.ollamaCloud !== undefined && this.host.readLocalOllamaModelCloud
+          ? await this.host.readLocalOllamaModelCloud(current.model, target?.endpoint)
+          : current.ollamaCloud;
+        const currentCloud = liveCloud ?? current.ollamaCloud;
+        const changed = current.providerId !== expected.providerId || current.model !== expected.model ||
+          currentCloud !== expected.ollamaCloud ||
+          (expected.endpointFingerprint !== undefined && target?.destination !== expected.endpointFingerprint);
+        const localOllamaUnverified = expected.ollamaCloud === false && (!expected.model || liveCloud === undefined);
+        if (changed || localOllamaUnverified) {
+          const reason = currentCloud && expected.ollamaCloud !== true && current.model
+            ? `Skipped: ${current.model} now runs on ollama.com. Review the schedule to continue.`
+            : changed
+              ? "Skipped: The model destination changed. Review the schedule to continue."
+              : `Skipped: OpenAdminOS could not confirm that ${expected.model ?? "the selected Ollama model"} runs on this device. Review the schedule to continue.`;
+          this.assertTenantOpen(persisted.activeTenantId);
+          const now = new Date().toISOString();
+          const skippedRun: RunRecord = {
+            id: `run_${randomUUID()}`,
+            agentSlug,
+            tenantId: persisted.activeTenantId,
+            trigger: "schedule",
+            initiator: "schedule",
+            providerId: expected.providerId,
+            model: expected.model,
+            status: "failed",
+            queuedAt: now,
+            finishedAt: now,
+            summary: reason,
+            error: reason,
+            graphDenialChecked: true,
+            steps: [],
+            logs: [],
+          };
+          await this.host.write({
+            ...persisted,
+            installedAgents: persisted.installedAgents.map((entry) => entry === agent
+              ? { ...entry, schedule: { ...schedule, lastSkipReason: reason } }
+              : entry),
+            runs: [skippedRun, ...persisted.runs],
+          });
+          return { agent, providerId: expected.providerId, model: expected.model, queuedRun: skippedRun };
+        }
+        options = { ...options, providerId: expected.providerId, model: expected.model, expectedOllamaCloud: expected.ollamaCloud };
+        if (target) scheduledBinding = { endpoint: target.endpoint, scope: "schedule" };
+      }
       // Honor a per-run provider override if supplied; otherwise fall
       // back to the globally-active provider. Unknown ids are an error
       // because silently dropping the override would be misleading.
@@ -748,6 +823,15 @@ export class RunService {
         explicitModel,
       }).model;
 
+      const ollamaCloud = scheduledBinding && options.expectedOllamaCloud !== undefined
+        ? options.expectedOllamaCloud
+        : activeProvider?.id === "ollama" && isRemoteBackedModel(activeProvider, model);
+      if (options.expectedOllamaCloud !== undefined && (
+        providerId !== "ollama" || ollamaCloud !== options.expectedOllamaCloud || (!ollamaCloud && activeProvider?.isLocal !== true)
+      )) {
+        throw new Error("Ollama's model destination changed, so this run did not start. Close the review and open it again.");
+      }
+
       // Preflight the LLM provider so a clearly-actionable error is
       // returned to the renderer synchronously instead of a queued
       // run that fails moments later when the runtime can't reach it.
@@ -780,7 +864,7 @@ export class RunService {
         throw new Error(`OpenAdminOS could not tell which ${activeProvider?.name ?? providerId} model this run uses, so it did not start. Choose a model, then review the run again.`);
       }
       if (options.requireOnDeviceModel) {
-        if (activeProvider?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+        if (activeProvider?.isLocal !== true || !isOnDeviceModel(activeProvider, model) || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? activeProvider?.name ?? providerId} runs on this device, so the run did not start. Choose another model, or a hosted provider.`);
         }
         // The check reads the network; the organization this start was admitted for must still be active.
@@ -789,7 +873,11 @@ export class RunService {
         }
       }
 
-      if (options.retryOfRunId && activeProvider?.isLocal !== true) {
+      const modelProvider = providerForModel(activeProvider, model);
+      if (modelFitStart && activeProvider?.isLocal && modelProvider?.isLocal === false) {
+        throw new Error(`${model} runs in Ollama Cloud. Choose an on-device model for this rerun.`);
+      }
+      if (options.retryOfRunId && modelProvider?.isLocal !== true) {
         throw new Error("Review and retry this assignment in Agent Team to confirm the hosted provider destination before sending its evidence.");
       }
 
@@ -883,6 +971,10 @@ export class RunService {
         agent = { ...agent, settings: { ...defaults, ...agent.settings } };
       }
       const queuedRun = createQueuedRun({ agent, providerId, model, dryRun: options.dryRun });
+      if (activeProvider?.id === "ollama") {
+        if (activeProvider.isLocal || ollamaCloud) queuedRun.ollamaCloud = ollamaCloud;
+        else queuedRun.ollamaOffDevice = true;
+      }
       // A model fit rerun keeps its admission checks for every later phase (plan, replan, apply).
       if (options.requireOnDeviceModel) queuedRun.requireOnDeviceModel = true;
       if (options.bindProviderEndpoint) {
@@ -905,6 +997,8 @@ export class RunService {
           throw new Error("The provider is reached somewhere else than when the dry run planned, so Run for real did not start. Start a new run from the agent page.");
         }
         queuedRun.providerEndpointBinding = { endpoint: target.endpoint, scope: "model-fit" };
+      } else if (scheduledBinding) {
+        queuedRun.providerEndpointBinding = scheduledBinding;
       } else if (inheritedEndpointBinding) {
         queuedRun.providerEndpointBinding = inheritedEndpointBinding;
       }
@@ -929,12 +1023,21 @@ export class RunService {
 
       await this.host.write({
         ...persisted,
+        ...(agentSchedule ? {
+          installedAgents: persisted.installedAgents.map((entry) => entry.slug === agentSlug && entry.schedule
+            ? { ...entry, schedule: { ...entry.schedule, lastScheduledRunAt: queuedRun.queuedAt } }
+            : entry),
+        } : {}),
         runs: [queuedRun, ...persisted.runs],
       });
 
       return { agent, providerId, model, queuedRun };
     });
 
+    if (queued.queuedRun.status === "failed") {
+      this.host.emitStateChanged("run-updated", queued.queuedRun.id);
+      return queued.queuedRun;
+    }
     if (options.source?.type === "intune-chat" && this.host.intelligenceStore) {
       const now = new Date().toISOString();
       const statusNote = queued.queuedRun.dryRun
@@ -1449,6 +1552,11 @@ export class RunService {
         throw new Error(`OpenAdminOS could not confirm that ${model ?? provider?.name ?? providerId} still runs on this device, so nothing was sent to it. Start the run again.`);
       }
     }
+    const verifyOllama = this.host.verifyLocalOllamaModel;
+    const legacyOllama = providerId === "ollama" && run.ollamaCloud === undefined && run.ollamaOffDevice !== true;
+    if (legacyOllama && verifyOllama && (!model || !(await verifyOllama(model)))) {
+      throw new Error(`OpenAdminOS could not confirm that ${model ?? "the saved Ollama model"} still runs on this device, so nothing was sent to it. Start the run again.`);
+    }
     let llm: RunLlmApi;
     try {
       llm = run.providerEndpointBinding
@@ -1461,7 +1569,8 @@ export class RunService {
       throw error;
     }
     // A hosted model fit rerun runs only the model its review named, call by call.
-    if (!run.requireOnDeviceModel) {
+    const verifyLocalOllama = (run.ollamaCloud === false || legacyOllama) && model && verifyOllama;
+    if (!run.requireOnDeviceModel && !verifyLocalOllama) {
       return run.providerEndpointBinding?.scope === "model-fit" ? guardModelFitLlm(llm, { before: async () => undefined, dispatched: () => undefined, model }) : llm;
     }
     // Every model call of the phase checks again, since evidence gathering and the
@@ -1473,8 +1582,13 @@ export class RunService {
         if (bound && this.host.providerTarget && (await this.host.providerTarget(providerId)).endpoint !== bound.endpoint) {
           throw new Error("The provider's settings changed while this run ran, so nothing more was sent. Review the run again.");
         }
-        const current = (await this.host.listProviders()).find((entry) => entry.id === providerId);
-        if (current?.isLocal !== true || !(await this.host.verifyOnDeviceModel?.(providerId, model))) {
+        const current = run.requireOnDeviceModel
+          ? (await this.host.listProviders()).find((entry) => entry.id === providerId)
+          : undefined;
+        const onDevice = run.requireOnDeviceModel
+          ? current?.isLocal === true && await this.host.verifyOnDeviceModel?.(providerId, model)
+          : model && await verifyOllama?.(model);
+        if (!onDevice) {
           throw new Error(`OpenAdminOS could not confirm that ${model ?? current?.name ?? providerId} still runs on this device, so nothing more was sent to it. Start the run again.`);
         }
       },
@@ -1932,10 +2046,10 @@ export class RunService {
    * when it failed, never later against changed provider settings.
    */
   private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
-    if (run.status !== "failed" || run.modelFit || !run.providerId || run.origin !== undefined || run.officeContext) return run;
+    if (run.status !== "failed" || run.modelFit || run.ollamaCloud || !run.providerId || run.origin !== undefined || run.officeContext) return run;
     // A reply with reasoning and no answer has its own cause and recovery card,
     // whatever its error text (a model name) matches.
-    if (run.failureCause === "reasoning-without-answer") return run;
+    if (run.failureCause === "reasoning-without-answer" || isOllamaKeptContextFailure(run.error, run.failureReason)) return run;
     try {
       // Only when the run turns failed: a later snapshot of a failure already checked keeps what
       // that check found (persistRunSnapshot carries an issue over), so no later state decides it.

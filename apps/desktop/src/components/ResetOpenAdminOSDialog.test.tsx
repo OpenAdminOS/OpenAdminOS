@@ -40,6 +40,7 @@ describe("Reset OpenAdminOS dialog", () => {
     expect(dialog).toHaveTextContent('The Keychain item "OpenAdminOS Safe Storage"');
     expect(dialog).toHaveTextContent("admin consent granted to it stay in each tenant");
     expect(dialog).toHaveTextContent("The IT policy file (policy.json)");
+    expect(dialog).toHaveTextContent("Models in Ollama's own store stay. To remove the index model, run ollama rm nomic-embed-text.");
     expect(screen.getByRole("button", { name: "How to revoke access in Entra" })).toBeInTheDocument();
   });
 

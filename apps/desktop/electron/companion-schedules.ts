@@ -15,7 +15,7 @@ export function nextRunTimeForSchedule(
   schedule: AgentSchedule | undefined,
   nowMs = Date.now(),
 ): number {
-  if (!schedule?.enabled) return Number.POSITIVE_INFINITY;
+  if (!schedule?.enabled || schedule.lastSkipReason) return Number.POSITIVE_INFINITY;
   const lastFired = schedule.lastScheduledRunAt
     ? new Date(schedule.lastScheduledRunAt).getTime()
     : 0;
@@ -44,7 +44,7 @@ export function companionUpcomingSchedules(
   return state.installedAgents
     .filter(
       (agent) =>
-        agent.schedule?.enabled === true &&
+        agent.schedule?.enabled === true && !agent.schedule.lastSkipReason &&
         scheduleRunsInActiveOrganization(agent.schedule, state.activeOrganizationId),
     )
     .map((agent) => {

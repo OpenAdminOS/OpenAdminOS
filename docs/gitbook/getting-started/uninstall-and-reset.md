@@ -25,7 +25,8 @@ data folder and what is removed. Type `RESET OPENADMINOS` exactly and choose
 
 OpenAdminOS then closes every organization to new work, turns off the
 background scheduler and the menu bar login item, stops its background work
-and restarts. At the restart, before anything else runs, it removes:
+including any index model download it requested through Ollama, and restarts.
+At the restart, before anything else runs, it removes:
 
 - every organization and its Microsoft sign-in tokens
 - provider settings and API keys, connector settings and secrets, including
@@ -63,6 +64,9 @@ What stays:
   before removing anything and says so: place the file itself there, or use the machine-wide policy path.
 - Exports and other files you saved outside the data folder.
 - The enterprise application and admin consent in each tenant.
+- Models already downloaded into Ollama's own store. To remove the index
+  model, run `ollama rm nomic-embed-text` against the Ollama instance
+  OpenAdminOS used.
 
 A few details:
 

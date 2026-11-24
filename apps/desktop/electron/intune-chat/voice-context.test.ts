@@ -67,6 +67,17 @@ it("answers unfiltered inventory questions from exact resource totals without co
     undefined,
   );
 });
+it("speaks the cache refresh in the desktop locale and time zone", () => {
+  const timestampLocale = { locale: "de-DE", timeZone: "America/Los_Angeles" };
+  const refreshedAt = "2026-09-12T01:00:00Z";
+  const expected = new Intl.DateTimeFormat(timestampLocale.locale, {
+    timeZone: timestampLocale.timeZone, year: "numeric", month: "short",
+    day: "numeric", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(refreshedAt));
+  const answer = voiceInventoryAnswer("How many managed devices?", [status({ refreshedAt })], timestampLocale);
+  assert.equal(answer, `The snapshot contains 9 Intune managed devices, refreshed ${expected}.`);
+});
+
 it("distinguishes partial, failed and missing snapshots from an empty tenant", () => {
   assert.match(
     voiceInventoryAnswer("How many managed devices?", [

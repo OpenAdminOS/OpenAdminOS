@@ -31,8 +31,17 @@ function detectPlatform(): HostPlatform {
   return "unknown";
 }
 
+function chatDateTimeArgument(name: string): string | undefined {
+  const prefix = `--openadminos-chat-${name}=`;
+  return process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length);
+}
+
 const api: OpenAdminOSApi = {
   platform,
+  chatDateTimeLocale: {
+    locale: chatDateTimeArgument("locale"),
+    timeZone: chatDateTimeArgument("time-zone"),
+  },
   setAppearance: (theme) => ipcRenderer.invoke("openadminos:set-appearance", theme),
   getCompanionSnapshot: () =>
     ipcRenderer.invoke("openadminos:get-companion-snapshot"),
@@ -121,6 +130,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:preview-intune-chat-send", input),
   getProviderDestination: (providerId: ProviderId) =>
     ipcRenderer.invoke("openadminos:get-provider-destination", providerId),
+  getModelFitContextWindow: (providerId: ProviderId, model: string) =>
+    ipcRenderer.invoke("openadminos:get-model-fit-context-window", providerId, model),
   streamIntuneChatMessage: (input, onEvent, options) => {
     const streamId = options?.streamId ?? crypto.randomUUID();
     let cleanedUp = false;

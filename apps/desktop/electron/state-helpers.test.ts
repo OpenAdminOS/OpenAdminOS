@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  buildMultiTenantDossierMarkdown,
   canonicalClientId,
   graphCacheRequestFromNextLink,
   humanizeMsalError,
@@ -676,16 +677,27 @@ describe("humanizeScheduledRunError", () => {
   it("keeps an Ollama memory failure that mentions 403 MiB instead of calling it a Graph denial", () => {
     const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
     const text = humanizeScheduledRunError(message);
-    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+    assert.match(text, /^Ollama failed with a kept context size\. Rerun the schedule to try without it\./);
+    assert.match(text, /free memory or pick a smaller model/);
     assert.doesNotMatch(text, /Graph/);
   });
+
+  for (const wrapper of [
+    "The proposal could not be checked against the tenant before applying, so nothing was applied. ",
+    "Nothing was applied: ",
+  ]) {
+    it(`keeps the Ollama recovery after "${wrapper.trim()}"`, () => {
+      const error = wrapper + "Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.";
+      assert.match(humanizeScheduledRunError(error), /^Ollama failed with a kept context size\. Rerun the schedule to try without it\./);
+    });
+  }
 
   it("ignores a Graph denial an older build saved from what Ollama said", () => {
     const message = "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: cudaMalloc failed: out of memory (403 MiB)";
     // Older builds stored denials without a source.
     const { source: _source, ...saved } = classifyGraphAccessDenied({});
     const text = humanizeScheduledRunError(message, saved);
-    assert.ok(text.startsWith("Ollama could not load gpt-oss:20b"), text);
+    assert.match(text, /Rerun the schedule to try without it/);
   });
 
   it("keeps a stored Graph denial for an error that is not Ollama's", () => {
@@ -696,4 +708,39 @@ describe("humanizeScheduledRunError", () => {
   it("still reads a Graph 403 in the app's own words", () => {
     assert.match(humanizeScheduledRunError("Graph responded with HTTP 403 for https://graph.microsoft.com/v1.0/users: reconnect to grant scopes"), /Graph/);
   });
+});
+
+it("localizes generation, cache refresh, and device sync timestamps in the dossier", () => {
+  const locale = "de-DE";
+  const timeZone = "Europe/Berlin";
+  const generatedAt = "2020-04-03T00:30:00.000Z";
+  const lastRefresh = "2020-04-02T23:15:00.000Z";
+  const lastSyncDateTime = "2020-03-31T22:30:00.000Z";
+  const dateOptions = { timeZone, year: "numeric", month: "short", day: "numeric" } as const;
+  const dateTime = new Intl.DateTimeFormat(locale, { ...dateOptions, hour: "2-digit", minute: "2-digit" });
+  const dateOnly = new Intl.DateTimeFormat(locale, dateOptions);
+  const counts = { windowsDevices: 1, compliant: 1, nonCompliant: 0, unknown: 0 };
+  const tenant = { tenantId: "tenant-1", tenantName: "Contoso" };
+
+  const markdown = buildMultiTenantDossierMarkdown({
+    timestampLocale: { locale, timeZone },
+    generatedAt,
+    prompt: "List Windows devices",
+    providerName: "Ollama",
+    summary: { ...counts, tenantsScanned: 1, failedTenants: 0, skippedTenants: 0, staleTenants: 0 },
+    comparisons: [{ ...tenant, ...counts, status: "ready", lastRefresh, warnings: [] }],
+    rows: [{
+      ...tenant,
+      deviceName: "WIN-01",
+      complianceState: "compliant",
+      operatingSystem: "Windows",
+      lastSyncDateTime,
+      stale: false,
+    }],
+  });
+
+  const lines = markdown.split("\n");
+  assert.ok(lines.includes(`Generated: ${dateTime.format(new Date(generatedAt))}`));
+  assert.ok(lines.includes(`| Contoso | ready | 1 | 1 | 0 | 0 | ${dateTime.format(new Date(lastRefresh))} |`));
+  assert.ok(lines.includes(`| Contoso | WIN-01 | compliant | Windows |  | ${dateOnly.format(new Date(lastSyncDateTime))} |  |`));
 });

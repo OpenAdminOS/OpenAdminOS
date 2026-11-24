@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentSchedule, AgentSummary } from "../shared/openAdminOS";
+import { Link } from "react-router";
+import type { AgentSchedule, AgentScheduleInput, AgentSummary } from "../shared/openAdminOS";
 import { ScheduleUsageForecast } from "./ScheduleUsageForecast";
 import {
   Badge,
@@ -11,7 +12,7 @@ import {
 import { SchedulesPausedNotice } from "./SchedulesPausedNotice";
 import { useAppState } from "../state";
 import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
-import { resolveOrganizations } from "../shared/openAdminOS";
+import { providerForModel, resolveOrganizations, resolveRunModel } from "../shared/openAdminOS";
 import { useToast } from "./Toast";
 
 const PRESETS = [
@@ -26,9 +27,15 @@ export function AgentScheduleCard({
   onChange,
 }: {
   agent: AgentSummary;
-  onChange: (next: AgentSchedule | null) => Promise<void> | void;
+  onChange: (next: AgentScheduleInput | null) => Promise<void> | void;
 }) {
   const schedule = agent.schedule;
+  const { state } = useAppState();
+  const endpoint = state.providers.find((provider) => provider.id === state.activeProviderId);
+  const reviewModel = resolveRunModel({ provider: endpoint, activeModelByProviderId: state.activeModelByProviderId, preferredModel: agent.preferredModel }).model;
+  const reviewProvider = providerForModel(endpoint, reviewModel);
+  const reviewed = schedule?.modelDestination;
+  const reviewedProvider = reviewed?.ollamaCloud ? "Ollama Cloud" : state.providers.find((provider) => provider.id === reviewed?.providerId)?.name ?? reviewed?.providerId;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState("30");
@@ -55,7 +62,7 @@ export function AgentScheduleCard({
     }
   }, [currentSeconds, preset]);
 
-  const apply = async (next: AgentSchedule | null) => {
+  const apply = async (next: AgentScheduleInput | null) => {
     setBusy(true);
     setError(null);
     try {
@@ -104,6 +111,26 @@ export function AgentScheduleCard({
           void apply(checked ? buildSchedule(draftSeconds) : null)
         }
       />
+
+      {enabled && reviewed ? (
+        <div className="space-y-2 text-sm text-[var(--color-text-muted)]">
+          <p>Scheduled model {reviewed.model ?? "Provider default"} · {reviewedProvider}</p>
+          {schedule?.lastSkipReason ? (
+            <div role="status">
+              <p>{schedule.lastSkipReason}</p>
+              <Link className="underline underline-offset-2" to="/settings/providers">Review provider settings</Link>
+            </div>
+          ) : null}
+          <Button size="sm" variant="secondary" disabled={busy || !reviewProvider}
+            onClick={() => void apply({ ...buildSchedule(currentSeconds), reviewModelDestination: true })}>
+            Use {reviewModel ?? "provider default"} · {reviewProvider?.name}
+          </Button>
+        </div>
+      ) : reviewProvider ? (
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Scheduled model {reviewModel ?? "Provider default"} · {reviewProvider.name}
+        </p>
+      ) : null}
 
       <div>
         <div className="mb-2 text-sm font-medium text-[var(--color-text)]">Interval</div>
@@ -207,12 +234,12 @@ export function AgentScheduleCard({
               })
             }
           />
-          <div className="mt-3 text-xs text-[var(--color-text-muted)]">
+          {!schedule?.lastSkipReason ? <div className="mt-3 text-xs text-[var(--color-text-muted)]">
             Next run <NextFireCountdown targetMs={nextFireMs} />
             {schedule?.lastScheduledRunAt
               ? `, last fired ${formatRelative(schedule.lastScheduledRunAt)}`
               : ""}
-          </div>
+          </div> : null}
         </div>
       ) : null}
 
