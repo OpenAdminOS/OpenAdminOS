@@ -1,3 +1,4 @@
+import { hostedOllamaDestination, providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
@@ -26,7 +27,7 @@ import {
 } from "./local-reset.js";
 import type { LocalResetInfo, LocalResetReport } from "@openadminos/agent-sdk";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
-import { runOfficeSmoke } from "./office-smoke.js";
+import { runOfficeSmoke, withOfficeSmokeOllama } from "./office-smoke.js";
 import { captureLandingShots } from "./landing-capture.js";
 import {
   captureFirstRunShots,
@@ -101,7 +102,7 @@ import type {
   CompanionLaunchSettings,
   AgentDiscordDelivery,
   AgentOutlookDelivery,
-  AgentSchedule,
+  AgentScheduleInput,
   AgentSignalDelivery,
   AgentSlackDelivery,
   AgentTeamsDelivery,
@@ -1179,8 +1180,13 @@ async function runScreenshotCapture(): Promise<void> {
     return;
   }
   if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
-    await runOfficeSmoke(window, screenshotCaptureOutDir);
-    await runOfficeRehearsal(window,screenshotCaptureOutDir,async()=>{officeRehearsalRevision=1;await store.tickOffice();});
+    await withOfficeSmokeOllama(smokeModelName, async () => {
+      await runOfficeSmoke(window, screenshotCaptureOutDir);
+      await runOfficeRehearsal(window, screenshotCaptureOutDir, async () => {
+        officeRehearsalRevision = 1;
+        await store.tickOffice();
+      });
+    });
     app.exit(0);
     return;
   }
@@ -2657,11 +2663,10 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId) ?? null
     : null;
-  const activeProvider =
-    state.providers.find((provider) => provider.id === state.activeProviderId) ?? null;
-  const activeModel = activeProvider
-    ? state.activeModelByProviderId?.[activeProvider.id] ?? activeProvider.defaultModel
-    : undefined;
+  const endpoint = state.providers.find((provider) => provider.id === state.activeProviderId);
+  const activeModel = resolveProviderDefaultModel(endpoint, state.activeModelByProviderId).model;
+  const activeProvider = providerForModel(endpoint, activeModel);
+  const ollamaDestination = hostedOllamaDestination(activeProvider, activeModel);
   const scheduler = await getSchedulerLaunchSettings();
   const cacheStatus = activeTenant
     ? await store.getGraphCacheStatus(activeTenant.id).catch(() => null)
@@ -2708,6 +2713,7 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
           label: activeProvider.name,
           isLocal: activeProvider.isLocal,
           trustLabel: state.trust.label,
+          ...(ollamaDestination ? { ollamaDestination } : {}),
           ...(activeModel ? { model: activeModel } : {}),
           status: activeProvider.status,
         }
@@ -2731,16 +2737,8 @@ async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult
   const nowMs = Date.now();
   return runDueCompanionSchedules(state, nowMs, {
     startScheduledRun: async (agent) => {
-      await store.startRun(agent.slug, { trigger: "schedule" });
-      const schedule = agent.schedule!;
-      await store.updateAgentSchedule(agent.slug, {
-        enabled: true,
-        intervalSeconds: schedule.intervalSeconds,
-        notifyOnSuccess: schedule.notifyOnSuccess,
-        notifyOnFailure: schedule.notifyOnFailure,
-        notifyOnChangeOnly: schedule.notifyOnChangeOnly,
-        lastScheduledRunAt: new Date(nowMs).toISOString(),
-      });
+      const run = await store.startRun(agent.slug, { trigger: "schedule" });
+      if (run.status === "failed") throw new Error(run.summary ?? run.error);
     },
   });
 }
@@ -3508,6 +3506,10 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     if (options.tenantId !== undefined) throw new Error("startRun.expectNoTenant cannot be combined with a tenant.");
     options.expectNoTenant = true;
   }
+  if (value.expectedOllamaCloud !== undefined) {
+    if (typeof value.expectedOllamaCloud !== "boolean") throw new Error("startRun.expectedOllamaCloud must be a boolean.");
+    options.expectedOllamaCloud = value.expectedOllamaCloud;
+  }
   if (value.requireOnDeviceModel !== undefined) {
     if (value.requireOnDeviceModel !== true) throw new Error("startRun.requireOnDeviceModel must be true when present.");
     options.requireOnDeviceModel = true;
@@ -3559,7 +3561,7 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
   return options;
 }
 
-function validateAgentSchedule(value: unknown): AgentSchedule | null {
+function validateAgentSchedule(value: unknown): AgentScheduleInput | null {
   if (value === null) return null;
   if (!isPlainRecord(value)) {
     throw new Error("agent schedule must be an object or null.");
@@ -3576,11 +3578,11 @@ function validateAgentSchedule(value: unknown): AgentSchedule | null {
   if (typeof value.enabled !== "boolean") {
     throw new Error("agent schedule enabled must be a boolean.");
   }
-  const schedule: AgentSchedule = {
+  const schedule: AgentScheduleInput = {
     enabled: value.enabled,
     intervalSeconds,
   };
-  for (const key of ["notifyOnSuccess", "notifyOnFailure", "notifyOnChangeOnly"] as const) {
+  for (const key of ["notifyOnSuccess", "notifyOnFailure", "notifyOnChangeOnly", "reviewModelDestination"] as const) {
     if (value[key] !== undefined) {
       if (typeof value[key] !== "boolean") {
         throw new Error(`agent schedule ${key} must be a boolean.`);
@@ -4033,6 +4035,11 @@ function validateHostedProviderConsent(
   const fitOffer = value.modelFitOfferId === undefined
     ? {}
     : { modelFitOfferId: requireBoundedString(value.modelFitOfferId, "hostedProviderConsent.modelFitOfferId", 128) };
+  const ollamaDestination = value.ollamaDestination;
+  if (ollamaDestination !== undefined && (providerId !== "ollama" || (ollamaDestination !== "ollama-cloud" && ollamaDestination !== "ollama-endpoint"))) {
+    throw new Error("hostedProviderConsent.ollamaDestination must name a hosted Ollama destination.");
+  }
+  const ollama = ollamaDestination ? { ollamaDestination } as const : {};
   const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
   // Bound to no tenant or to one tenant, never both: a no-tenant
   // acknowledgement covers no tenant context and no workspace.
@@ -4043,7 +4050,7 @@ function validateHostedProviderConsent(
     if (value.tenantId !== undefined || workspaceContext) {
       throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
     }
-    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember, ...fitOffer };
+    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember, ...ollama, ...fitOffer };
   }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
@@ -4051,6 +4058,7 @@ function validateHostedProviderConsent(
     ...(model !== undefined ? { model } : {}),
     acknowledgedAt,
     ...remember,
+    ...ollama,
     ...(workspaceContext ? { workspaceContext } : {}),
     ...fitOffer,
   };

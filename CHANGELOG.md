@@ -56,6 +56,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Before sending to an on-device Ollama model from Chat, agent runs, schedules, Agent Team, or Nova, OpenAdminOS checks that the model still runs on this device and stops if it cannot confirm that.
 - The Splashtop Docs and Splashtop Agentic Packr Docs references name OpenAdminOS as their publisher, and the install footer of a built-in reference names the host it reads; the earlier names ending in MCP still work in Chat.
 - Nightly release notes list only what that nightly adds: its pull requests and commits, and the changelog entries added since the previous release, not the whole unreleased changelog.
 - Claude Code and Codex requests no longer stop at 180 seconds in total: they end after a silence limit (90 seconds for Claude Code, 180 for Codex, also before the first output) or a 15 minute cap, each with its own error. `OPENADMINOS_CLAUDE_CODE_IDLE_TIMEOUT_MS` and `OPENADMINOS_CODEX_IDLE_TIMEOUT_MS` raise the silence limit; the existing `_TIMEOUT_MS` variables set the cap. A value above 2147483647 ms, the longest a Node timer waits, is ignored. Time a slow consumer of the stream spends on a chunk does not count as silence.
@@ -83,6 +84,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Remove the GitBook sync config now that docs.openadminos.com is served by the self-hosted docs site.
 
 ### Fixed
+
+- The Agent Team smoke rehearsal supplies Ollama model metadata so it checks on-device planning and verifies that the Chief skips redundant work.
+- Schedules paused for model destination review show a pause notice with a link to review the schedule.
+
+- Agent Team, Run with, install checks and delivered reports label Ollama Cloud models as hosted. Opt-in usage counts them as hosted.
+- The menu bar shows the selected model and uses the same hosted consent as Chat.
+- Chat asks for separate consent for Ollama Cloud and an off-device Ollama server.
+- Agent Team checks that reviewed local Ollama models still run on this device before sending evidence.
+- Runs saved before Ollama Cloud tracking verify that the saved model is still on this device before they resume.
+- Nova uses the selected model to identify where reasoning runs, including Ollama Cloud aliases.
+- Agent schedules pause for review when the model destination changes. The schedule card and run history show why. After an upgrade, schedules that had no saved destination also wait for review before running automatically with a hosted model.
+- Managed policies that allow Ollama also allow Ollama Cloud with hosted Chat confirmation. IT can lock `defaultModel` to an installed Ollama model by name. Keep that name backed by a model that runs on this device.
+
+- Ollama Cloud models show where prompts are processed and require the usual hosted Chat confirmation. On-device reruns only offer models that run on this device.
 
 - Chat with a local model keeps a prose answer that quotes a tool call as an example, reads a final answer that also names a tool as the answer, no longer flashes a raw tool request while the cached-data answer streams, and never shows an unreadable device sync time as a date.
 - Chat with a local model counts in code: device counts, per OS splits and not compliant lists come from SQL over every cached Intune device (a new `count_cached` tool and an authoritative computed result in the answer pack), Entra devices are no longer mixed into Intune answers, follow-ups such as "only Windows" narrow the previous result, "why is this device not compliant" says the failing rule is not in the cached data and gives the last sync (and corrects the premise for a compliant device), standing instructions earlier in a chat are no longer bypassed by direct cache answers, a local model's answer to those questions is written by code from the counts, and auto mode falls back within four model calls with a notice that says what happened.

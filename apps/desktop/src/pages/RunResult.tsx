@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
@@ -110,10 +111,16 @@ function RunResultPage({ run }: { run: RunRecord }) {
     : undefined;
   // Fall back to the built-in catalog so a run whose provider entry was
   // later removed still reports where its data went.
-  const runProvider = run.providerId
+  const endpointProvider = run.providerId
     ? state.providers.find((provider) => provider.id === run.providerId) ??
       providerCatalog.find((provider) => provider.id === run.providerId)
     : undefined;
+  const runProvider = providerForModel(
+    endpointProvider && run.ollamaCloud !== undefined && run.model
+      ? { ...endpointProvider, isLocal: !run.ollamaCloud, remoteModels: run.ollamaCloud ? [run.model] : [] }
+      : endpointProvider,
+    run.model,
+  );
   const derivedTrust = deriveTrustState({
     provider: runProvider,
     activeTenant: runTenant,
@@ -354,7 +361,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
       run={run}
       displayName={displayName}
       tenantName={tenantName}
-      providerName={providerNameForRun(run, state.providers)}
+      providerName={runProvider?.name ?? providerNameForRun(run, state.providers)}
       providerIsLocal={runProvider?.isLocal}
       trustDetail={runTrust.detail}
       activeTenantId={state.activeTenantId}
@@ -376,6 +383,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
                   providerId: choice.providerId,
                   ...(choice.model ? { model: choice.model } : {}),
                   modelFit,
+                  ...(choice.isLocal ? { safeguards: { onDevice: true } } : {}),
                   ...(run.dryRun ? { dryRun: true } : {}),
                 };
                 reRun();

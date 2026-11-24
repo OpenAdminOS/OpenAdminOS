@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, it, mock } from "node:test";
 import { providerCatalog } from "@openadminos/agent-sdk";
 import { createOllamaLlm } from "@openadminos/runtime";
-import { checkOllama } from "./provider-detail.js";
+import { checkOllama, ollamaModelIsOnDevice } from "./provider-detail.js";
 
 afterEach(() => mock.restoreAll());
 const provider = providerCatalog.find((p) => p.id === "ollama")!;
@@ -130,4 +130,21 @@ it("keeps a known family when a check reads a reply without a model list", async
   await checkOllama(provider);
   await createOllamaLlm({ defaultModel: "renamed-oss:latest", refreshModelFamily: false }).complete({ prompt: "p" });
   assert.deepEqual(thinks, ["low"]);
+});
+
+it("detects Cloud aliases and suffixes while preferring an installed local default", async () => {
+  mock.method(globalThis, "fetch", async (url: string) => url.endsWith("/api/tags")
+    ? Response.json({ models: [
+        { model: "alias:latest", remote_host: "https://ollama.com" },
+        { name: "glm-4.6:cloud" },
+        { name: "gpt-oss:120b-cloud" },
+        { model: "writer:latest" },
+      ] })
+    : Response.json({ capabilities: ["completion"] }));
+
+  const result = await checkOllama(provider);
+  assert.deepEqual(result.remoteModels, ["alias:latest", "glm-4.6:cloud", "gpt-oss:120b-cloud"]);
+  assert.equal(result.defaultModel, "writer:latest");
+  assert.equal(await ollamaModelIsOnDevice("alias:latest"), false);
+  assert.equal(await ollamaModelIsOnDevice("writer:latest"), true);
 });

@@ -1,4 +1,4 @@
-import { managedLockedModel, managedProviderAllowed, providerCatalog, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
+import { isOnDeviceModel, managedLockedModel, managedProviderAllowed, providerCatalog, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type { ManagedPolicyStatus, ModelFitIssue, ModelFitReason, ProviderId, ProviderSummary } from "./openAdminOS.js";
 import { isProviderReady } from "./provider-detection.js";
 
@@ -226,30 +226,12 @@ export function hostedModelFitModel(
   return provider.models.find((model) => isListedHostedModel(provider, model));
 }
 
-/**
- * An Ollama Cloud model, such as "gpt-oss:120b-cloud" or "glm-4.6:cloud".
- * A loopback Ollama that is signed in to ollama.com lists these with its
- * local models, but their prompts are processed on Ollama's servers, so
- * they are never offered or accepted as a model on this device.
- * TODO(ugur): Ollama's /api/tags also marks them with `remote_host`; should
- * provider detection read that and label cloud models everywhere?
- */
-export function isOllamaCloudModel(model: string | undefined): boolean {
-  return Boolean(model && /[:-]cloud$/i.test(model.trim()));
-}
+export { isOllamaCloudModel, isOnDeviceModel, isRemoteBackedModel } from "@openadminos/agent-sdk";
 
-/**
- * A model whose prompts leave this device although its provider runs here:
- * one the server marks as remote-backed, or an Ollama Cloud name.
- */
-export function isRemoteBackedModel(provider: Pick<ProviderSummary, "id" | "remoteModels">, model: string | undefined): boolean {
-  if (!model) return false;
-  return Boolean(provider.remoteModels?.includes(model)) || (provider.id === "ollama" && isOllamaCloudModel(model));
-}
-
-/** Whether a provider runs this model on this device: a local provider, and not a remote-backed model. */
-export function isOnDeviceModel(provider: Pick<ProviderSummary, "id" | "isLocal" | "remoteModels">, model: string | undefined): boolean {
-  return provider.isLocal && !isRemoteBackedModel(provider, model);
+/** Resolve a rerun model from the models actually available on this device. */
+export function onDeviceRerunProvider(provider: ProviderSummary): ProviderSummary {
+  const models = provider.models.filter((model) => isOnDeviceModel(provider, model) && !isPlaceholderModel(model));
+  return { ...provider, models, defaultModel: models.includes(provider.defaultModel ?? "") ? provider.defaultModel : models[0] };
 }
 
 /** The parameter count in a model's name, such as 8 for "openadmin-8b" or 20 for "gpt-oss:20b". */
@@ -317,7 +299,7 @@ export function modelFitChoices(input: {
       if (!provider.isLocal || !isProviderReady(provider) || !managedProviderAllowed(input.managedPolicy, provider.id)) continue;
       for (const model of provider.models) {
         if (provider.id === issue.providerId && model === issue.model) continue;
-        if (isRemoteBackedModel(provider, model)) continue;
+        if (!isOnDeviceModel(provider, model)) continue;
         // A model the managed policy locks this provider to is the only one it may use.
         const locked = managedLockedModel(input.managedPolicy, provider.id);
         if (locked !== undefined && model !== locked) continue;

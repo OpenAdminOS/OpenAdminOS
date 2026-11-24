@@ -829,3 +829,48 @@ describe("Model fit in Chat", () => {
     });
   });
 });
+
+it("refuses a Chat send to an Ollama Cloud alias until the hosted model is confirmed", async () => {
+  await withStore(async (store) => {
+    const built: string[] = [];
+    const host = chatHost(store, built);
+    host.listProviders = async () => [{ ...ollama, remoteModels: [LOCAL_MODEL] }];
+    const service = new IntuneChatService(host);
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION }, () => undefined),
+      /Hosted provider confirmation is required/,
+    );
+    const consent = { noTenant: true as const, providerId: "ollama" as const, model: LOCAL_MODEL, acknowledgedAt: new Date().toISOString() };
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION, hostedProviderConsent: { ...consent, remember: true, ollamaDestination: "ollama-endpoint" } }, () => undefined),
+      /Ollama destination changed or was not confirmed/,
+    );
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION, hostedProviderConsent: consent }, () => undefined),
+      /Ollama destination changed or was not confirmed/,
+    );
+    assert.equal(built.length, 0);
+    const result = await service.streamIntuneChatMessage({
+      content: QUESTION,
+      hostedProviderConsent: { ...consent, ollamaDestination: "ollama-cloud" },
+    }, () => undefined);
+    assert.ok(built.includes("ollama"));
+    assert.equal(result.assistantMessage.modelFit, undefined);
+  });
+});
+
+it("does not dispatch a Chat request if a previously local Ollama alias cannot be verified", async () => {
+  await withStore(async (store) => {
+    const host = chatHost(store, []);
+    let calls = 0;
+    host.verifyLocalOllamaModel = async () => false;
+    host.buildLlm = async () => ({
+      available: true,
+      async complete() { calls += 1; throw new Error("Unexpected model call"); },
+      async *stream() { calls += 1; throw new Error("Unexpected model call"); },
+    });
+    const result = await new IntuneChatService(host).streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+    assert.match(result.assistantMessage.error ?? "", /still runs on this device/);
+    assert.equal(calls, 0);
+  });
+});

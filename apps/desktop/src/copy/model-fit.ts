@@ -119,6 +119,9 @@ export const MODEL_FIT_COPY = {
 
   reviewAgain: "Close this review and open the run again to review where it goes now.",
   modelGone: (model: string, provider: string) => `${provider} no longer lists ${model}, so this run cannot start. Choose a provider again on the run page.`,
+  onDeviceModelMissing: (provider: string, model?: string) => model
+    ? `${model} is unavailable for an on-device rerun. Choose a model that runs on this device.`
+    : `${provider} has no available model for this on-device rerun. Choose or download a model that runs on this device, then recheck providers.`,
   modelMissing: (provider: string) => `${provider} does not report a model yet, so this run cannot start. Check it in Settings, Providers.`,
   destinationPending: (provider: string) => `Checking where ${provider} is reached before the run can start.`,
   destinationFailedChat: (provider: string) =>

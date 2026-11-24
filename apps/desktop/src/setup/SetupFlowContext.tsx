@@ -1,3 +1,5 @@
+import { MODEL_FIT_COPY } from "../copy/model-fit";
+import { activeModelProvider } from "@openadminos/agent-sdk";
 import {
   createContext,
   useCallback,
@@ -20,7 +22,7 @@ import type {
   TenantRecord,
 } from "../shared/openAdminOS";
 import { isManagedSettingLocked } from "../shared/openAdminOS";
-import { hostedModelFitModel, SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
+import { hostedModelFitModel, onDeviceRerunProvider, SELF_HOSTED_PROVIDER_IDS } from "../shared/model-fit";
 import { useAppState } from "../state";
 import {
   clearPendingIntent,
@@ -100,6 +102,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       ? state.installedAgents.find((agent) => agent.slug === intent.slug)?.name ??
         state.registryAgents.find((agent) => agent.slug === intent.slug)?.name
       : undefined;
+  const selectedProvider = state.providers.find((provider) => provider.id === (
+    (intent?.kind === "agent-run" && intent.providerId) || state.activeProviderId
+  ));
+  const onDeviceModelMissing = isOneRunProviderIntent(intent) && selectedProvider?.isLocal &&
+    selectedProvider.status === "connected" && onDeviceRerunProvider(selectedProvider).models.length === 0;
   const providerReady = useCallback(
     (candidate: PendingIntent | null | undefined) => {
       const providerId =
@@ -108,7 +115,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
           : state.activeProviderId;
       const provider = state.providers.find((entry) => entry.id === providerId);
       // A run for one request after a model fit failure never goes to a self-hosted server outside this device.
-      if (isOneRunProviderIntent(candidate) && provider && !modelFitUsable(provider, state.activeModelByProviderId)) return false;
+      if (isOneRunProviderIntent(candidate) && provider && !modelFitUsable(provider, state.activeModelByProviderId, candidate.safeguards?.onDevice === true)) return false;
       return Boolean(
         provider &&
           isProviderImplemented(provider.id) &&
@@ -394,11 +401,13 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         intent={intent}
         scopes={scopes}
         scopesError={scopesError}
-        error={error}
+        error={error ?? (stage === "provider" && onDeviceModelMissing ? MODEL_FIT_COPY.onDeviceModelMissing(selectedProvider.name) : null)}
         activeTenant={connectedTenant ?? activeTenant}
         agentName={pendingAgentName}
         // The picker for one run offers only what the run host admits for it.
-        providers={isOneRunProviderIntent(intent) ? state.providers.filter((provider) => modelFitUsable(provider, state.activeModelByProviderId)) : state.providers}
+        providers={isOneRunProviderIntent(intent)
+          ? state.providers.filter((provider) => modelFitUsable(provider, state.activeModelByProviderId, intent.safeguards?.onDevice === true))
+          : state.providers.map((provider) => activeModelProvider(provider, state.activeModelByProviderId))}
         activeProviderId={isOneRunProviderIntent(intent) && intent.providerId ? intent.providerId : state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
         registrationLocked={
@@ -433,8 +442,8 @@ export function currentReturnTo(pathname: string, search = ""): string {
 }
 
 /** A self-hosted server outside this device (LM Studio, Lemonade or Ollama reached elsewhere) is never a model fit choice. */
-function modelFitEligible(provider: ProviderSummary): boolean {
-  return provider.isLocal || !SELF_HOSTED_PROVIDER_IDS.has(provider.id);
+function modelFitEligible(provider: ProviderSummary, onDevice: boolean): boolean {
+  return provider.isLocal || (!onDevice && !SELF_HOSTED_PROVIDER_IDS.has(provider.id));
 }
 
 /**
@@ -442,11 +451,12 @@ function modelFitEligible(provider: ProviderSummary): boolean {
  * (listed, not a placeholder such as Gemini's `gemini-default`, not only a policy lock). One that
  * still needs setup stays in the picker, so the admin can set it up.
  */
-function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined): boolean {
-  if (!modelFitEligible(provider)) return false;
+function modelFitUsable(provider: ProviderSummary, activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined, onDevice: boolean): boolean {
+  if (!modelFitEligible(provider, onDevice)) return false;
   // Azure OpenAI's ready state is "available"; any other state still needs setup.
   const ready = provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available");
-  if (provider.isLocal || !ready) return true;
+  if (!ready) return true;
+  if (provider.isLocal) return onDeviceRerunProvider(provider).models.length > 0;
   return hostedModelFitModel(provider, activeModelByProviderId) !== undefined;
 }
 
