@@ -1235,9 +1235,9 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   }
   const validated = validateMcpArgs(entry, proposed);
   // This is a title search inside the M365 roadmap, not a product selector.
-  // The public service errors on the bare abbreviation; ask for the list instead.
+  // A bare suite name does not narrow the list.
   if (entry.serverId === "release-communications" && entry.tool === "get_recent_m365_roadmaps" &&
-      typeof validated.search === "string" && /^m(?:icrosoft\s+)?365$/i.test(validated.search.trim())) {
+      typeof validated.search === "string" && /^(?:microsoft\s*365|office\s*365|o365|m365)$/i.test(validated.search.trim())) {
     delete validated.search;
   }
   const { args, checked } = canonicalMcpArgs(entry, validated, hooks.references(entry.serverId));

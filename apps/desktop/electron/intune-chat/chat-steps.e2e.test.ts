@@ -335,6 +335,24 @@ describe("Microsoft 365 roadmap routing", () => {
     });
   });
 
+  for (const [search, dropped] of [
+    [" Microsoft 365 ", true], ["MICROSOFT365", true], ["Office 365", true], ["office365", true],
+    ["O365", true], ["m365", true],
+    ["Intune", false], ["Entra", false], ["Defender", false], ["Teams", false], ["Microsoft 365 Copilot", false],
+  ] as const) {
+    it(`${dropped ? "drops" : "preserves"} the roadmap search ${JSON.stringify(search)}`, async () => {
+      await withHarness(async ({ store, script }) => {
+        roadmapRequests.length = 0;
+        script([
+          { kind: "docs", tool: roadmapTool, params: { search } },
+          { final: true, answer: "Roadmap check finished." },
+        ]);
+        await store.sendIntuneChatMessage({ content: "What's on the Microsoft 365 roadmap?" });
+        assert.deepEqual(roadmapRequests, [dropped ? {} : { search }]);
+      }, { roadmap: true });
+    });
+  }
+
   it("asks the roadmap source before a tenant tool even when the model labels what's coming as a tenant question", async () => {
     await withHarness(async ({ store, graphPaths, prompts, script }) => {
       roadmapRequests.length = 0;
