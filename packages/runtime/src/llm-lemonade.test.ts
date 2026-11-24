@@ -87,7 +87,7 @@ describe("probeLemonadeLlm", () => {
     }, async () => {
       const probe = await probeLemonadeLlm();
       assert.equal(probe.status, "not-running");
-      assert.equal(probe.detail, "Lemonade isn't running. Start Lemonade Server, then try again.");
+      assert.equal(probe.detail, "The connection to Lemonade on http://127.0.0.1:13305/v1 was refused. Start Lemonade Server, then try again.");
     });
   });
 
@@ -99,11 +99,11 @@ describe("probeLemonadeLlm", () => {
     });
   });
 
-  it("keeps the plain HTTP message for other statuses", async () => {
+  it("names the endpoint and HTTP status for other errors", async () => {
     await withFetch(async () => new Response("", { status: 500 }), async () => {
       const probe = await probeLemonadeLlm();
       assert.equal(probe.status, "error");
-      assert.equal(probe.detail, "Lemonade responded with HTTP 500.");
+      assert.equal(probe.detail, "Lemonade on http://127.0.0.1:13305/v1 responded with HTTP 500. Check the server address and configuration, then try again.");
     });
   });
 });

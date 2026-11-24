@@ -10,6 +10,8 @@ The release surface publishes Windows, macOS, and Linux binaries:
 
 A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
 
+Before publishing either channel, the release job downloads each platform artifact by name and verifies the expected installers and manifests. It checks updater asset sizes and SHA-512 hashes against the update manifests, and checks build-time SHA-256 hashes for the manifests, Linux packages, and stable macOS PKG. The release job also reads the Linux `.deb` data archive with `dpkg-deb --fsys-tarfile`. A failed check names the file and stops publishing. The stable apt job compares its separately downloaded `.deb` with the verified release checksum before building the repository.
+
 Every merge to `main` that changes the app also ships a signed **nightly** prerelease. Nightlies need no maintainer action; see [Nightly builds](#nightly-builds).
 
 The macOS job also verifies the two bundled native helpers inside the packaged
@@ -188,7 +190,9 @@ The workflow exports the public key to `https://repo.openadminos.com/debian/open
 
 To republish an existing release into apt without rebuilding the app, run the
 **Release** workflow manually from `main` and set `backfill_apt_tag` to the
-release tag, for example `v0.2.1`.
+stable release tag, for example `v0.7.2`. The workflow checks the downloaded
+`.deb` size and SHA-512 against that release's `latest-linux.yml` before
+building the repository. A missing manifest or package entry blocks the backfill.
 
 ---
 
