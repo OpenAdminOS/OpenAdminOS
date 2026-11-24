@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Conditional Access explainer 1.2.0 (needs 0.7.3-nightly.20261123094040 or later) sends one compact record per policy, so a typical set of about 100 policies fits OpenAdmin 8B's 16k context, and the review now leads with concrete recommended changes, maps coverage and explains what each group of policies does.
 - When an on-device model reasons without answering during an agent run, the failed run offers other on-device models and configured hosted providers, including for older failures from script agents. Hosted retries require a run review that names where prompts and data go.
 - Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review (mockup 36).
 - Windows uninstall now removes the account's local data folder, including an IT `policy.json` placed there (IT deploys it again after a reinstall); the machine-wide policy stays.

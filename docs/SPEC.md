@@ -676,8 +676,9 @@ Agent prompts carry summaries, not inventories. The runtime's
 `compact-conditional-access` transform turns each Conditional Access policy
 into one short record (scope as counts or `All`, built-in role names,
 conditions, grant and session controls), and `group-by-age` can keep names
-only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
-follow-up change; with it, 100 policies of the test fixture need about
+only (`pick`). Conditional Access explainer 1.2.0 is planned for OpenAdminOS
+0.8.0 and keeps `0.7.3-nightly.20261123094040` as its minimum app version.
+With the compact manifest, 100 policies of the test fixture need about
 15,500 estimated tokens with an 1,100 token answer and fit a 16k local model,
 and up to 107 fit by the estimate. Grouped
 records reach prompts only as counts (`count-by-field` steps), and breakdowns
