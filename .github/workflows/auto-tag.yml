@@ -22,6 +22,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: auto-tag-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   # Dispatching release.yml uses the workflow dispatch API, which needs
