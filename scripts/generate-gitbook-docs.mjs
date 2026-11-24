@@ -14,7 +14,6 @@
 import { execFileSync } from "node:child_process";
 import { tsImport } from "tsx/esm/api";
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -28,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 import { load as parseYaml } from "js-yaml";
 
-import { buildDocsSite, parseSummary } from "./docs-site-routes.mjs";
+import { buildDocsSite, parseSummary, stripHtmlComments } from "./docs-site-routes.mjs";
 
 const { DEFAULT_WRITE_MAX_ACTIONS } = await tsImport("../packages/agent-sdk/src/write-limits.ts", import.meta.url);
 const {
@@ -727,7 +726,7 @@ function writeWebDocsMirror() {
     }
     const to = join(webDocsRoot, page.source);
     ensureDir(dirname(to));
-    copyFileSync(from, to);
+    writeFileSync(to, stripHtmlComments(readFileSync(from, "utf8")));
   }
 
   const manifest = {

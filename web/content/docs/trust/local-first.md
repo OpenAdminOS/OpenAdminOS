@@ -7,7 +7,7 @@ description: "What stays on the device when OpenAdminOS runs locally."
 
 With a local model, OpenAdminOS processes tenant data, prompts, and model responses on your computer. It stores run history and error details locally. A public reference you enable can receive words from your question, and a delivery rule or connector step you configure can send run reports.
 
-The app sends no tenant-content, prompt, run-result, or crash-report telemetry. Registry install counts are on by default in packaged production builds and can be turned off in **Settings > Privacy**. A count sends the public agent slug, app version, and platform. See [Network calls](network-calls.md) for hosts, timing, and controls.
+The app sends no tenant-content, prompt, run-result, or crash-report telemetry. Registry install counts are on by default in packaged builds (stable and nightly) and can be turned off in **Settings > Privacy**. A count sends the public agent slug, app version, and platform. See [Network calls](network-calls.md) for hosts, timing, and controls.
 
 ## Tenant Content in Prompts
 

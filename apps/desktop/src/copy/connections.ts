@@ -89,7 +89,7 @@ export const CONNECTIONS_COPY = {
   emptyBody:
     "Chat answers from the model and public references. Connect Microsoft 365 to read Intune, Entra and Defender for an organization.",
   appTraffic: "App traffic",
-  appTrafficDetails: "Update checks and agent registry (GitHub), docs index (GitHub and Ollama registry through local Ollama), install counts (openadminos.com).",
+  appTrafficDetails: "Update checks and registry refreshes can reach GitHub, docs index requests can reach GitHub and the Ollama registry through local Ollama, and install counts can reach openadminos.com.",
   networkCallsLink: "Network calls and controls",
   leavesNowHeading: "Leaves this device now",
   reportsNowHeading: "Run reports and agent messages",

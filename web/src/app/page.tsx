@@ -154,7 +154,7 @@ const TOUR: readonly TourItem[] = [
 const DATA_ROWS = [
   {
     label: "Prompts and tenant context",
-    local: "Stay on this device",
+    local: "Stay on this device. Enabled public references can receive filtered words from a prompt.",
     hosted: "Sent to the provider you selected",
   },
   {
@@ -181,7 +181,7 @@ const DATA_ROWS = [
 
 const GUARANTEES = [
   ["01", "No tenant telemetry", "The app sends no tenant data, prompts, run results, or crash reports to us as telemetry."],
-  ["02", "No agent without a tenant", "Nothing runs until an active tenant is connected and shown in the title bar."],
+  ["02", "Service access requires a connection", "Agents use only services connected in the active organization shown in the app. Agents that call no service API can run without an organization."],
   ["03", "No write without review", "No skip toggle and no trust-this-agent exception, for any agent."],
   ["04", "Open source, MIT", "Read the code that touches your tenant before you connect it."],
 ] as const;
@@ -260,7 +260,7 @@ const TESTIMONIAL = {
 //   download. This file is the badge as NVIDIA placed it in its member social
 //   template (nv-inception-social-fb-instagram-template.pptx,
 //   ppt/media/image4.png, 2048 px), cut out at its border.
-//   TODO(ugur): replace it with the badge file from the Inception portal.
+//   Replace it when the badge file from the Inception portal is available.
 const MEMBERSHIPS: readonly {
   name: string;
   href: string;

@@ -6,18 +6,19 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Document the desktop app's automatic network requests, what each sends, and where to turn them off.
+- Document background update downloads, docs index checks, provider checks, and the controls for app network requests.
 
 ### Changed
 
 - Clarify what stays on the device with a local model and show app traffic in Connections.
-- Explain what OpenAdminOS and its service providers process in the website privacy notice.
+- Explain who controls tenant data, how install counts are retained, and when support previews are required in the website privacy notice.
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
 
 ### Removed
 
 ### Fixed
 
+- Include app traffic and its destinations in the Connections reach map's screen-reader description.
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
 
 ### Security

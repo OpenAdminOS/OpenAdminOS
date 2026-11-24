@@ -85,8 +85,9 @@ describe("Connections reach map", () => {
     const description = reachDescription(buildReachModel(state, [teamsConnector()]));
     await waitFor(() => expect(map).toHaveAccessibleDescription(description));
     expect(description).toMatch(
-      /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports and agent messages can go to Microsoft Teams under saved delivery rules and agent steps\.$/,
+      /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports and agent messages can go to Microsoft Teams under saved delivery rules and agent steps\. /,
     );
+    expect(map).toHaveAccessibleDescription(/Update checks and registry refreshes can reach GitHub, docs index requests can reach GitHub and the Ollama registry through local Ollama, and install counts can reach openadminos\.com\.$/);
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
     expect(within(map).getByText(CONNECTIONS_COPY.appTraffic)).toBeInTheDocument();
     const networkCalls = within(map).getByRole("link", { name: CONNECTIONS_COPY.networkCallsLink });
@@ -172,6 +173,7 @@ describe("Connections reach map", () => {
     // The figure keeps its text alternative.
     const figure = within(empty).getByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(figure).toHaveAccessibleDescription(/^No organization reads no service into this device\./);
+    expect(figure).toHaveAccessibleDescription(/install counts can reach openadminos\.com\.$/);
     // One way forward: Connect Microsoft 365. There is no sample data.
     expect(within(empty).getAllByRole("button").map((button) => button.textContent)).toEqual([CONNECTIONS_COPY.connectMicrosoft365]);
     expect(screen.queryByRole("button", { name: /sample data/i })).not.toBeInTheDocument();

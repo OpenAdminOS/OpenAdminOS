@@ -80,7 +80,7 @@ export default function PrivacyPage() {
               Who is responsible
             </h2>
             <p className="mt-3">
-              The controller for the processing described here is {LEGAL_ENTITY_NAME}{" "}
+              The controller for the processing we do is {LEGAL_ENTITY_NAME}{" "}
               (&ldquo;{LEGAL_ENTITY_SHORT_NAME}&rdquo;, &ldquo;we&rdquo;),
               represented by its managing director, {MANAGING_DIRECTOR_NAME}.
               For privacy questions and requests, email{" "}
@@ -91,11 +91,25 @@ export default function PrivacyPage() {
                 <span key={line} className="block">{line}</span>
               ))}
             </address>
-            {/* TODO(ugur): Confirm whether a data protection officer is required and publish their contact details if applicable. */}
             <p className="mt-3">
               Data protection officer contact, if applicable: [to be confirmed].
               The full provider disclosure is in the{" "}
               <Link href="/legal-notice" className="text-link">legal notice</Link>.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              People and devices in your Microsoft 365 tenant
+            </h2>
+            <p className="mt-3">
+              The administrator&rsquo;s organization is the controller for personal
+              data about other people in its Microsoft 365 tenant, including user
+              records and device records associated with people. The desktop app
+              processes this tenant content on the administrator&rsquo;s device.
+              Ugurlabs does not receive the tenant content the app processes.
+              For questions about these records, contact the administrator&rsquo;s
+              organization.
             </p>
           </section>
 
@@ -117,16 +131,20 @@ export default function PrivacyPage() {
               configured delivery rules or agent steps can send reports to connectors.
             </p>
             <p className="mt-3">
-              The app checks local model servers on your computer. It reads local CLI
-              version and sign-in status for tools such as Claude Code and Codex and
-              reads the Codex model cache and configuration for model names.
-              The CLI tools may check sign-in with their providers. OpenAdminOS
-              sends none of these discovery results to us.
+              The app checks local model servers and installed CLI versions. It
+              reads the Codex model cache and configuration and asks Codex and
+              Claude Code for sign-in status. Claude Code may contact its configured
+              service. The full Copilot check contacts GitHub through the Copilot CLI
+              for the model catalog. For Copilot and Gemini, the first-run scan checks
+              only the installed versions. OpenAdminOS sends none of these discovery
+              results to us.
             </p>
             <p className="mt-3">
               The app checks GitHub Releases for updates on supported Windows and
-              macOS builds and refreshes the agent registry from GitHub or your
-              configured registry. With local Ollama available, it can download the
+              macOS builds. An available update downloads in the background from
+              GitHub. It installs when you restart or quit the app. The app refreshes
+              the agent registry from GitHub or your configured registry. With local
+              Ollama available, it can download the
               docs index from GitHub Releases and have local Ollama pull its embedding
               model from the Ollama registry. Installing a public agent can send
               a count to our website. Turn off these requests in Settings &gt; Privacy.
@@ -143,7 +161,6 @@ export default function PrivacyPage() {
             <div className="mt-4 space-y-5">
               <div>
                 <h3 className="font-medium text-brand-ink">Hosting and access logs</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis, Vercel log retention, and processor terms. */}
                 <p>
                   Vercel hosts the website and its APIs for us. It processes access
                   logs with IP addresses, browser or app user-agent strings, and
@@ -156,10 +173,9 @@ export default function PrivacyPage() {
               </div>
               <div>
                 <h3 className="font-medium text-brand-ink">Rate limits and duplicate reports</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis, Upstash region, and processor terms. */}
                 <p>
                   Upstash Redis processes short-lived keys containing the requester&rsquo;s
-                  IP address. Install count keys expire after 60 seconds. Support and
+                  IP address. Install rate-limit keys expire after 60 seconds. Support and
                   agent submission rate-limit keys expire after 1 hour. A hash used to
                   detect repeated support reports expires after 24 hours. The storage region
                   is [to be confirmed]. We rely on our legitimate interest in preventing
@@ -169,21 +185,30 @@ export default function PrivacyPage() {
               </div>
               <div>
                 <h3 className="font-medium text-brand-ink">Public agent install counts</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis and retention for the aggregate daily counters. */}
                 <p>
-                  Packaged production builds send the public agent slug, app version,
+                  Packaged builds (stable and nightly) send the public agent slug, app version,
                   and platform when you install a public registry agent. The app
                   checks for duplicates on your device. Upstash Redis stores aggregate
-                  daily counters without a per-install identifier. We briefly use your
+                  daily counters for about 8 days. Pending counts stay in Redis until
+                  the hourly update to the public <code>stats/agents.json</code> file.
+                  We briefly use your
                   IP address for rate limiting as described above. Our legitimate
                   interest is measuring which agents are installed (Art. 6(1)(f)
-                  GDPR, [to be confirmed]). Aggregate retention is [to be confirmed].
+                  GDPR, [to be confirmed]).
                   Counts are on by default. Turn them off in Settings &gt; Privacy.
                 </p>
               </div>
               <div>
+                <h3 className="font-medium text-brand-ink">Website theme</h3>
+                <p>
+                  If you choose a light or dark theme, the site can save that choice in
+                  your browser&rsquo;s local storage (<code>localStorage</code>). The choice stays in your browser
+                  and is never sent to us. The theme setting uses no cookie. You can
+                  clear it in your browser&rsquo;s site settings.
+                </p>
+              </div>
+              <div>
                 <h3 className="font-medium text-brand-ink">Marketing website analytics</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis and analytics retention for this site. */}
                 <p>
                   Plausible Analytics measures aggregate use of our marketing
                   pages. It receives page, referral, and engagement information
@@ -199,7 +224,6 @@ export default function PrivacyPage() {
               </div>
               <div>
                 <h3 className="font-medium text-brand-ink">GitHub downloads and registry requests</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis for OpenAdminOS distributing releases and registry data through GitHub. */}
                 <p>
                   GitHub receives your IP address and request details when you use
                   GitHub Releases, the apt repository on GitHub Pages, or the
@@ -209,9 +233,9 @@ export default function PrivacyPage() {
                   available and helping users find updates (Art. 6(1)(f) GDPR,
                   [to be confirmed]). GitHub acts as an independent controller for
                   these requests. Its own statement covers its logging, retention,
-                  and rights requests. To stop background update and registry checks,
-                  turn off automatic network requests in Settings &gt; Privacy. Downloads
-                  are optional. See <Link href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" className="text-link">GitHub&rsquo;s privacy statement</Link>.
+                  and rights requests. To stop update checks and downloads and automatic
+                  registry refreshes, turn off Automatic network requests in Settings &gt;
+                  Privacy. See <Link href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" className="text-link">GitHub&rsquo;s privacy statement</Link>.
                 </p>
               </div>
             </div>
@@ -224,11 +248,10 @@ export default function PrivacyPage() {
             <div className="mt-4 space-y-5">
               <div>
                 <h3 className="font-medium text-brand-ink">Support email</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(b) basis and support mailbox retention. */}
                 <p>
                   When you email us, we use your address, message, and any attachments
                   to handle your request. Microsoft 365 Exchange Online hosts the
-                  mailbox for us. The legal basis is handling the support you
+                  mailbox for us [to be confirmed]. The legal basis is handling the support you
                   request (Art. 6(1)(b) GDPR, [to be confirmed]). Mail retention
                   is [to be confirmed]. Email is optional. We need a return address
                   and enough information about the problem to respond.
@@ -236,12 +259,12 @@ export default function PrivacyPage() {
               </div>
               <div>
                 <h3 className="font-medium text-brand-ink">Public GitHub issues</h3>
-                {/* TODO(ugur): Confirm Art. 6(1)(b) for support reports and Art. 6(1)(f) for agent submissions. */}
                 <p>
                   If you submit a support report or share a community agent, our
                   website forwards the submitted content to GitHub to open a public
-                  issue. You review the support report before submitting it.
-                  Optional diagnostics are shown in the preview and group counts into ranges.
+                  issue. You can preview the report and diagnostics before submitting.
+                  A preview is required when diagnostics are included. Diagnostics group
+                  counts into ranges.
                   Agent submissions include the manifest, supporting details, and
                   contact information you provide. We use reports to respond
                   to support requests (Art. 6(1)(b) GDPR, [to be confirmed]) and
@@ -257,12 +280,12 @@ export default function PrivacyPage() {
               </div>
               <div>
                 <h3 className="font-medium text-brand-ink">Booking a call</h3>
-                {/* TODO(ugur): Confirm the Art. 6(1)(b) basis, Cal.com and Teams processor roles, and booking retention. */}
                 <p>
                   Our site links to Cal.com. When you book, Cal.com receives the
-                  name, email address, selected time, and any notes you enter.
+                  name, email address, selected time, and any notes you enter [to be confirmed].
                   We use these details to arrange and hold the call on Microsoft
-                  Teams. We do not record the calls. The legal basis is arranging
+                  Teams [to be confirmed]. We do not record the calls [to be confirmed].
+                  The legal basis is arranging
                   the call you requested (Art. 6(1)(b) GDPR, [to be confirmed]).
                   Booking retention is [to be confirmed]. Booking is optional.
                   We need your email address and a time to confirm the appointment.
@@ -284,7 +307,6 @@ export default function PrivacyPage() {
               standard contractual clauses (SCCs).
             </p>
             <ul className="mt-3 list-disc space-y-1 pl-5">
-              {/* TODO(ugur): Confirm the transfer countries and applicable safeguard for each provider, including DPF certification or SCCs, and how to obtain copies. */}
               <li>Vercel (hosting and access logs): [to be confirmed].</li>
               <li>Upstash (rate limiting, deduplication, and counters): [to be confirmed].</li>
               <li>Plausible (marketing website analytics): [to be confirmed].</li>
@@ -313,14 +335,15 @@ export default function PrivacyPage() {
             </p>
             <p className="mt-3">
               Email {SUPPORT_EMAIL}. We generally cannot link app traffic to
-              you. Install counts carry no personal or installation identifier,
-              and the updater UUID goes to GitHub. An email address you used
+              you. Install counts carry no installation identifier. Older app versions
+              may still send a legacy hash, which the server discards without storing.
+              Legacy keys were deleted at the switch (date [to be confirmed]). The updater
+              UUID goes to GitHub. An email address you used
               to contact us, an issue URL, a booking reference, or an approximate
               date and time can help us locate a record. We may ask for enough
               information to verify that the record is yours. We normally respond
               within one month.
             </p>
-            {/* TODO(ugur): Confirm the competent supervisory authority for the controller. */}
             <p className="mt-3">
               You can lodge a complaint with a data protection supervisory authority,
               including in the EU country where you live, work, or believe a

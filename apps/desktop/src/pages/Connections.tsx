@@ -167,13 +167,13 @@ function listText(values: readonly string[]): string {
   return `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`;
 }
 
-/** The map's text alternative: the same facts as one paragraph. */
 /** Where a hosted model's location depends on, plus who sees the prompt for a Copilot Fusion tier. */
 function hostedDetail(provider: Parameters<typeof providerDataLocationDetail>[0], modelNote: string | undefined): { locationDetail?: string } {
   const detail = [providerDataLocationDetail(provider), modelNote ? `${modelNote}.` : undefined].filter(Boolean).join(" ");
   return detail ? { locationDetail: detail } : {};
 }
 
+/** The map's text alternative: the same facts as one paragraph. */
 export function reachDescription(model: ReachModel): string {
   const who = model.organizationName ?? "No organization";
   const services = model.services.length > 0
@@ -199,7 +199,7 @@ export function reachDescription(model: ReachModel): string {
   const voice = model.voice
     ? ` ${novaVoiceSentence(Boolean(model.organizationName))}${model.voice.model ? ` The voice model is ${model.voice.model}.` : ""}`
     : "";
-  return `${services} ${device} ${words}${sophos} ${reports}${voice}`;
+  return `${services} ${device} ${words}${sophos} ${reports}${voice} ${CONNECTIONS_COPY.appTrafficDetails}`;
 }
 
 /** Below this content width the map stacks and draws no connectors. */

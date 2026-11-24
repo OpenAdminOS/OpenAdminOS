@@ -166,13 +166,34 @@ copy explicitly identifies it as the Impressum / provider identification under
 is Ugurlabs UG (haftungsbeschränkt), Fährstraße 217, 40221 Düsseldorf, Germany,
 registered at Amtsgericht Düsseldorf under HRB 113979, reachable at
 `support@openadminos.com`. The managing director is Ugur Koc. The privacy policy
-names the company as GDPR controller, the terms name it as the provider, and
+names the company as controller for its own processing and the administrator's
+organization as controller for personal data in its Microsoft 365 tenant. The
+policy describes the website theme choice stored in the browser. The terms name
+Ugurlabs as the provider, and
 the footer copyright uses the company name. The details live once in
 `web/src/app/seo.tsx`, including the VAT ID (DE464886395, § 27a UStG), which is
 also in the organization structured data. One shared Microsoft notice in the
 footer, legal notice, and terms states that Ugurlabs is a member of the
 Microsoft AI Cloud Partner Program and that OpenAdminOS is an independent
 product, not made, endorsed, or sponsored by Microsoft.
+
+<!--
+Privacy notice confirmations for /privacy
+
+- TODO(ugur): Confirm whether a data protection officer is required and publish their contact details if applicable.
+- TODO(ugur): Confirm the Art. 6(1)(f) basis, Vercel log retention, and processor terms.
+- TODO(ugur): Confirm the Art. 6(1)(f) basis for rate limiting and duplicate reports, Upstash region, and processor terms.
+- TODO(ugur): Confirm the Art. 6(1)(f) basis for install counts.
+- TODO(ugur): Confirm the Art. 6(1)(f) basis and Plausible analytics retention for this site.
+- TODO(ugur): Confirm the Art. 6(1)(f) basis for distributing releases and registry data through GitHub.
+- TODO(ugur): Confirm Exchange Online mailbox hosting, the Art. 6(1)(b) basis, and support mailbox retention.
+- TODO(ugur): Confirm Art. 6(1)(b) for support reports and Art. 6(1)(f) for agent submissions.
+- TODO(ugur): Confirm the Cal.com fields, Teams hosting, whether calls are recorded, the Art. 6(1)(b) basis, processor roles, and booking retention.
+- TODO(ugur): Confirm each provider's transfer countries and safeguards, including DPF certification or SCCs, and how to obtain copies.
+- TODO(ugur): Confirm the install-count switch date and that the legacy Redis keys were deleted at the switch.
+- TODO(ugur): Confirm the competent supervisory authority for the controller.
+-->
+
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
 outside click, Escape, or link activation.
@@ -1948,16 +1969,23 @@ The previous destination remains intact throughout; persistent errors still surf
 
 No cloud sync. The app sends no tenant-content, prompt, run-result, or
 crash-report telemetry. Registry install counts are on by default in packaged
-production builds. A count carries the public agent slug, app version, and
+builds (stable and nightly). A count carries the public agent slug, app version, and
 platform. The app deduplicates on the device. The server uses IP addresses briefly
 for rate limiting and stores aggregate daily counters without a per-install
-identifier. Settings > Privacy controls install counts and docs index auto-install
+identifier. Legacy client hashes are discarded. Daily counters expire after eight
+days. Pending counts are applied to the public `stats/agents.json` file by the
+hourly flush. Settings > Privacy controls install counts and docs index auto-install
 individually. The Automatic network requests switch covers update checks,
-registry refresh, docs index auto-install, and registry install counts. IT can
-control automatic requests and install counts through managed configuration.
+registry refresh, docs index auto-install, and registry install counts. It also
+gates the manual update check. An available update downloads in the background
+from GitHub. It installs when you restart or quit the app. When local Ollama is
+reachable, automatic docs installation checks the pointer at each launch. It
+attempts a download at most once a day when the index is missing or outdated.
+IT can set `automaticNetworkRequests` and `registryInstallCounts` to `"on"` or
+`"off"` through managed configuration.
 See [Network calls](gitbook/trust/network-calls.md) for timing and destinations.
 
-<!-- TODO(ugur): Confirm the final managed policy key names and values after the automatic network requests change. -->
+<!-- TODO(ugur): Confirm the managed policy keys automaticNetworkRequests and registryInstallCounts and their on/off values. -->
 
 Submitting a support report requires an explicit user action.
 The Settings → About action and contextual failure-state actions open an in-app
@@ -1971,7 +1999,8 @@ redaction, enforces request-size limits, rate-limits by IP, and deduplicates
 matching recent reports. The optional diagnostics JSON is bounded to
 app/build/OS, provider status categories, registry/scheduler/cache health,
 bucketed run counts, and hashed error categories. The admin can preview the report
-and diagnostics before sending. Diagnostics must not include tenant
+and diagnostics before sending. A preview is required when diagnostics are included.
+Diagnostics must not include tenant
 identifiers, account usernames, tenant domains, prompts, LLM output, Graph
 response bodies, run reports, raw run logs, SQLite databases, screenshots, MSAL
 tokens, provider credentials, or keychain values. No support report is

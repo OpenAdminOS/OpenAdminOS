@@ -55,7 +55,7 @@ Service. KDE users can use KWallet. OpenAdminOS refuses Electron's unprotected
 
 ## Update checks
 
-Packaged Windows and macOS builds check GitHub Releases 15 seconds after launch and every 4 hours. You choose when to download an update. Linux packages and Microsoft Store builds use their own update channels. See [Network calls](../trust/network-calls.md) for the request details and how to turn off automatic checks.
+Packaged Windows and macOS builds check GitHub Releases 15 seconds after launch and every 4 hours. An available update downloads in the background from GitHub. It installs when you restart or quit the app. Microsoft Store builds update through the Store. On Linux, the signed apt repository provides updates through your package manager. Update direct AppImage, `.rpm`, and standalone `.deb` installs by downloading and installing a newer package. See [Network calls](../trust/network-calls.md) for request details and controls.
 
 ## Nightly builds
 

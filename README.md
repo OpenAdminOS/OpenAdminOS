@@ -131,7 +131,7 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 
 - **Local models process tenant data and prompts on your device.** The app sends no tenant-content, prompt, run-result, or crash-report telemetry. Public references you enable can receive words from your question. Delivery rules and agent steps you configure can send run reports.
 - **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
-- **No tenant, no run.** The desktop shell remains available for browsing and drafting, but tenant-backed Chat, Graph refreshes, Changes, and agents pause for contextual connection. Agents never run against fallback demo data.
+- **Service access requires a connection.** Tenant-backed Chat, refreshes, changes, and agent runs need the relevant service connected in the active organization. Agents that call no service API can run without an organization. Agents never run against fallback demo data.
 - **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle. The typed-phrase confirmation per run is the only gate.
 
 ### Network calls the app makes on its own
@@ -140,10 +140,10 @@ Remote hosts see your IP address and standard request headers. Turn off **Automa
 
 | Activity | Host | When | What is sent | Individual control |
 |---|---|---|---|---|
-| Update checks | GitHub Releases | 15 seconds after launch, then every 4 hours on packaged Windows and macOS builds. Downloads require your action. | Release metadata request and a random UUID saved on the device (`x-user-staging-id`). | Automatic network requests |
+| Update checks | GitHub Releases | 15 seconds after launch, then every 4 hours on packaged Windows and macOS builds. An available update downloads in the background from GitHub. It installs when you restart or quit the app. | Release metadata request and a random UUID saved on the device (`x-user-staging-id`). | Automatic network requests |
 | Agent registry refresh | `raw.githubusercontent.com` or your configured registry | At startup, every 6 hours, and on focus at least 1 hour after the last refresh. | Catalog request for `agents/index.json`. | Automatic network requests |
-| Docs index auto-install | GitHub Releases and `registry.ollama.ai` (through local Ollama) | At launch when local Ollama is reachable. If the index is missing, downloads about 264 MB and pulls the embedding model if needed. Retries at most daily. | Index pointer and asset requests, plus an Ollama model request. | Docs index auto-install in Settings > Privacy |
-| Registry install counts | `openadminos.com/api/install` | On public agent install in packaged production builds. On by default and deduplicated on your device. | Agent slug, app version, and platform. The server uses IP briefly for rate limiting and stores daily aggregate counts without a per-install identifier. | Registry install counts in Settings > Privacy |
+| Docs index auto-install | GitHub Releases and `registry.ollama.ai` (through local Ollama) | Checks the index pointer at launch when local Ollama is reachable. Downloads about 264 MB when the index is missing or outdated, at most one download attempt per day. Local Ollama pulls the embedding model if needed. | Index pointer and asset requests, plus an Ollama model request. | Docs index auto-install in Settings > Privacy |
+| Registry install counts | `openadminos.com/api/install` | On public agent install in packaged builds (stable and nightly). On by default and deduplicated on your device. | Agent slug, app version, and platform. The server uses IP briefly for rate limiting and stores daily aggregate counts without a per-install identifier. | Registry install counts in Settings > Privacy |
 
 See [Network calls](docs/gitbook/trust/network-calls.md) for requests that depend on your setup, and [Managed configuration](docs/gitbook/getting-started/managed-configuration.md) for rollout controls.
 

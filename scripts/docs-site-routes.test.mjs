@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { buildDocsSite, parseSummary, slugify } from "./docs-site-routes.mjs";
+import { buildDocsSite, parseSummary, slugify, stripHtmlComments } from "./docs-site-routes.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const summary = readFileSync(
@@ -12,6 +12,11 @@ const summary = readFileSync(
   "utf8",
 );
 const site = buildDocsSite(parseSummary(summary));
+
+test("public Markdown omits source comments and keeps visible confirmation markers", () => {
+  const source = "# Heading\n\n<!-- Internal\nreview note -->\n[Link](./page.md)<!-- Inline note --> [to be confirmed]\n";
+  assert.equal(stripHtmlComments(source), "# Heading\n\n\n[Link](./page.md) [to be confirmed]\n");
+});
 
 function routeFor(source) {
   return site.pages.find((page) => page.source === source)?.route;

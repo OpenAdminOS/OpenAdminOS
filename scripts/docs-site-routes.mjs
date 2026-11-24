@@ -10,6 +10,11 @@
 
 import { posix } from "node:path";
 
+/** Public Markdown exports must omit source comments as well as rendered pages. */
+export function stripHtmlComments(markdown) {
+  return markdown.replace(/<!--[\s\S]*?-->/g, "");
+}
+
 export function slugify(value) {
   return String(value ?? "")
     .toLowerCase()

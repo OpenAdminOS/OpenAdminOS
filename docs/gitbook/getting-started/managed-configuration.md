@@ -19,9 +19,10 @@ Reading a policy file on one device is part of the free app. OpenAdminOS reads t
 
 ## Automatic network requests
 
-A policy key can turn off automatic update checks, agent registry refreshes, docs index auto-installs, and registry install counts. A separate key controls registry install counts on their own. See [Network calls](../trust/network-calls.md) for timing, destinations, and the controls in Settings > Privacy.
+- `automaticNetworkRequests` accepts `"on"` or `"off"`. It controls update checks, automatic registry refreshes, automatic docs index and embedding model downloads, and registry install counts. With `"off"`, **Check for updates** also makes no request. Manual registry refresh and docs index installation remain available.
+- `registryInstallCounts` accepts `"on"` or `"off"`. It controls aggregate public registry install counts. Counts pause whenever `automaticNetworkRequests` is `"off"`.
 
-<!-- TODO(ugur): Add the two policy keys and their accepted values once the automatic network requests change lands. -->
+See [Network calls](../trust/network-calls.md) for timing, destinations, and the controls in Settings > Privacy.
 
 ## Where the File Goes
 
