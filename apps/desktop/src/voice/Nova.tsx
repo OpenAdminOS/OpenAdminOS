@@ -18,7 +18,7 @@ import {
   type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
-import { NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
+import { NOVA_CHECK_DOCUMENTATION, NOVA_INSTALL_DOCUMENTATION, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
 import "./nova.css";
 
 /** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
@@ -119,6 +119,9 @@ export function Nova({
     state.activeModelByProviderId,
   ).model;
   const reasoning = providerForModel(reasoningEndpoint, reasoningModel);
+  const hostedReasoningDisclosure = reasoning && !reasoning.isLocal
+    ? `Your question, recent turns and documentation passages go to ${reasoning.name} for reasoning.` : "";
+  const publicHostedDisclosure = ["Audio and Nova’s instructions go to OpenAI.", hostedReasoningDisclosure, "No organization data is shared."].filter(Boolean).join(" ");
   const reasoningReady =
     reasoning?.status === "connected" &&
     (mode !== "local" || reasoning.isLocal);
@@ -622,7 +625,7 @@ export function Nova({
           setPendingAction(answer.pendingAction);
           setError(answer.answerError || "");
           appendSpeech("assistant", answer.text || "No answer returned.");
-          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || answer.text);
+          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Answer ready") }, answer.displayText || answer.text);
           setConversation(answer.conversationId);
           setLinks(answer.links ?? []);
           if (answer.route) {
@@ -802,7 +805,7 @@ export function Nova({
           const result =
             answer.text || "No answer available. Open Chat for details.";
           completedResult.current = result;
-          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || result);
+          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Answer ready") }, answer.displayText || result);
           setPhase("listening");
           for (const chunk of novaCommentaryChunks(result))
             dc.send(
@@ -1115,7 +1118,7 @@ export function Nova({
             {mode === "openai"
               ? state.activeTenantId
                 ? "Hosted voice + web search · audio, shared context and searches go to OpenAI"
-                : "Hosted voice · question, audio and Nova’s instructions go to OpenAI"
+                : `Hosted voice · ${publicHostedDisclosure}`
               : "Local voice · audio stays on this device"}
           </p>
           {!active && (
@@ -1325,8 +1328,11 @@ export function Nova({
           )}
           {links.length > 0 && (
             <div className={`nova-links flex flex-wrap justify-center gap-2${state.activeTenantId ? "" : " rounded-lg border border-[var(--color-border-soft)] p-3"}`} aria-label="Pages in this answer">
-              {!state.activeTenantId && links.some(link => link.route === "/settings/privacy") && (
+              {links.some(link => link.label === NOVA_INSTALL_DOCUMENTATION) && (
                 <p className="w-full text-center text-xs">The local documentation index is missing.</p>
+              )}
+              {links.some(link => link.label === NOVA_CHECK_DOCUMENTATION) && (
+                <p className="w-full text-center text-xs">Nova could not search the local documentation index.</p>
               )}
               {links.map((link) => (
                 <Button key={link.route} size="sm" variant="secondary" onClick={() => { setExpanded(false); navigate(link.route); }}>
@@ -1392,9 +1398,9 @@ export function Nova({
                 onChange={(e) => setConsent(e.target.checked)}
               />{" "}
               {state.activeTenantId ? (
-                <>Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too.</>
+                <>Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too. {hostedReasoningDisclosure}</>
               ) : (
-                <>Allow your question, audio and Nova’s instructions to go to the selected hosted providers for this session. No organization data is shared.</>
+                <>Allow hosted processing for this session. {publicHostedDisclosure}</>
               )}
             </label>
           )}
@@ -1415,7 +1421,7 @@ export function Nova({
               {mode === "openai" ? (
                 <>
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    {state.activeTenantId ? "Audio, shared tenant answers and public research queries go to OpenAI. Nova can choose web search when it needs current information." : "Only your question, audio and Nova’s instructions go to OpenAI. No organization data is shared."} Agent
+                    {state.activeTenantId ? "Audio, shared tenant answers and public research queries go to OpenAI. Nova can choose web search when it needs current information." : publicHostedDisclosure} Agent
                     reasoning uses{" "}
                     {
                       state.providers.find(

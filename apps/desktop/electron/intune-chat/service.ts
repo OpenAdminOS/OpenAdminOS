@@ -3392,9 +3392,7 @@ export class IntuneChatService {
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
             const indexLater = answerPlan ? indexWaits(answerPlan.sources, lazyRefresh) : false;
             const documentation = options.voice
-              ? !options.webSearch || (!hasStrongTenantReference(content) && classifyChatQuestion(content, { plannedResources: [], namesSource: false }) === "docs")
-                ? await this.retrieveDocumentationSafely(modelQuestion)
-                : []
+              ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
               : indexLater || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             // In auto mode a local model in Chat gets the compact budget. Always investigative keeps the full loop.
             const localChat = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto";

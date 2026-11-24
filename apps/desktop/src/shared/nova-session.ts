@@ -38,3 +38,8 @@ export function novaEndedCardOutcome(kind: "send" | "run" | "profile" | "remembe
     profile: "The settings change on the card was not saved.",
   }[kind];
 }
+
+
+export const NOVA_DOCUMENTATION_SETTINGS = "/settings/privacy?target=documentation-grounding";
+export const NOVA_INSTALL_DOCUMENTATION = "Install the documentation index";
+export const NOVA_CHECK_DOCUMENTATION = "Check documentation grounding";

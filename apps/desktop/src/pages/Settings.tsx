@@ -4041,7 +4041,7 @@ function PrivacySection({
           </div>
         )}
         <div className="border-b border-[var(--color-border-soft)]">
-          <section aria-labelledby="documentation-grounding-title" className="px-5 py-4">
+          <section id="setting-documentation-grounding" tabIndex={-1} aria-labelledby="documentation-grounding-title" className="px-5 py-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 max-w-[520px]">
                 <h3

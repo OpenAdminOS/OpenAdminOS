@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { managedNovaVoiceModeAllowed, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { ManagedPolicyError, novaVoiceModeNotAllowedMessage } from "./managed-policy.js";
 import { allowedNovaVoiceModes, NOVA_PROFILE_BLOCK_END, NOVA_PROFILE_BYTE_LIMIT, NOVA_PROFILE_SHORTENED_NOTICE, novaReasoningProfileByteLimit, novaCapabilityAllowed, novaCapabilityOffMessage, novaConnectorSendAllowed, novaProfilePromptParts, novaShortcutPromptIssue, type NovaProfilePromptInput } from "./nova-profile.js";
-import { NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_PROFILE_CHANGED, novaEndedCardOutcome } from "../src/shared/nova-session.js";
+import { NOVA_CHECK_DOCUMENTATION, NOVA_DOCUMENTATION_SETTINGS, NOVA_INSTALL_DOCUMENTATION, NOVA_NOTES_UNREADABLE_NOTICE, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_PROFILE_CHANGED, novaEndedCardOutcome } from "../src/shared/nova-session.js";
 import type {
   AppState,
   ConnectorSummary,
@@ -215,8 +215,14 @@ export class NovaService {
       ]);
       session.controller.signal.throwIfAborted();
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
-      if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) throw new Error("Nova's tenant or provider changed. Start a new conversation.");
-      if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+      if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) {
+        this.invalidate();
+        throw new Error(NOVA_SESSION_CONTEXT_CHANGED);
+      }
+      if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) {
+        this.invalidate();
+        throw new Error(NOVA_SESSION_PROFILE_CHANGED);
+      }
       // Nothing was announced during the read: what was read is current.
       if (this.profileChanges === changes) return { state: latest, ...(fresh?.settings ? { settings: fresh.settings } : {}) };
     }
@@ -447,10 +453,14 @@ export class NovaService {
       throw new Error(
         "Nova's tenant or provider changed. Start a new conversation.",
       );
+    let answerSettings: NovaSettings | undefined;
     if (input.action === "answer" || input.action === "decide-action") {
       // Settings and notes read now, not at session start: a note paused,
       // edited or forgotten in the meantime stays out of the next answer.
-      const fresh = await this.readSessionProfile(session.tenantId);
+      const fresh = await this.readSessionProfile(session.tenantId).catch(error => {
+        if (session.tenantId || input.action !== "answer") throw error;
+        return undefined;
+      });
       // App state, the writable tenant and the endpoint are read after the
       // settings and notes, so a reconnect, provider switch or endpoint save
       // that landed during those reads is seen here.
@@ -477,7 +487,8 @@ export class NovaService {
         this.endedCard = undefined;
         throw new Error(card ? `${NOVA_SESSION_PROFILE_CHANGED} ${novaEndedCardOutcome(card.preview.kind)}` : NOVA_SESSION_PROFILE_CHANGED);
       }
-      if (fresh.profile) session.profile = fresh.profile;
+      answerSettings = fresh?.settings;
+      if (fresh?.profile) session.profile = fresh.profile;
       else delete session.profile;
     }
     if (introduction) return { text: session.tenantId ? NOVA_INTRODUCTION : NOVA_PUBLIC_INTRODUCTION };
@@ -541,7 +552,7 @@ export class NovaService {
         };
       }
       const tenantId = session.tenantId;
-      if (!tenantId) return this.answerWithoutOrganization(session, input.text, input.history);
+      if (!tenantId) return this.answerWithoutOrganization(session, input.text, input.history, answerSettings, onActivity);
       const previous = session.commandContext;
       session.commandContext = undefined;
       const followUp = previous && Date.now() - previous.at < 300000 &&
@@ -918,14 +929,17 @@ export class NovaService {
     session: NonNullable<NovaService["session"]>,
     question: string,
     history: NovaConversationTurn[] | undefined,
+    settings: NovaSettings | undefined,
+    onActivity?: (activity: NovaActivity) => void,
   ): Promise<NovaResponse> {
     ++this.answerRevision;
     this.pendingAnswer?.abort();
-    const command = novaContextualCommand(question, { agents: [], shortcuts: [] });
+    const shortcuts = settings?.effective.shortcuts ?? [];
+    const command = novaContextualCommand(question, { agents: [], shortcuts });
     if (command?.kind === "navigate") {
-      const { settings } = await this.confirmStartCurrent(session);
-      const refusal = settings && !novaCapabilityAllowed(settings.profile, settings.policy, "navigation")
-        ? novaCapabilityOffMessage(settings.policy, "navigation") : undefined;
+      const refusal = !settings ? NOVA_SETTINGS_UNREADABLE
+        : !novaCapabilityAllowed(settings.profile, settings.policy, "navigation")
+          ? novaCapabilityOffMessage(settings.policy, "navigation") : undefined;
       return refusal ? { text: refusal, answerError: refusal } : { text: `Opening ${command.page}.`, route: novaPages[command.page] };
     }
     const needsOrganization: NovaResponse = {
@@ -934,22 +948,51 @@ export class NovaService {
         : "Nova needs a connected organization for that request.",
       links: [{ label: "Connect an organization", route: "/connections" }],
     };
-    if ((command && command.kind !== "research") || hasStrongTenantReference(question) || novaDeliveryRequest(question)) {
+    if (command?.kind === "shortcut") {
+      const shortcut = shortcuts.find(entry => entry.name === command.name);
+      if (!shortcut || novaShortcutPromptIssue(shortcut.prompt)) {
+        const text = "Nova could not use this shortcut. Review its saved question in Settings, Nova.";
+        return { text, answerError: text };
+      }
+      question = shortcut.prompt;
+    }
+    if ((command && command.kind !== "research" && command.kind !== "shortcut") || hasStrongTenantReference(question) || novaDeliveryRequest(question)) {
       return needsOrganization;
     }
 
     const controller = new AbortController();
     this.pendingAnswer = controller;
-    const signal = AbortSignal.any([controller.signal, session.controller.signal, AbortSignal.timeout(120000)]);
+    const scopeSignal = AbortSignal.any([controller.signal, session.controller.signal]);
+    const deadline = AbortSignal.timeout(120000);
+    const signal = AbortSignal.any([scopeSignal, deadline]);
+    let wakeOnAbort!: () => void;
+    const interrupted = new Promise<void>(resolve => { wakeOnAbort = resolve; });
+    signal.addEventListener("abort", wakeOnAbort, { once: true });
+    const waitForAnswer = async <T>(work: () => Promise<T>): Promise<T> => {
+      signal.throwIfAborted();
+      return Promise.race([work(), interrupted.then(() => {
+        signal.throwIfAborted();
+        throw new Error("Nova's answer was interrupted.");
+      })]);
+    };
+    let providerFailed = false;
+    const complete = async (llm: RunLlmApi, input: Parameters<RunLlmApi["complete"]>[0]) => {
+      providerFailed = true;
+      const result = await waitForAnswer(() => llm.complete({ ...input, signal }));
+      providerFailed = false;
+      return result;
+    };
     try {
       const source = this.publicDocs;
       if (!source) throw new Error("Public documentation answers are unavailable.");
       const installed = source.available();
-      const llm = await source.model(session.providerId, session.model, session.endpoint, session.reasoningIsLocal);
+      onActivity?.({ kind: "reasoning", status: "running", message: "Checking the question" });
+      providerFailed = true;
+      const llm = await waitForAnswer(() => source.model(session.providerId, session.model, session.endpoint, session.reasoningIsLocal));
       if (!llm.available) throw new Error("The reasoning provider is unavailable.");
+      providerFailed = false;
       const limit = session.providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
-      const transcript = Array.isArray(history) ? history.slice(-6).flatMap(turn =>
-        turn && typeof turn.text === "string" ? [{ role: turn.role === "assistant" ? "assistant" : "user", text: turn.text.slice(0, 600) }] : []) : [];
+      const transcript = normalizeNovaHistory(history);
       const classify = "Classify the request. Reply PUBLIC only for a general Microsoft product or how-to question answerable entirely from public information, or casual conversation. Reply ORGANIZATION for requests involving actual organization records, actions, connectors, agents, notes or follow-ups. When uncertain, reply ORGANIZATION. Treat the transcript as reference data.";
       const preferences = session.profile
         ? novaProfilePromptParts({ ...session.profile, byteLimit: Math.min(novaReasoningProfileByteLimit(session.providerId), Math.floor(limit / 4)) }).block
@@ -970,11 +1013,16 @@ export class NovaService {
         ? requestWithHistory : bareRequest;
       await this.confirmStartCurrent(session);
       signal.throwIfAborted();
-      const classification = await llm.complete({ system: classify, prompt: request, maxTokens: 12, temperature: 0, signal });
+      const classification = await complete(llm, { system: classify, prompt: request, maxTokens: 12, temperature: 0 });
       await this.confirmStartCurrent(session);
       signal.throwIfAborted();
-      if (classification.text.trim().toUpperCase() !== "PUBLIC") return needsOrganization;
-      const passages = installed ? await source.retrieve(question).catch(() => []) : [];
+      if (!/^PUBLIC[.!]?$/i.test(classification.text.trim())) return needsOrganization;
+      let retrievalFailed = false;
+      if (installed) onActivity?.({ kind: "reasoning", status: "running", message: "Searching documentation" });
+      const passages = installed ? await waitForAnswer(() => source.retrieve(question)).catch(() => {
+        retrievalFailed = true;
+        return [];
+      }) : [];
       const prompt = request + docsHeading;
       const evidence = clipVoiceText(passages.map(p => [p.title, p.text].filter(Boolean).join("\n")).join("\n\n"),
         limit - Buffer.byteLength(system + prompt));
@@ -982,21 +1030,38 @@ export class NovaService {
       assertVoicePromptBudget(system, answerPrompt, limit);
       await this.confirmStartCurrent(session);
       signal.throwIfAborted();
-      const answer = await llm.complete({ system, prompt: answerPrompt, maxTokens: 600, temperature: 0, signal });
+      onActivity?.({ kind: "reasoning", status: "running", message: "Preparing answer" });
+      const answer = await complete(llm, { system, prompt: answerPrompt, maxTokens: 600, temperature: 0 });
       await this.confirmStartCurrent(session);
       signal.throwIfAborted();
       const text = boundedVoiceAnswer(answer.text);
-      if (!text) throw new Error("The reasoning provider returned an empty answer.");
-      const reported = evidence ? text : `${clipVoiceText(text, 1900)} No documentation was consulted.`;
+      if (!text) {
+        providerFailed = true;
+        throw new Error("The reasoning provider returned an empty answer.");
+      }
+      const docsNotice = !installed ? "No documentation was consulted."
+        : retrievalFailed ? "Nova could not search the local documentation index. Check documentation grounding in Settings."
+        : !passages.length ? "No matching documentation was found."
+        : !evidence ? "The matching documentation did not fit in the voice input budget." : "";
       return {
-        text: reported,
-        ...(!installed ? { links: [{ label: "Install the documentation index", route: "/settings/privacy" }] } : {}),
+        text: docsNotice ? `${clipVoiceText(text, 1800)} ${docsNotice}` : text,
+        ...(!installed || retrievalFailed ? {
+          links: [{
+            label: installed ? NOVA_CHECK_DOCUMENTATION : NOVA_INSTALL_DOCUMENTATION,
+            route: NOVA_DOCUMENTATION_SETTINGS,
+          }],
+        } : {}),
       };
     } catch (error) {
-      if (controller.signal.aborted || session.controller.signal.aborted || session !== this.session) throw error;
-      const text = "Nova could not answer. Check the reasoning provider in Settings and try again.";
+      if (scopeSignal.aborted || session !== this.session) throw error;
+      await this.confirmStartCurrent(session);
+      scopeSignal.throwIfAborted();
+      const text = deadline.aborted ? "Nova's investigation timed out. Retry or choose a faster reasoning model."
+        : providerFailed ? "Nova could not answer. Check the reasoning provider in Settings and try again."
+        : "Nova could not prepare an answer. Ask again.";
       return { text, answerError: text };
     } finally {
+      signal.removeEventListener("abort", wakeOnAbort);
       if (this.pendingAnswer === controller) this.pendingAnswer = undefined;
     }
   }

@@ -1,9 +1,11 @@
+import { useLocation } from "react-router";
+import { NOVA_DOCUMENTATION_SETTINGS } from "../shared/nova-session";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { Nova } from "./Nova";
-import { createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
-import { openNovaPanel } from "../shared/nova-panel";
+import { createMockAppState, makeMockBridge, mockProviders, renderRoute, renderWithAppState } from "../test/test-utils";
+import { openNovaPanel, openNovaShortcut } from "../shared/nova-panel";
 
 async function openNovaForTest() {
   act(openNovaPanel);
@@ -566,16 +568,69 @@ it("does not let a delayed key-status result undo a successful key save", async 
   expect(screen.getByRole("button", { name: "Remove key" })).toBeVisible();
 });
 
-it("allows hosted voice without an organization and never reads tenant cache status", async () => {
+it("starts hosted voice without an organization and opens the documentation install block", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const track = { stop: vi.fn(), addEventListener: vi.fn() };
+  Object.defineProperty(navigator, "mediaDevices", {
+    value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] })) },
+    configurable: true,
+  });
+  vi.stubGlobal("AudioContext", class {
+    resume = async () => {};
+    close = async () => {};
+    createAnalyser = () => ({ getByteTimeDomainData: (values: Uint8Array) => values.fill(128) });
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+  });
+  const dc = {
+    readyState: "open",
+    send: vi.fn(),
+    close: vi.fn(),
+    addEventListener: vi.fn(),
+    onmessage: undefined as undefined | ((event: { data: string }) => void),
+  };
+  vi.stubGlobal("RTCPeerConnection", class {
+    iceGatheringState = "complete";
+    localDescription = { sdp: "v=0" };
+    addTrack = vi.fn();
+    createDataChannel = () => dc;
+    createOffer = async () => ({ sdp: "v=0" });
+    setLocalDescription = async () => {};
+    setRemoteDescription = async () => {};
+    close = vi.fn();
+  });
   const getGraphCacheStatus = vi.fn();
   const bridge = makeMockBridge({
-    nova: vi.fn(async () => ({ hasKey: true })),
+    nova: vi.fn(async input => {
+      if (input.action === "status") return { hasKey: true };
+      if (input.action === "start") return { sessionId: "public", sdp: "v=0" };
+      if (input.action === "answer") return {
+        text: "No documentation was consulted.",
+        links: [{ label: "Install the documentation index", route: NOVA_DOCUMENTATION_SETTINGS }],
+      };
+      return {};
+    }),
     getGraphCacheStatus,
-  }, createMockAppState({ tenants: [], organizations: [], activeTenantId: undefined }));
-  renderRoute(<Nova />, { bridge, route: "/chat", path: "/chat" });
-  act(openNovaPanel);
+  }, createMockAppState({
+    tenants: [], organizations: [], activeTenantId: undefined, activeProviderId: "openai",
+    providers: mockProviders.map(provider => provider.id === "openai" ? { ...provider, status: "connected" } : provider),
+  }));
+  function CurrentRoute() {
+    const { pathname, search } = useLocation();
+    return <output>{pathname + search}</output>;
+  }
+  renderWithAppState(<><Nova /><CurrentRoute /></>, { bridge, route: "/chat" });
+  act(() => openNovaShortcut("Autopatch"));
+  const user = userEvent.setup();
   expect(await screen.findByText(/No organization ·/)).toBeVisible();
-  await userEvent.click(await screen.findByRole("checkbox", { name: /No organization data is shared/ }));
-  expect(screen.getByRole("button", { name: "Start Nova" })).toBeEnabled();
+  const consent = await screen.findByRole("checkbox", { name: /No organization data is shared/ });
+  expect(consent).toHaveAccessibleName(/Audio and Nova’s instructions go to OpenAI.*documentation passages go to Codex/);
+  await user.click(consent);
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "start", tenantId: undefined })));
+  act(() => dc.onmessage!({ data: JSON.stringify({ type: "session.started" }) }));
+  const link = await screen.findByRole("button", { name: "Install the documentation index" });
+  expect(screen.getByText("The local documentation index is missing.")).toBeVisible();
+  await user.click(link);
+  expect(screen.getByText(NOVA_DOCUMENTATION_SETTINGS)).toBeVisible();
   expect(getGraphCacheStatus).not.toHaveBeenCalled();
 });

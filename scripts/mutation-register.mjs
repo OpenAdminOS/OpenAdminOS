@@ -331,7 +331,10 @@ export const REGISTER = [
   {
     id: "nova-hosted-start-skips-context-check",
     path: "apps/desktop/electron/nova.ts",
-    find: "      if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) throw new Error(\"Nova's tenant or provider changed. Start a new conversation.\");",
+    find: `      if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) {
+        this.invalidate();
+        throw new Error(NOVA_SESSION_CONTEXT_CHANGED);
+      }`,
     replace: "",
     tests: ["apps/desktop/electron/nova-notes-followups.test.ts"],
     why: "A hosted voice start sends nothing after its organization, connection or reasoning provider changed while it started.",
