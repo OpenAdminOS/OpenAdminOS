@@ -166,7 +166,7 @@ import {
   selfTrainingCandidateFromPrompt,
   type PlannedChatContext,
 } from "./planner.js";
-import { executeIntuneChatTool, isTenantTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext, type SplashtopChatContext } from "./tools.js";
+import { executeIntuneChatTool, isTenantTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext, type SplashtopChatContext, type SophosChatContext } from "./tools.js";
 import {
   CitationRegistry,
   MICROSOFT_GRAPH,
@@ -524,6 +524,7 @@ export interface ChatServiceHost {
    * The Splashtop connection of the organization that holds this tenant,
    * for a Chat answer. Undefined when it has none.
    */
+  sophosChatContext?(tenant: TenantRecord): Promise<SophosChatContext | undefined>;
   splashtopChatContext?(tenant: TenantRecord): Promise<SplashtopChatContext | undefined>;
   /** Appends a hosted-provider consent to the audit log. The Chat database keeps it either way. */
   recordHostedProviderConsent?(record: HostedProviderConsentAuditRecord): void;
@@ -3857,7 +3858,7 @@ export class IntuneChatService {
     /** With nothing connected, a request to write a query or script is docs. */
     forceDocs?: boolean;
     steps: ChatStepRecorder;
-  }): Promise<{ mcp: { mcp?: McpChatContext; splashtop?: SplashtopChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; roadmapUnavailable?: string; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
+  }): Promise<{ mcp: { mcp?: McpChatContext; splashtop?: SplashtopChatContext; sophos?: SophosChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; roadmapUnavailable?: string; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
     const planStep = input.steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: ON_DEVICE });
     const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
@@ -4020,17 +4021,21 @@ export class IntuneChatService {
    * MCP tools for one answer, with the tenant values earlier turns
    * observed, and the organization's Splashtop tools when it has them.
    */
-  private async mcpToolsFor(tenant: TenantRecord, conversationId: string): Promise<{ mcp?: McpChatContext; splashtop?: SplashtopChatContext }> {
+  private async mcpToolsFor(tenant: TenantRecord, conversationId: string): Promise<{ mcp?: McpChatContext; splashtop?: SplashtopChatContext; sophos?: SophosChatContext }> {
     const splashtop = await this.host.splashtopChatContext?.(tenant).catch((error: unknown) => {
       // A missing token or a removed connection leaves Chat without Splashtop, never without an answer.
       console.warn("[intune-chat] Splashtop is not offered for this answer:", error instanceof Error ? error.message : error);
       return undefined;
     });
-    const withSplashtop = splashtop && splashtop.tools.length > 0 ? { splashtop } : {};
+    const sophos = await this.host.sophosChatContext?.(tenant);
+    const vendorTools = {
+      ...(splashtop && splashtop.tools.length > 0 ? { splashtop } : {}),
+      ...(sophos ? { sophos } : {}),
+    };
     const mcp = await this.host.mcpChatContext?.(tenant);
-    if (!mcp || mcp.tools.length === 0) return withSplashtop;
+    if (!mcp || mcp.tools.length === 0) return vendorTools;
     mcp.tenantValues.addAll(this.host.requireIntelligenceStore().listChatTenantValues(conversationId));
-    return { mcp, ...withSplashtop };
+    return { mcp, ...vendorTools };
   }
 
   /**

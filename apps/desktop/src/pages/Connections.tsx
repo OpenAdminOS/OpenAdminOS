@@ -54,6 +54,7 @@ import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
 import { TenantCleanupNotice } from "../components/TenantCleanupNotice";
+import { SophosConnection } from "../components/SophosConnection";
 import { SplashtopServiceRow } from "../components/SplashtopConnection";
 import { SPLASHTOP_COPY } from "../copy/splashtop";
 
@@ -1388,6 +1389,9 @@ export default function Connections() {
               <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
                 {!organization ? (
                   <>
+                    {searchParams.get("connect") === "sophos" ? (
+                      <p role="status" className="mb-4 text-sm text-[var(--color-text-soft)]">Set up an organization before connecting Sophos Central.</p>
+                    ) : null}
                     {connectSplashtop ? (
                       <div role="status" className="mb-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
                         {SPLASHTOP_COPY.needsMicrosoft365}
@@ -1406,6 +1410,12 @@ export default function Connections() {
                         <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.otherServicesHeading}</strong>
                         <span className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.otherServicesBody}</span>
                       </div>
+                      <SophosConnection
+                        key={organization.id}
+                        organizationId={organization.id}
+                        connection={state.sophosConnections?.find((entry) => entry.organizationId === organization.id)}
+                        focus={searchParams.get("connect") === "sophos"}
+                      />
                       <SplashtopServiceRow
                         organization={organization}
                         connection={splashtopConnection}

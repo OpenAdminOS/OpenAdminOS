@@ -1,3 +1,4 @@
+import { isSophosReadTool } from "../sophos/reads.js";
 import type {
   GraphCacheResourceKind,
   IntuneChatDocumentationSource,
@@ -457,6 +458,9 @@ export function toolStepStart(
     };
   }
   if (tool === "web_search") return { kind: "tool", title: "Searching the web", origin: "model", originLabel: modelLabel };
+  if (isSophosReadTool(tool)) {
+    return { kind: "tool", title: "Reading Sophos Central", origin: "graph", originLabel: "Sophos Central API" };
+  }
   if (isSplashtopReadTool(tool)) {
     return { kind: "tool", title: "Reading Splashtop", detail: splashtopToolLabel(tool), origin: "graph", originLabel: SPLASHTOP_OPEN_API };
   }
@@ -509,6 +513,11 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry, readsItem = fals
     return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${item || (count > 0 ? shown : `answer from ${host}`)}${more}`, durationMs };
   }
   if (entry.tool === "web_search") return entry.error ? { status: "failed", title: "Web search failed", detail: entry.error, durationMs } : { status: "completed", title: "Searched the web", detail: entry.resultSummary, durationMs };
+  if (isSophosReadTool(entry.tool)) {
+    return entry.error
+      ? { status: "failed", title: "Sophos Central read failed", detail: entry.error, durationMs }
+      : { status: "completed", title: "Read Sophos Central", detail: entry.resultSummary, durationMs };
+  }
   if (isSplashtopReadTool(entry.tool)) {
     const what = splashtopToolLabel(entry.tool);
     return entry.error
@@ -588,6 +597,7 @@ function midSentenceLabel(label: string): string {
 /** The plain decision of a tool call, such as "Chose to ask Microsoft Learn" or "Chose to query cached managed devices". */
 export function toolDecision(tool: IntuneChatInvestigationToolName, params: unknown, mcp: McpChatTool | undefined): string {
   if (isMcpChatToolName(tool)) return `Chose to ask ${mcp?.serverName ?? "an MCP server"}`;
+  if (isSophosReadTool(tool)) return "Chose to read Sophos Central";
   if (isSplashtopReadTool(tool)) return `Chose to read Splashtop ${splashtopToolLabel(tool)}`;
   if (tool === "query_cache" || tool === "count_cached") {
     const verb = tool === "count_cached" ? "count" : "query";

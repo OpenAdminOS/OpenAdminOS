@@ -104,6 +104,13 @@
           "children": []
         },
         {
+          "title": "Sophos Central (Preview)",
+          "source": "services/sophos-central.md",
+          "route": "services/sophos-central",
+          "path": "services/sophos-central",
+          "children": []
+        },
+        {
           "title": "Planned services",
           "source": "services/planned.md",
           "route": "services/planned",

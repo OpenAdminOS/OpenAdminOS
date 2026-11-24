@@ -442,6 +442,7 @@ export interface RunServiceHost {
    * tenant and the same Splashtop team and region. Throws a designed
    * message otherwise; nothing is sent then.
    */
+  applySophosAction?(run: RunRecord, action: WriteAction, signal: AbortSignal): Promise<void>;
   splashtopForRun?(run: RunRecord): Promise<SplashtopRunClient>;
   /** The validation error of the agent's manifest on disk, if it is invalid. */
   agentManifestError?(agent: AgentSummary): string | undefined;
@@ -1251,6 +1252,36 @@ export class RunService {
    * the typed confirmation gate; it applies only through the Splashtop
    * connection of the organization that holds `tenantId`.
    */
+  async startSophosChangeRun(tenantId: string, sophos: NonNullable<RunRecord["sophos"]>, plan: NonNullable<RunRecord["plan"]>): Promise<RunRecord> {
+    const run: RunRecord = {
+      id: `run_${randomUUID()}`,
+      agentSlug: "sophos-change",
+      origin: "sophos-change",
+      sophos,
+      tenantId,
+      status: "awaiting-confirmation",
+      queuedAt: new Date().toISOString(),
+      trigger: "manual",
+      initiator: "person",
+      summary: plan.summary,
+      steps: [],
+      logs: [],
+      plan,
+    };
+    await this.host.serialize(async () => {
+      this.assertTenantOpen(tenantId);
+      const persisted = await this.host.read();
+      run.riskAssessment = this.assessPlan(run, persisted);
+      await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
+    });
+    this.host.recordLearningEventSafely({
+      tenantId, agentSlug: run.agentSlug, eventType: "sophos.change-plan-queued", source: "run",
+      payload: { runId: run.id, kind: sophos.kind, actionCount: plan.actions.length },
+    });
+    this.host.emitStateChanged("sophos-change-queued", run.id);
+    return run;
+  }
+
   async startSplashtopChangeRun(input: {
     tenantId: string;
     organizationId: string;
@@ -1352,6 +1383,8 @@ export class RunService {
           summary:
             run.origin === "baseline-rollback"
               ? "Rollback is applying."
+              : run.origin === "sophos-change"
+                ? "Sending approved changes to Sophos Central."
               : run.origin === "splashtop-change"
                 ? "Splashtop changes are applying."
                 : "Approved proposal is applying.",
@@ -1419,7 +1452,7 @@ export class RunService {
             ? "drift.rollback-plan-confirmed"
             : transition.updated.origin === "splashtop-change"
               ? "splashtop.change-plan-confirmed"
-              : "gateway.proposal-confirmed",
+              : transition.updated.origin === "sophos-change" ? "sophos.change-plan-confirmed" : "gateway.proposal-confirmed",
         source: "run",
         payload: {
           runId: transition.updated.id,
@@ -1792,7 +1825,7 @@ export class RunService {
    * connection they were read through.
    */
   private async driveSystemApply(input: { run: RunRecord }): Promise<void> {
-    if (input.run.origin === "splashtop-change") return this.driveSplashtopApply(input.run);
+    if (input.run.origin === "splashtop-change" || input.run.origin === "sophos-change") return this.driveVendorApply(input.run);
     const plan = input.run.plan;
     const isRollback = input.run.origin === "baseline-rollback";
     const noun = isRollback ? "Rollback" : "Proposal";
@@ -1943,12 +1976,15 @@ export class RunService {
   }
 
   /**
-   * Apply a confirmed Splashtop change plan: in order, one request per
+   * Apply a confirmed vendor change plan: in order, one request per
    * action, through the run's own organization's connection. Fail-stop:
    * the first error marks the run failed with an exact count, and nothing
    * after it is attempted. No Graph token is built for this run.
    */
-  private async driveSplashtopApply(input: RunRecord): Promise<void> {
+  private async driveVendorApply(input: RunRecord): Promise<void> {
+    const sophos = input.origin === "sophos-change";
+    const service = sophos ? "Sophos Central" : "Splashtop";
+    const outcome = sophos ? "accepted" : "applied";
     const plan = input.plan;
     const controller = new AbortController();
     this.controllers.set(input.id, controller);
@@ -1957,13 +1993,15 @@ export class RunService {
     try {
       if ((await this.getRun(input.id))?.status === "cancelled") return;
       assertRunCanApply(input);
-      if (!plan) throw new Error("Splashtop change run has no plan.");
-      if (!this.host.splashtopForRun) throw new Error("Splashtop is not available in this build.");
-      const client = await this.host.splashtopForRun(input);
+      if (!plan) throw new Error(`${service} change run has no plan.`);
+      const apply = sophos
+        ? this.host.applySophosAction?.bind(this.host, input)
+        : (await this.host.splashtopForRun?.(input))?.apply;
+      if (!apply) throw new Error(`${service} is unavailable. Reopen Connections and test the connection.`);
       for (const [index, action] of plan.actions.entries()) {
         controller.signal.throwIfAborted();
         const step = {
-          id: `step_splashtop_${index}`,
+          id: `step_${sophos ? "sophos" : "splashtop"}_${index}`,
           runId: run.id,
           label: action.label,
           status: "running" as const,
@@ -1973,7 +2011,7 @@ export class RunService {
         run = { ...run, steps: [...run.steps, step] };
         await this.persistRunSnapshot(run);
         try {
-          await client.apply(action, controller.signal);
+          await apply(action, controller.signal);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const finishedAt = new Date().toISOString();
@@ -1984,7 +2022,7 @@ export class RunService {
             finishedAt,
             error: message,
             ...classifiedFailureFields(error),
-            summary: `Splashtop changes stopped at "${action.label}" after applying ${applied} of ${plan.actions.length}. Nothing after it was attempted.`,
+            summary: `${service} changes stopped at "${action.label}" after ${outcome === "accepted" ? "accepting" : "applying"} ${applied} of ${plan.actions.length}. Nothing after it was attempted.`,
           };
           await this.persistRunSnapshot(run);
           return;
@@ -2000,8 +2038,8 @@ export class RunService {
         ...run,
         status: "completed",
         finishedAt: new Date().toISOString(),
-        summary: applied === 1 ? "1 Splashtop change applied." : `${applied} Splashtop changes applied.`,
-        result: { appliedActions: applied },
+        summary: `${applied} ${service} ${applied === 1 ? "change" : "changes"} ${outcome}.`,
+        result: sophos ? { acceptedActions: applied } : { appliedActions: applied },
       };
       await this.persistRunSnapshot(run);
     } catch (error) {
@@ -2011,8 +2049,8 @@ export class RunService {
         status: "failed",
         finishedAt: new Date().toISOString(),
         summary: applied > 0
-          ? `Splashtop changes stopped after applying ${applied} of ${plan?.actions.length ?? applied}: ${message}`
-          : `Splashtop changes failed before any was applied: ${message}`,
+          ? `${service} changes stopped after ${applied} of ${plan?.actions.length ?? applied} were ${outcome}. ${message}`
+          : `${service} changes failed before any was ${outcome}. ${message}`,
         error: message,
         ...classifiedFailureFields(error),
       });

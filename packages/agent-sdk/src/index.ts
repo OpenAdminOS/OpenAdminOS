@@ -5,6 +5,7 @@ export * from "./services.js";
 export * from "./organizations.js";
 export * from "./managed-policy.js";
 export * from "./splashtop.js";
+export * from "./sophos.js";
 
 export type ProviderId =
   | "ollama"
@@ -185,6 +186,15 @@ import type {
   SplashtopConnectionSummary,
   SplashtopRegion,
 } from "./splashtop.js";
+import type {
+  ConnectSophosInput,
+  PrepareSophosChangeInput,
+  SophosChangeKind,
+  SophosConnectionRecord,
+  SophosConnectionSummary,
+  SophosReadTool,
+  SophosTarget,
+} from "./sophos.js";
 
 export type AgentCategory =
   | "devices"
@@ -925,6 +935,7 @@ export interface OrganizationConnections {
   microsoft365?: { tenantId: string };
   /** The Splashtop Open API connection. The token is never part of state. */
   splashtop?: SplashtopConnectionRecord;
+  sophos?: SophosConnectionRecord;
   /**
    * Connections of services this version does not know, kept as they were
    * so a connection made by a newer version survives a downgrade.
@@ -1051,7 +1062,7 @@ export interface RunRecord {
    * deterministically from drift; "external-proposal" plans arrive
    * through the MCP gateway and can never self-apply.
    */
-  origin?: "baseline-rollback" | "external-proposal" | "splashtop-change";
+  origin?: "baseline-rollback" | "external-proposal" | "splashtop-change" | "sophos-change";
   rollback?: {
     baselineId: string;
     requiredScopes: string[];
@@ -1070,6 +1081,7 @@ export interface RunRecord {
    * applies through the Splashtop connection of this organization only,
    * after the same typed confirmation gate.
    */
+  sophos?: { organizationId: string; connectionId: string; host: string; kind: SophosChangeKind; comment?: string };
   splashtop?: {
     organizationId: string;
     kind: SplashtopChangeKind;
@@ -1437,6 +1449,7 @@ export interface AppState {
   /** Why Nova's notes and follow-ups are unavailable on this device, when openadminos.db cannot be opened. */
   novaRecordsUnavailable?: string;
   /** Splashtop connections of the organizations on this device. Never holds a token. */
+  sophosConnections?: SophosConnectionSummary[];
   splashtopConnections?: SplashtopConnectionSummary[];
 }
 
@@ -1695,6 +1708,7 @@ export type IntuneChatInvestigationToolName =
   | "refresh_resource"
   | "query_drift"
   | "web_search"
+  | SophosReadTool
   | SplashtopChatToolName
   | McpChatToolName;
 
@@ -3728,6 +3742,11 @@ export interface OpenAdminOSApi {
   /** Reconnect to an installed server and refresh its tool list. */
   checkMcpServer?(serverId: string): Promise<McpServerSummary[]>;
   /** Checks the token with `users/basic_info` and saves the connection only when it works. */
+  listSophosTargets?(organizationId: string, search: string): Promise<SophosTarget[]>;
+  prepareSophosChange?(input: PrepareSophosChangeInput): Promise<RunRecord>;
+  connectSophos?(input: ConnectSophosInput): Promise<SophosConnectionSummary>;
+  testSophos?(organizationId: string): Promise<SophosConnectionSummary>;
+  disconnectSophos?(organizationId: string): Promise<void>;
   connectSplashtop?(input: ConnectSplashtopInput): Promise<SplashtopConnectionSummary>;
   /** Calls `users/basic_info` with the stored token and records what it may reach. */
   testSplashtop?(organizationId: string): Promise<SplashtopConnectionSummary>;
