@@ -350,7 +350,7 @@ it("opens the main-panel preview from its screen question form and preserves it 
   act(openNovaPanel);
   const user = userEvent.setup();
   await user.type(await screen.findByRole("textbox", { name: "Question about your screen" }), "Why is BitLocker off?{Enter}");
-  const question = await screen.findByRole("textbox", { name: "Question", exact: true });
+  const question = await screen.findByRole("textbox", { name: /^Question$/ });
   expect(question).toHaveValue("Why is BitLocker off?");
   const ocr = screen.getByRole("textbox", { name: "Screen text" });
   await user.clear(ocr);
