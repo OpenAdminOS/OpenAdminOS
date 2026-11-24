@@ -496,7 +496,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   // The local data line follows the existing trust copy: with a public
   // reference enabled, question words leave the device for its host.
   const referenceHosts = chatToolHosts(state);
-  const localLine = referenceHosts.length > 0 ? MODEL_SCAN_COPY.localWithReferences(deriveToolHostsCopy(referenceHosts)!.strip) : MODEL_SCAN_COPY.nothingLeaves;
+  const localLine = referenceHosts.length > 0 ? MODEL_SCAN_COPY.localWithReferences(deriveToolHostsCopy(referenceHosts)!.strip) : MODEL_SCAN_COPY.localPrompts;
   const found = rows.filter((probe) => probe.state === "found" || probe.state === "unavailable").length;
 
   // Focus the heading when the screen opens and when the result settles, so

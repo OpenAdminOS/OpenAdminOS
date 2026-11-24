@@ -9,7 +9,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, modelTrustNote, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail } from "../copy";
+import { LOCAL_PROMPTS_COPY, deriveToolHostsCopy, modelTrustNote, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail } from "../copy";
 
 /** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
@@ -32,7 +32,7 @@ export type DataBoundary =
       toolHosts?: string;
       /** Composer sentence naming every MCP host. */
       toolHostsNote?: string;
-      /** Status strip segment when nothing leaves the device: no reference is enabled. */
+      /** Status strip segment for a local model with no reference enabled. */
       note?: string;
       tooltip: string;
       isVoiceHosted: false;
@@ -163,7 +163,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
       label: `Local · ${provider.name}`,
       ...(model ? { model } : {}),
       ...toolHosts,
-      ...(hosts ? {} : { note: NOTHING_LEAVES_COPY }),
+      ...(hosts ? {} : { note: LOCAL_PROMPTS_COPY }),
       tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
       isVoiceHosted: false,
     };

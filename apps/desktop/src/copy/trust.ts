@@ -34,14 +34,14 @@ export interface ToolHostsCopy {
 
 /** The local composer line. With MCP tools on, only the model and the tenant data stay local: words from the question can leave. */
 export const LOCAL_BOUNDARY_COPY = {
-  plain: "Local model. Tenant data stays on this device.",
+  plain: "Local model. Tenant data and prompts stay on this device.",
   withTools: "Local model. Graph and cache data stay on this device.",
   /** Local model, nothing connected and no reference added. */
-  noTenant: "Local model. No organization. Nothing leaves this device.",
+  noTenant: "Local model. No organization. Questions and answers stay on this device.",
 } as const;
 
 /** The status strip segment for a local model with no reference enabled. */
-export const NOTHING_LEAVES_COPY = "nothing leaves this device";
+export const LOCAL_PROMPTS_COPY = "tenant data and prompts stay here";
 
 /**
  * Where a hosted provider sends prompts, as the status strip, the composer
@@ -202,7 +202,7 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
 
   if (input.provider.isLocal && input.noTenant) {
     return {
-      strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
+      strip: toolHosts ? `local model · ${toolHosts.strip}` : `local-only · ${LOCAL_PROMPTS_COPY}`,
       ...(toolHosts ? { toolHosts } : {}),
       confirmTitle: "Process your question on this device",
       confirmBody: `${providerName}${modelDetail} will answer locally. No organization is active, so no tenant data is used.`,
@@ -215,7 +215,7 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
 
   if (input.provider.isLocal) {
     return {
-      strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
+      strip: toolHosts ? `local model · ${toolHosts.strip}` : `local-only · ${LOCAL_PROMPTS_COPY}`,
       ...(toolHosts ? { toolHosts } : {}),
       ...(attachments
         ? { boundary: `${attachments} will be included. Processing stays on this device.` }

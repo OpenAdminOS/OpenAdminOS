@@ -107,11 +107,11 @@ export const MODEL_SCAN_COPY = {
   startFailed: (name: string) => `${name} did not start. Start it yourself, then scan again.`,
   skip: "Skip scan",
   localBody: (model: string, runtime: string) => `Chat answers with ${model} in ${runtime}. You can change the model at any time.`,
-  nothingLeaves: "Nothing leaves this device.",
+  localPrompts: "Prompts and responses stay on this device.",
   openChat: "Open Chat",
   hostedTitle: "A signed-in AI tool was found",
   hostedBody:
-    "It is not selected for you, because prompts would leave this device. Choose it to answer with it, or keep everything local.",
+    "Choose it to send prompts to its provider, or pick a model that runs on this device.",
   continueWithoutModel: "Continue without a model",
   nothingTitle: "No model on this device yet",
   nothingBody: "Install Ollama, then run this command to get OpenAdmin 8B, a model trained for Intune and Entra work:",

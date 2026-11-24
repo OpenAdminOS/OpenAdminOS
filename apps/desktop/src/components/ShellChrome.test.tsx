@@ -69,15 +69,15 @@ describe("shell chrome", () => {
     expect(screen.getByText("Nightly")).toBeInTheDocument();
   });
 
-  it("says nothing leaves the device with a local model, nothing connected and no reference", async () => {
+  it("says tenant data and prompts stay here with a local model and no reference", async () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge({}, createMockAppState({ tenants: [], activeTenantId: undefined, mcpServers: createMockMcpServers() })),
     });
     expect(
-      await screen.findByRole("status", { name: "Local · Ollama · llama3.1 · nothing leaves this device" }),
-    ).toBeInTheDocument();
+      await screen.findByRole("status", { name: "Local · Ollama · llama3.1 · tenant data and prompts stay here" }),
+    ).toHaveTextContent("tenant data and prompts stay here");
   });
 
   it("names the hosted provider and its region with nothing connected, before any reference is added", async () => {
@@ -131,7 +131,7 @@ describe("shell chrome", () => {
     });
     const status = await screen.findByRole("status", { name: /tool queries to api-eu01\.central\.sophos\.com/ });
     expect(status).toHaveTextContent(host);
-    expect(status).not.toHaveAccessibleName(/no data leaves this device/i);
+    expect(status).not.toHaveAccessibleName(/tenant data and prompts stay here/i);
   });
 
   it("names the second-wave hosts while their servers are on", async () => {

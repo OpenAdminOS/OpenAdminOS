@@ -972,8 +972,8 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
               </h3>
             </div>
             <p className="mt-1 max-w-[620px] text-sm leading-relaxed text-[var(--color-text-muted)]">
-              Your key is encrypted with the OS secure storage and never leaves
-              this device except to call your Azure endpoint.
+              The app encrypts your key with OS secure storage and sends it to
+              authenticate requests to your Azure endpoint.
             </p>
           </div>
           <Badge tone={hasStoredKey ? "success" : "warning"}>
@@ -3975,7 +3975,7 @@ function PrivacySection({
       <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <SettingRow
           id="tenant-telemetry"
-          description="Tenant data, prompts, run results, and error-reporting data are never collected. Optional usage telemetry and aggregate registry install counts are controlled separately below. Crash logs stay on this device."
+          description="The app sends no tenant data, prompts, run results, or crash logs to OpenAdminOS as telemetry."
           control={
             <Badge tone="success">
               <StatusDot tone="success" /> Not collected

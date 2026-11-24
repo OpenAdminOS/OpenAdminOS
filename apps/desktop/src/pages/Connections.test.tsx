@@ -73,13 +73,14 @@ describe("Connections reach map", () => {
     ]);
   });
 
-  it("gives the map a text alternative that names everything that leaves the device", async () => {
+  it("names Chat and run destinations in the map description and makes app traffic accessible", async () => {
+    const user = userEvent.setup();
     const state = createMockAppState({
       tenants: [partialTenant],
       mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true } }),
       installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })],
     });
-    render(state, { listConnectors: vi.fn(async () => [teamsConnector()]) });
+    const bridge = render(state, { listConnectors: vi.fn(async () => [teamsConnector()]) });
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
     const description = reachDescription(buildReachModel(state, [teamsConnector()]));
     await waitFor(() => expect(map).toHaveAccessibleDescription(description));
@@ -87,6 +88,10 @@ describe("Connections reach map", () => {
       /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports and agent messages can go to Microsoft Teams under saved delivery rules and agent steps\.$/,
     );
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
+    expect(within(map).getByText(CONNECTIONS_COPY.appTraffic)).toBeInTheDocument();
+    const networkCalls = within(map).getByRole("link", { name: CONNECTIONS_COPY.networkCallsLink });
+    await user.click(networkCalls);
+    expect(bridge.openExternal).toHaveBeenCalledWith("https://openadminos.com/docs/trust-model/network-calls");
   });
 
   it("shows the logo of each reference host and result connector on its row", async () => {
@@ -175,6 +180,7 @@ describe("Connections reach map", () => {
     expect(screen.queryByText(SERVICE_COPY.status.missing)).not.toBeInTheDocument();
     expect(document.querySelector(".reach-map")).toBeNull();
     const leaves = screen.getByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
+    expect(within(leaves).getByRole("link", { name: CONNECTIONS_COPY.networkCallsLink })).toBeInTheDocument();
     expect(within(leaves).getByText(CONNECTIONS_COPY.map.promptsNoOrganization)).toBeInTheDocument();
     expect(within(leaves).getByRole("button", { name: CONNECTIONS_COPY.changeModel })).toBeInTheDocument();
     await user.click(within(empty).getByRole("button", { name: CONNECTIONS_COPY.connectMicrosoft365 }));
