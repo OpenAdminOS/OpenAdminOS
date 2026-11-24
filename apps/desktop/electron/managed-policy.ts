@@ -412,6 +412,15 @@ export function parsePolicyFile(
         result.values.skipFirstRunScan = node.value;
         result.keys.push(key);
         break;
+      case "automaticNetworkRequests":
+      case "registryInstallCounts":
+        if (node.kind !== "string" || (node.value !== "on" && node.value !== "off")) {
+          issue(`"${key}" must be "on" or "off". It is not applied.`, node, key);
+          break;
+        }
+        result.values[key] = node.value;
+        result.keys.push(key);
+        break;
       case "novaVoiceModes": {
         if (node.kind !== "array") {
           issue(`"novaVoiceModes" must be a list in [ ] such as ["local"], not ${kindName(node)}. It is not applied.`, node, key);

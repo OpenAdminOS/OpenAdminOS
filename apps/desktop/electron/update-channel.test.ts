@@ -9,6 +9,8 @@ import type { CancellationToken } from "electron-updater";
 import { withAgentCompatibility } from "./agent-draft-helpers.js";
 import { AppStateStore } from "./state.js";
 import {
+  POLL_INTERVAL_MS,
+  STARTUP_DELAY_MS,
   UpdateController,
   switchAndSaveChannel,
   updateUnavailableReason,
@@ -187,6 +189,45 @@ describe("update channel", () => {
     controller.configure("nightly");
     await settle();
     assert.equal(updater.checks, 1);
+  });
+
+  it("skips startup, periodic, channel and manual checks while networking is off", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const { updater, controller } = harness(t);
+    controller.setChecksEnabled(false);
+    controller.configure("stable");
+    t.mock.timers.tick(STARTUP_DELAY_MS + POLL_INTERVAL_MS);
+    controller.configure("nightly");
+    await controller.check();
+    assert.equal(updater.checks, 0);
+
+    controller.setChecksEnabled(true);
+    t.mock.timers.tick(STARTUP_DELAY_MS);
+    await settle();
+    assert.equal(updater.checks, 1);
+    t.mock.timers.tick(POLL_INTERVAL_MS - STARTUP_DELAY_MS);
+    await settle();
+    assert.equal(updater.checks, 2);
+
+    controller.setChecksEnabled(false);
+    t.mock.timers.tick(POLL_INTERVAL_MS);
+    await controller.check();
+    assert.equal(updater.checks, 2);
+  });
+
+  it("ignores an update found by a check that was in flight when networking was turned off", async (t) => {
+    const { updater, controller } = harness(t);
+    controller.configure("stable");
+    let finish = () => {};
+    updater.checkQueue.push(() => new Promise<void>((resolve) => (finish = resolve)));
+    const current = controller.check();
+    await settle();
+    controller.setChecksEnabled(false);
+    updater.emit("update-available", { version: "0.8.0" });
+    finish();
+    await current;
+    assert.equal(updater.downloads.length, 0);
+    assert.equal(controller.current().status, "idle");
   });
 
   it("starts no check again once stopped for a reset, also not on a channel switch", async (t) => {

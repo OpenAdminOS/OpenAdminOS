@@ -114,6 +114,7 @@ export class UpdateController {
   private started = false;
   /** Set by stop(): a stopped controller starts no check and arms no timer again. */
   private stopped = false;
+  private checksEnabled = true;
   private pollTimer: NodeJS.Timeout | null = null;
   private startupTimer: NodeJS.Timeout | null = null;
   // Bumped when the channel changes, so work for the previous channel is recognised.
@@ -148,7 +149,11 @@ export class UpdateController {
       this.downloading = download;
       // Failures also arrive as error events.
       download.done = Promise.resolve()
-        .then(() => updater.downloadUpdate(download.token))
+        .then(() => {
+          if (this.checksEnabled && download.generation === this.generation) {
+            return updater.downloadUpdate(download.token);
+          }
+        })
         .then(() => undefined, () => undefined)
         .finally(() => {
           if (this.downloading === download) this.downloading = null;
@@ -221,24 +226,49 @@ export class UpdateController {
     this.useChannel(nightly);
     this.started = true;
     if (firstStart) {
-      this.startupTimer = setTimeout(() => void this.check(), STARTUP_DELAY_MS);
-      this.pollTimer = setInterval(() => void this.check(), POLL_INTERVAL_MS);
+      this.scheduleChecks();
     } else if (channelChanged) {
       // A check still running for the previous channel is followed right away by one for this channel.
       void this.check();
     }
   }
 
-  stop(): void {
+  setChecksEnabled(enabled: boolean): void {
+    if (this.checksEnabled === enabled) return;
+    this.checksEnabled = enabled;
+    if (enabled) {
+      this.scheduleChecks();
+    } else {
+      this.clearCheckTimers();
+      if (this.state.status !== "ready") {
+        this.generation++;
+        this.downloading?.token.cancel();
+        this.set({ status: "idle" });
+      }
+    }
+  }
+
+  private scheduleChecks(): void {
+    if (!this.started || !this.checksEnabled) return;
+    this.startupTimer = setTimeout(() => void this.check(), STARTUP_DELAY_MS);
+    this.pollTimer = setInterval(() => void this.check(), POLL_INTERVAL_MS);
+  }
+
+  private clearCheckTimers(): void {
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.startupTimer) clearTimeout(this.startupTimer);
     this.pollTimer = null;
     this.startupTimer = null;
+  }
+
+  stop(): void {
+    this.clearCheckTimers();
     this.started = false;
     this.stopped = true;
   }
 
   async check(): Promise<UpdateState> {
+    if (!this.checksEnabled) return this.state;
     // electron-updater hands out a running check again, even one for the
     // previous channel, so that one has to settle before this channel is checked.
     while (
@@ -247,7 +277,7 @@ export class UpdateController {
     ) {
       await Promise.all([this.checking?.done, this.downloading?.done]);
     }
-    if (!this.started || this.state.status === "ready" || this.downloading) return this.state;
+    if (!this.started || !this.checksEnabled || this.state.status === "ready" || this.downloading) return this.state;
     if (!this.checking) {
       const generation = this.generation;
       const checking = {
@@ -264,7 +294,7 @@ export class UpdateController {
   }
 
   private async run(generation: number): Promise<void> {
-    if (!this.started || generation !== this.generation) return;
+    if (!this.started || !this.checksEnabled || generation !== this.generation) return;
     this.set({ status: "checking" });
     try {
       await this.host.updater.checkForUpdates();
@@ -328,6 +358,7 @@ export class UpdateController {
   private currentActivity(): boolean {
     return (
       this.started &&
+      (this.checksEnabled || this.installing) &&
       (!this.checking || this.checking.generation === this.generation) &&
       (!this.downloading || this.downloading.generation === this.generation)
     );

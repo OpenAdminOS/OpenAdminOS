@@ -220,6 +220,10 @@ export function sanitizeManagedPolicyRecord(value: unknown): ManagedPolicyRecord
     };
   }
   if (typeof rawValues.skipFirstRunScan === "boolean") values.skipFirstRunScan = rawValues.skipFirstRunScan;
+  for (const key of ["automaticNetworkRequests", "registryInstallCounts"] as const) {
+    const mode = rawValues[key];
+    if (mode === "on" || mode === "off") values[key] = mode;
+  }
   const voiceModes = stringList(rawValues.novaVoiceModes);
   if (voiceModes) values.novaVoiceModes = voiceModes.filter((mode): mode is "local" | "openai" => mode === "local" || mode === "openai");
   if (typeof rawValues.novaInstructions === "string") values.novaInstructions = rawValues.novaInstructions;

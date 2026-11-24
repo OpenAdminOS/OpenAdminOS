@@ -313,6 +313,7 @@ import {
 
 import {
   DEFAULT_REGISTRY_SOURCE,
+  readCachedRegistry,
   refreshRegistry,
   validateRegistrySource,
 } from "./registry-client.js";
@@ -373,10 +374,6 @@ import {
   fetchIndexManifest,
   installIndexFromDirectory,
 } from "./retrieval/install.js";
-import {
-  buildUsageTelemetryPayload,
-  type UsageTelemetryPayload,
-} from "./telemetry/usage.js";
 import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
 import { LOCAL_RESET_MARKER_FILES } from "./local-reset.js";
 import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, scheduleModelDestination, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
@@ -500,25 +497,14 @@ interface PersistedState {
    * on read.
    */
   savedAppRegistrations?: SavedAppRegistration[];
-  /**
-   * Stable per-installation UUID, generated on first agent install and
-   * persisted thereafter. Sent to the stats aggregator alongside each
-   * install event so the same machine never counts twice for the same
-   * agent. Carries no PII. It's a random v4 UUID, not derived from
-   * any hardware identifier.
-   */
-  installId?: string;
+  automaticNetworkRequestsEnabled?: boolean;
   /**
    * Whether packaged builds report aggregate public registry install counts.
    * Defaults to true; users can disable it from Settings -> Privacy.
    */
   registryInstallCountsEnabled?: boolean;
-  /**
-   * Opt-in install and usage telemetry (counts and versions only).
-   * Absent or false means off; the ping never fires until the user
-   * turns it on from Settings -> Privacy.
-   */
-  usageTelemetryEnabled?: boolean;
+  /** Latest UTC year for which this device attempted each public install count. */
+  registryInstallCountYears?: Record<string, number>;
   /**
    * Automatic documentation-index install. On by default: grounding
    * measurably improves answers, so every admin should get it without
@@ -1670,12 +1656,6 @@ export interface AppStateStoreOptions {
    * never leaves a refresh token behind. The files are never deleted.
    */
   legacyTokenStoresFor?(partition: string): TokenCacheStorage[];
-  /**
-   * Base URL for the opt-in usage-telemetry collector. Empty (the
-   * default) means usage pings never fire regardless of the user's
-   * opt-in. Set per build once a collector is hosted.
-   */
-  usageTelemetryUrl?: string;
   /** Version string POSTed alongside install events, e.g. `0.1.5`. */
   appVersion?: string;
   /** Initial MXC setting used when state.json has no saved preference. */
@@ -1903,7 +1883,6 @@ export class AppStateStore {
   private readonly legacyTokenStoresFor: AppStateStoreOptions["legacyTokenStoresFor"];
   private readonly statsApiUrl: string;
   private resolveProxy: ProxyResolver | undefined;
-  private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
   private readonly sandboxedCodeDefault: boolean;
   private readonly userDataPath: string | undefined;
@@ -2010,7 +1989,6 @@ export class AppStateStore {
       this.statsApiUrl = "";
       this.tokenStoreFor = undefined;
       this.legacyTokenStoresFor = undefined;
-      this.usageTelemetryUrl = "";
       this.appVersion = "0.0.0";
       this.sandboxedCodeDefault = false;
       this.userDataPath = undefined;
@@ -2046,13 +2024,6 @@ export class AppStateStore {
       this.tokenStoreFor = tokenStoreFor && ((partition) => this.heldAfterLocalReset(tokenStoreFor(partition)));
       this.legacyTokenStoresFor =
         legacyTokenStoresFor && ((partition) => legacyTokenStoresFor(partition).map((store) => this.heldAfterLocalReset(store)));
-      // No default: usage telemetry stays inert until a collector URL is
-      // configured for the build AND the user opts in. // TODO(ugur):
-      // decide where the usage collector is hosted and set it here.
-      this.usageTelemetryUrl =
-        typeof options.usageTelemetryUrl === "string"
-          ? options.usageTelemetryUrl
-          : "";
       this.appVersion = options.appVersion ?? "0.0.0";
       this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
@@ -2536,6 +2507,7 @@ export class AppStateStore {
     this.auditLog.freezeSideFiles();
     // The work that writes on its own stops first, so a guard that failed
     // to install would still leave nothing running.
+    this.automaticIndexDownload?.abort();
     for (const download of this.indexDownloads) download.abort();
     // WhatsApp Web clients write and delete their auth files by path on
     // their own (credential and key updates, a logged out session, a QR
@@ -3186,78 +3158,6 @@ export class AppStateStore {
     };
   }
 
-  private async buildUsageTelemetry(): Promise<{
-    payload: UsageTelemetryPayload;
-    enabled: boolean;
-  }> {
-    const persisted = await this.read();
-    const providers = await this.listProviders();
-    const activeProvider = providers.find(
-      (provider) => provider.id === persisted.activeProviderId,
-    );
-    const retrievalStatus = await this.getRetrievalStatus();
-    const installId = persisted.installId ?? "anonymous";
-    const payload = buildUsageTelemetryPayload({
-      installId,
-      appVersion: this.appVersion,
-      platform: process.platform,
-      arch: process.arch,
-      providerIsLocal: activeModelProvider(activeProvider, persisted.activeModelByProviderId)?.isLocal === true,
-      tenantCount: persisted.tenants.length,
-      installedAgentCount: persisted.installedAgents.length,
-      runCount: persisted.runs.length,
-      retrievalIndexInstalled: retrievalStatus.available,
-    });
-    return { payload, enabled: persisted.usageTelemetryEnabled === true };
-  }
-
-  /** The exact JSON the Privacy preview shows and a ping would send. */
-  async getUsageTelemetryPreview(): Promise<{
-    enabled: boolean;
-    endpointConfigured: boolean;
-    payload: UsageTelemetryPayload;
-  }> {
-    const { payload, enabled } = await this.buildUsageTelemetry();
-    return {
-      enabled,
-      endpointConfigured: this.usageTelemetryUrl.length > 0,
-      payload,
-    };
-  }
-
-  async setUsageTelemetryEnabled(enabled: boolean): Promise<AppState> {
-    await this.serialize(async () => {
-      const current = await this.read();
-      await this.write({ ...current, usageTelemetryEnabled: enabled });
-    });
-    if (enabled) void this.sendUsageTelemetry();
-    return this.getAppState();
-  }
-
-  /**
-   * Send one usage ping. No-op unless the user enabled telemetry AND a
-   * collector endpoint is configured. Errors are swallowed; telemetry
-   * must never affect the app.
-   */
-  async sendUsageTelemetry(): Promise<{ sent: boolean }> {
-    const { payload, enabled } = await this.buildUsageTelemetry();
-    if (!enabled || this.usageTelemetryUrl.length === 0) {
-      return { sent: false };
-    }
-    try {
-      await fetch(`${this.usageTelemetryUrl.replace(/\/$/, "")}/api/usage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(5_000),
-      });
-      return { sent: true };
-    } catch (error) {
-      console.debug("[telemetry] usage ping failed:", error);
-      return { sent: false };
-    }
-  }
-
   private retrievalIndex(): RetrievalIndex | undefined {
     if (!this.userDataPath) return undefined;
     if (!this.retrievalIndexInstance) {
@@ -3289,8 +3189,8 @@ export class AppStateStore {
   /** Status plus, when known, a newer published index version. */
   async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
     const status = await this.getRetrievalStatusWithEmbedding();
-    if (!status.available) return status;
-    const manifest = await fetchIndexManifest();
+    if (!status.available || !await this.mayAutoInstallRetrieval()) return status;
+    const manifest = await fetchIndexManifest({ signal: AbortSignal.timeout(10_000) });
     return manifest && manifest.version !== status.version
       ? { ...status, updateAvailable: manifest.version }
       : status;
@@ -3331,17 +3231,27 @@ export class AppStateStore {
   async installRetrievalIndex(input: {
     sourceDir?: string;
     baseUrl?: string;
-  }): Promise<RetrievalStatus> {
+  }, cancellation?: AbortSignal): Promise<RetrievalStatus> {
     // Refused once a reset has started, but not counted: a download of a few
     // hundred megabytes must not hold a reset back. The commit aborts it, and
     // the sealed data folder refuses whatever it would still write.
     if (this.localResetStarted) {
       throw new LocalResetInProgressError("OpenAdminOS is resetting and restarts in a moment. Nothing was changed.");
     }
+    if (!cancellation) this.automaticIndexDownload?.abort(new Error("A manual index installation was requested."));
     const controller = new AbortController();
     this.indexDownloads.add(controller);
+    const signals = [controller.signal, AbortSignal.timeout(INDEX_DOWNLOAD_TIMEOUT_MS)];
+    if (cancellation) signals.push(cancellation);
+    const signal = AbortSignal.any(signals);
+    // All installations share the same staging directory.
+    const install = this.indexInstallTail.then(() => {
+      signal.throwIfAborted();
+      return this.installRetrievalIndexNow(input, signal);
+    });
+    this.indexInstallTail = install.then(() => undefined, () => undefined);
     try {
-      return await this.installRetrievalIndexNow(input, AbortSignal.any([controller.signal, AbortSignal.timeout(INDEX_DOWNLOAD_TIMEOUT_MS)]));
+      return await install;
     } finally {
       this.indexDownloads.delete(controller);
     }
@@ -3349,6 +3259,7 @@ export class AppStateStore {
 
   /** Documentation index downloads under way, so the reset commit can stop them. */
   private readonly indexDownloads = new Set<AbortController>();
+  private indexInstallTail = Promise.resolve();
 
   private async installRetrievalIndexNow(
     input: {
@@ -3386,12 +3297,27 @@ export class AppStateStore {
     await this.serialize(async () => {
       const current = await this.read();
       await this.write({ ...current, retrievalAutoInstall: enabled });
+      if (!enabled) this.cancelAutomaticRetrievalDownloads();
     });
     if (enabled) {
       void this.autoInstallRetrievalIndex();
       void this.autoInstallEmbeddingModel();
     }
     return this.getRetrievalStatus();
+  }
+
+  private async mayAutoInstallRetrieval(persisted?: PersistedState): Promise<boolean> {
+    const current = persisted ?? await this.read();
+    return current.retrievalAutoInstall !== false &&
+      this.privacySettingEnabled("automaticNetworkRequests", current.automaticNetworkRequestsEnabled);
+  }
+
+  private automaticIndexDownload?: AbortController;
+
+  private cancelAutomaticRetrievalDownloads(): void {
+    const reason = new Error("Automatic documentation installation was turned off.");
+    this.automaticIndexDownload?.abort(reason);
+    this.embeddingDownload?.abort(reason);
   }
 
   /**
@@ -3405,17 +3331,22 @@ export class AppStateStore {
    * error dialog. Settings shows the resulting state either way.
    */
   async autoInstallRetrievalIndex(): Promise<void> {
+    if (!this.userDataPath || this.automaticIndexDownload || this.localResetStarted) return;
+    const controller = new AbortController();
+    this.automaticIndexDownload = controller;
+    const { signal } = controller;
     try {
-      if (!this.userDataPath) return;
       const persisted = await this.read();
-      if (persisted.retrievalAutoInstall === false) return;
+      if (!await this.mayAutoInstallRetrieval(persisted)) return;
+      signal.throwIfAborted();
 
       // Grounding cannot work without the local Ollama to embed
       // questions, so a machine without it would download 264 MB it can
       // never use. Skip quietly; a later launch after Ollama appears
       // fetches the index and the model together. Not counted as an
       // attempt, so no daily backoff applies to this case.
-      const embedding = await embeddingModelState();
+      const embedding = await embeddingModelState(undefined, undefined, undefined, signal);
+      signal.throwIfAborted();
       if (!embedding.ollamaReachable || embedding.error) {
         console.info(
           "[retrieval] automatic index install skipped:",
@@ -3429,7 +3360,11 @@ export class AppStateStore {
       // not yet published) means fall back to installing the pinned
       // release when nothing is installed at all.
       const status = await this.getRetrievalStatus();
-      const manifest = await fetchIndexManifest();
+      signal.throwIfAborted();
+      const manifest = await fetchIndexManifest({
+        signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+      });
+      signal.throwIfAborted();
       if (status.available) {
         if (!manifest || manifest.version === status.version) return;
       }
@@ -3439,17 +3374,19 @@ export class AppStateStore {
         const age = Date.now() - new Date(lastAttempt).getTime();
         if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
       }
-      await this.serialize(async () => {
-        const current = await this.read();
-        await this.write({
-          ...current,
-          retrievalAutoInstallAttemptedAt: new Date().toISOString(),
-        });
-      });
-
-      await this.installRetrievalIndex(
-        manifest ? { baseUrl: manifest.baseUrl } : {},
-      );
+      const attemptedAt = new Date().toISOString();
+      try {
+        await this.installRetrievalIndex(manifest ? { baseUrl: manifest.baseUrl } : {}, signal);
+      } finally {
+        if (!signal.aborted) {
+          await this.serialize(async () => {
+            const current = await this.read();
+            if (!signal.aborted) {
+              await this.write({ ...current, retrievalAutoInstallAttemptedAt: attemptedAt });
+            }
+          });
+        }
+      }
       this.emitStateChanged("retrieval-index-installed");
     } catch (error) {
       // Never user-facing: a missing release, an offline machine or a
@@ -3459,6 +3396,8 @@ export class AppStateStore {
         "[retrieval] automatic index install skipped:",
         error instanceof Error ? error.message : error,
       );
+    } finally {
+      this.automaticIndexDownload = undefined;
     }
   }
 
@@ -3490,7 +3429,8 @@ export class AppStateStore {
     try {
       const persisted = await this.read();
       signal.throwIfAborted();
-      if (persisted.retrievalAutoInstall === false) return skipped("Automatic installation is off.");
+      if (!await this.mayAutoInstallRetrieval(persisted)) return skipped("Automatic installation is off.");
+      signal.throwIfAborted();
       const endpoint = embeddingEndpoint();
       const state = await embeddingModelState(endpoint, undefined, undefined, signal);
       signal.throwIfAborted();
@@ -3616,17 +3556,27 @@ export class AppStateStore {
    *
    * Safe to call multiple times (e.g., on manual refresh).
    */
-  async initRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
-    return this.localResetGatedWork(() => this.initRegistryNow());
+  async initRegistry(trigger: "manual" | "automatic" = "manual"): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+    return this.localResetGatedWork(() => this.initRegistryNow(trigger));
   }
 
-  private async initRegistryNow(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+  private async initRegistryNow(trigger: "manual" | "automatic"): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     if (!this.userDataPath) {
       // No userData path, fall back to filesystem only (tests / legacy ctor).
       return { error: null, fromCache: false, cachedAt: null };
     }
-    const persisted = await this.read().catch(() => defaultState);
+    const persisted = await this.read();
     const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
+    if (trigger === "automatic" &&
+        !this.privacySettingEnabled("automaticNetworkRequests", persisted.automaticNetworkRequestsEnabled)) {
+      if (!this.registryCacheEntries) {
+        const cached = readCachedRegistry(this.userDataPath, registrySource);
+        if (cached.fromCache) {
+          this.registryCacheEntries = cached.entries.map((entry) => entryToRegistrySummary(entry, this.appVersion));
+        }
+      }
+      return { error: null, fromCache: true, cachedAt: null };
+    }
     const result = await refreshRegistry(this.userDataPath, registrySource, {
       allowDevSource: this.allowDevRegistrySource,
       ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}),
@@ -3670,17 +3620,43 @@ export class AppStateStore {
     return this.initRegistry();
   }
 
+  private privacySettingEnabled(
+    key: "automaticNetworkRequests" | "registryInstallCounts",
+    preference: boolean | undefined,
+  ): boolean {
+    const value = this.managedPolicy?.values[key];
+    if (this.managedPolicy?.locked.includes(key)) return value !== "off";
+    return preference ?? (value !== "off");
+  }
+
+  private assertPrivacySettingUnlocked(key: "automaticNetworkRequests" | "registryInstallCounts", label: string): void {
+    if (this.managedPolicy?.locked.includes(key)) {
+      throw new ManagedPolicyError(`${label} is set by your IT department.`);
+    }
+  }
+
+  async getAutomaticNetworkRequestsEnabled(): Promise<boolean> {
+    return this.privacySettingEnabled("automaticNetworkRequests", (await this.read()).automaticNetworkRequestsEnabled);
+  }
+
+  async setAutomaticNetworkRequestsEnabled(enabled: boolean): Promise<void> {
+    await this.serialize(async () => {
+      this.assertPrivacySettingUnlocked("automaticNetworkRequests", "Automatic network requests");
+      const current = await this.read();
+      await this.write({ ...current, automaticNetworkRequestsEnabled: enabled });
+      if (!enabled) this.cancelAutomaticRetrievalDownloads();
+    });
+    if (enabled) {
+      void this.autoInstallRetrievalIndex();
+      void this.autoInstallEmbeddingModel();
+    }
+  }
+
   async setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState> {
     await this.serialize(async () => {
+      this.assertPrivacySettingUnlocked("registryInstallCounts", "Registry install counts");
       const current = await this.read();
-      const next: PersistedState = {
-        ...current,
-        registryInstallCountsEnabled: enabled,
-      };
-      if (!enabled) {
-        delete next.installId;
-      }
-      await this.write(next);
+      await this.write({ ...current, registryInstallCountsEnabled: enabled });
     });
     return this.getAppState();
   }
@@ -4203,6 +4179,9 @@ export class AppStateStore {
       listedInvalid,
     );
 
+    const automaticNetworkRequestsEnabled = this.privacySettingEnabled(
+      "automaticNetworkRequests", persisted.automaticNetworkRequestsEnabled,
+    );
     const state: AppState = {
       activeProviderId: activeProvider?.id ?? "ollama",
       appVersion: this.appVersion,
@@ -4222,8 +4201,9 @@ export class AppStateStore {
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
-      registryInstallCountsEnabled: persisted.registryInstallCountsEnabled !== false,
-      usageTelemetryEnabled: persisted.usageTelemetryEnabled === true,
+      automaticNetworkRequestsEnabled,
+      registryInstallCountsEnabled: automaticNetworkRequestsEnabled &&
+        this.privacySettingEnabled("registryInstallCounts", persisted.registryInstallCountsEnabled),
       schedulerStatus: this.deriveSchedulerStatus(persisted),
       office: this.officeService.state(),
       mcpServers: this.mcpServerSummaries(persisted),
@@ -7219,8 +7199,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async installAgentNow(agentId: string): Promise<AppState> {
-    let installedSlug: string | undefined;
-    let installIdForReport: string | undefined;
     const initialCandidate = this.listRegistryAgents().find(
       (agent) =>
         agent.id === agentId ||
@@ -7254,13 +7232,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
       assertAgentCompatible(compatibleRegistryAgent, "install");
 
-      const registryInstallCountsEnabled =
-        persisted.registryInstallCountsEnabled !== false;
-      const installId = registryInstallCountsEnabled
-        ? persisted.installId ?? randomUUID()
-        : persisted.installId;
-
-      const installedAt = new Date();
+      const installedAt = this.clock();
+      const countedYear = installedAt.getUTCFullYear();
+      const slug = compatibleRegistryAgent.slug;
+      const storedYear = persisted.registryInstallCountYears?.[slug];
+      const reportInstall = this.statsApiUrl.length > 0 &&
+        this.privacySettingEnabled("automaticNetworkRequests", persisted.automaticNetworkRequestsEnabled) &&
+        this.privacySettingEnabled("registryInstallCounts", persisted.registryInstallCountsEnabled) &&
+        !this.isUserAuthoredSlug(slug) &&
+        (!downloaded || downloaded.target.manifestUrl === `${DEFAULT_REGISTRY_SOURCE}/${slug}/manifest.yaml`) &&
+        (typeof storedYear !== "number" || storedYear < countedYear);
       const installed = toInstalledAgent(compatibleRegistryAgent, installedAt);
       installed.provenance = buildAgentProvenance({
         agent: compatibleRegistryAgent,
@@ -7276,7 +7257,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const commitState = () =>
         this.write({
           ...persisted,
-          ...(installId ? { installId } : {}),
+          ...(reportInstall ? {
+            registryInstallCountYears: { ...persisted.registryInstallCountYears, [slug]: countedYear },
+          } : {}),
           installedAgents: [...persisted.installedAgents, installed],
         });
       if (downloaded) {
@@ -7289,13 +7272,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         await commitState();
       }
 
-      installedSlug = compatibleRegistryAgent.slug;
-      installIdForReport = registryInstallCountsEnabled ? installId : undefined;
+      // Reserve the attempt in the install commit so a restart or lost response
+      // cannot send another request for this slug in the same year.
+      if (reportInstall) this.reportInstall(slug);
     });
-
-    if (installedSlug && installIdForReport) {
-      this.reportInstall(installedSlug, installIdForReport);
-    }
 
     return this.getAppState();
   }
@@ -7661,14 +7641,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * never report because they don't exist in the public registry, so the
    * aggregator would reject the slug anyway.
    */
-  private reportInstall(slug: string, installId: string): void {
-    if (this.statsApiUrl.length === 0) return;
-    if (this.userAgentsDir && this.isUserAuthoredSlug(slug)) return;
-
+  private reportInstall(slug: string): void {
     const url = `${this.statsApiUrl.replace(/\/$/, "")}/api/install`;
     const body = JSON.stringify(createRegistryInstallCountPayload({
       slug,
-      rawInstallId: installId,
       version: this.appVersion,
       platform: process.platform,
     }));
@@ -7704,6 +7680,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         ? providerLockedMessage(this.providerName(locked))
         : providerNotAllowedMessage(this.providerName(id)),
     );
+  }
+
+  /** Remove the former identifier and usage preference from profiles on upgrade. */
+  async removeLegacyTelemetryState(): Promise<void> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const raw: unknown = JSON.parse(await readFile(this.filePath, "utf8"));
+      if (isPlainRecordValue(raw) && (Object.hasOwn(raw, "installId") || Object.hasOwn(raw, "usageTelemetryEnabled"))) {
+        await this.write(persisted);
+      }
+    });
   }
 
   /**
@@ -10014,14 +10001,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           noticeDismissed: autoSelection.noticeDismissed === true,
         };
       }
-      if (typeof parsed.installId === "string" && parsed.installId.length > 0) {
-        state.installId = parsed.installId;
+      if (typeof parsed.automaticNetworkRequestsEnabled === "boolean") {
+        state.automaticNetworkRequestsEnabled = parsed.automaticNetworkRequestsEnabled;
       }
       if (typeof parsed.registryInstallCountsEnabled === "boolean") {
         state.registryInstallCountsEnabled = parsed.registryInstallCountsEnabled;
       }
-      if (typeof parsed.usageTelemetryEnabled === "boolean") {
-        state.usageTelemetryEnabled = parsed.usageTelemetryEnabled;
+      if (isPlainRecordValue(parsed.registryInstallCountYears)) {
+        const years = Object.entries(parsed.registryInstallCountYears).filter(([slug, year]) =>
+          /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && Number.isSafeInteger(year) && year >= 1970,
+        );
+        state.registryInstallCountYears = Object.fromEntries(years);
       }
       if (typeof parsed.retrievalAutoInstall === "boolean") {
         state.retrievalAutoInstall = parsed.retrievalAutoInstall;

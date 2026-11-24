@@ -97,10 +97,6 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   const [confirmInstall, setConfirmInstall] = useState(false);
   const [installingAgentId, setInstallingAgentId] = useState<string | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
-  // Live install counts fetched from the public stats endpoint on Hub
-  // mount. Falls back silently to the bundled values on `agent.installs`
-  // when the fetch fails (offline, network error, etc.).
-  const liveInstalls = useLiveInstalls();
   const detailSlug = searchParams.get("agent");
 
   useEffect(() => {
@@ -319,7 +315,7 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
                   <HubAgentCard
                     key={agent.id}
                     agent={agent}
-                    installs={resolveInstallCount(agent, liveInstalls)}
+                    installs={agent.installs}
                     installed={isInstalled(agent)}
                     tenantTier={tenantTier}
                     onInstall={() => {
@@ -797,71 +793,6 @@ function EmptyRegistry() {
       </div>
     </Card>
   );
-}
-
-const LIVE_STATS_URL = "https://openadminos.com/stats/agents.json";
-const LIVE_STATS_TIMEOUT_MS = 5_000;
-
-interface LiveStatsFile {
-  updatedAt?: string;
-  agents?: Record<string, { installs?: number; installs7d?: number }>;
-}
-
-/**
- * Pulls the public stats file on Hub mount. Lives at a static URL on
- * the marketing site (synced from the canonical `stats/agents.json` at
- * deploy time). When the fetch fails (offline, DNS error, or marketing
- * site down), we silently fall back to the bundled `agent.installs`
- * value baked into the desktop release. The Hub never shows a loading
- * spinner for stats; the bundled values are used until/unless the
- * fetch resolves, at which point counts swap in.
- */
-function useLiveInstalls(): Map<string, number> | null {
-  const [live, setLive] = useState<Map<string, number> | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), LIVE_STATS_TIMEOUT_MS);
-    fetch(LIVE_STATS_URL, {
-      method: "GET",
-      cache: "no-cache",
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? (response.json() as Promise<LiveStatsFile>) : null))
-      .then((data) => {
-        if (!data || typeof data !== "object" || !data.agents) return;
-        const next = new Map<string, number>();
-        for (const [slug, entry] of Object.entries(data.agents)) {
-          if (entry && typeof entry.installs === "number") {
-            next.set(slug, entry.installs);
-          }
-        }
-        setLive(next);
-      })
-      .catch((error: unknown) => {
-        console.debug("[hub] live stats fetch failed; using bundled values", error);
-      })
-      .finally(() => clearTimeout(timer));
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, []);
-
-  return live;
-}
-
-/**
- * Returns the live install count for an agent when the fetch has
- * resolved, otherwise the bundled value, otherwise `undefined` (which
- * tells `<InstallCount>` to render nothing).
- */
-function resolveInstallCount(
-  agent: RegistryAgentSummary,
-  live: Map<string, number> | null,
-): number | undefined {
-  if (live && live.has(agent.slug)) return live.get(agent.slug);
-  return agent.installs;
 }
 
 /**

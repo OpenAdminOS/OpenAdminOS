@@ -171,6 +171,7 @@ export async function downloadIndex(input: {
   // Fetch the checksum manifest first when it is published. Size alone
   // catches a truncated download; only a hash catches a corrupted or
   // substituted one.
+  input.signal?.throwIfAborted();
   let checksums = new Map<string, string>();
   try {
     const sums = await doFetch(`${base}/${INDEX_CHECKSUM_FILE}`, {
@@ -182,6 +183,7 @@ export async function downloadIndex(input: {
   }
 
   for (const file of INDEX_FILES) {
+    input.signal?.throwIfAborted();
     const response = await doFetch(`${base}/${file}`, {
       ...(input.signal ? { signal: input.signal } : {}),
     });
@@ -213,6 +215,7 @@ export async function downloadIndex(input: {
   }
 
   const result = await validateIndexDirectory(staging);
+  input.signal?.throwIfAborted();
   await promoteStaging(staging, input.targetDir);
   return result;
 }

@@ -807,36 +807,58 @@ describe("Settings provider section", () => {
     expect(screen.getByText(/10 local history rows removed/i)).toBeInTheDocument();
   });
 
-  it("keeps usage telemetry off by default and supports preview and test actions", async () => {
+  it("starts with all privacy switches on and pauses downloads and counts when automatic requests are off", async () => {
     const user = userEvent.setup();
-    const bridge = makeMockBridge();
-
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/privacy",
-      bridge,
+    const bridge = makeMockBridge({
+      installRetrievalIndex: vi.fn(async () => ({ available: true })),
     });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
 
-    const telemetrySwitch = await screen.findByRole("switch", {
-      name: "Usage telemetry",
-    });
-    expect(telemetrySwitch).toHaveAttribute("aria-checked", "false");
-    await user.click(screen.getByText("Show exact ping JSON preview"));
-    expect(await screen.findByText(/openadminos-usage-1/)).toBeInTheDocument();
+    const network = await screen.findByRole("switch", { name: "Automatic network requests" });
+    const counts = screen.getByRole("switch", { name: "Registry install counts" });
+    const docs = screen.getByRole("switch", { name: "Automatically install the documentation index" });
+    await waitFor(() => expect(docs).toHaveAttribute("aria-checked", "true"));
+    expect(network).toHaveAttribute("aria-checked", "true");
+    expect(counts).toHaveAttribute("aria-checked", "true");
 
-    await user.click(telemetrySwitch);
+    await user.click(docs);
+    expect(bridge.setRetrievalAutoInstall).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(docs).toHaveAttribute("aria-checked", "false"));
+    await user.click(network);
+    expect(bridge.setAutomaticNetworkRequestsEnabled).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(network).toHaveAttribute("aria-checked", "false"));
+    expect(counts).toBeDisabled();
+    expect(docs).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Download index" }));
+    expect(bridge.installRetrievalIndex).toHaveBeenCalledWith({ source: "download" });
 
-    await waitFor(() => {
-      expect(bridge.setUsageTelemetryEnabled).toHaveBeenCalledWith(true);
-      expect(telemetrySwitch).toHaveAttribute("aria-checked", "true");
-    });
+    await user.click(network);
+    await waitFor(() => expect(counts).toBeEnabled());
+    expect(counts).toHaveAttribute("aria-checked", "true");
+    expect(docs).toHaveAttribute("aria-checked", "false");
+  });
 
-    await user.click(screen.getByRole("button", { name: "Send a test ping" }));
+  it("shows the privacy switches locked by IT policy", async () => {
+    const bridge = makeMockBridge({}, createMockAppState({
+      automaticNetworkRequestsEnabled: false,
+      registryInstallCountsEnabled: false,
+      managedPolicy: {
+        files: [],
+        values: { automaticNetworkRequests: "off", registryInstallCounts: "off" },
+        sources: { automaticNetworkRequests: "machine", registryInstallCounts: "machine" },
+        locked: ["automaticNetworkRequests", "registryInstallCounts"],
+        issues: [],
+      },
+    }));
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
 
-    await waitFor(() => {
-      expect(bridge.sendUsageTelemetryTest).toHaveBeenCalledTimes(1);
-    });
-    expect(screen.getByText("Test ping sent.")).toBeInTheDocument();
+    const switches = await screen.findAllByRole("switch");
+    expect(switches).toHaveLength(3);
+    for (const control of switches) {
+      expect(control).toHaveAttribute("aria-checked", "false");
+      expect(control).toBeDisabled();
+    }
+    expect(screen.getAllByText("Set by your IT department")).toHaveLength(2);
   });
 
   it("states in About that product names and logos belong to their owners", async () => {
@@ -963,7 +985,7 @@ describe("Settings provider section", () => {
       getRetrievalStatus: vi.fn(async () => ({ available: false, ollamaReachable: true, embeddingModelInstalled: false })),
     });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
-    expect(await screen.findByText("The embedding model is not installed yet. OpenAdminOS downloads it through Ollama in the background when it starts with Ollama running; answers stay ungrounded until it arrives.")).toBeVisible();
+    expect(await screen.findByText("The embedding model is not installed yet. OpenAdminOS downloads it through Ollama at launch.")).toBeVisible();
     expect(screen.queryByText(/setting above/)).toBeNull();
   });
 
