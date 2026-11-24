@@ -4994,7 +4994,7 @@ export class AppStateStore {
     if (!this.tenantLifecycle.isWritable(tenantId)) {
       throw new Error("The organization is disconnecting or is not ready.");
     }
-    // TODO(ugur): confirm cached rows stay browsable after a service disconnect
+    // Rows stay browsable after a service disconnect, with a note, until the cache is cleared (decided 2026-11-24).
   }
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
