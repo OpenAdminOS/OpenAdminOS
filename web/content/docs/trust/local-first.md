@@ -7,7 +7,7 @@ description: "What stays on the device when OpenAdminOS runs locally."
 
 When a local LLM provider is selected, tenant data, prompts, agent outputs, run history, and error details stay on the user's machine.
 
-OpenAdminOS does not send tenant-content telemetry. Registry install counts, when enabled, are limited to non-content metadata such as agent slug, app version, platform, and a yearly per-agent hash.
+OpenAdminOS does not send tenant-content telemetry. Registry install counts include only the agent slug, app version, and platform. The device tracks which agents it has reported this UTC year. You can turn off counts or disable automatic app network requests in Settings > Privacy.
 
 ## Tenant Content in Prompts
 
