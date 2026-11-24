@@ -668,6 +668,10 @@ function sanitizeMcpServers(
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
+function isPublicRegistryManifest(agent: RegistryAgentSummary): boolean {
+  return agent.manifestUrl === `${DEFAULT_REGISTRY_SOURCE}/${agent.slug}/manifest.yaml`;
+}
+
 const defaultState: PersistedState = {
   activeProviderId: "ollama",
   providerChosenByUser: false,
@@ -4287,15 +4291,19 @@ export class AppStateStore {
     }
     // HTTP cache populated: use it as base and overlay user-authored agents.
     const dir = this.userAgentsDir;
-    const listing = dir
-      ? listAllRegistryAgentsWithIssues(dir)
-      : { agents: [], invalid: [] };
+    const listing = listAllRegistryAgentsWithIssues(dir);
     const userAgents = dir
       ? listing.agents.filter((a) => a.registryPath?.startsWith(dir))
       : [];
+    const bundledCounts = new Map(listing.agents.map((agent) => [agent.slug, agent.installs]));
     const bySlug = new Map<string, RegistryAgentSummary>();
-    for (const a of this.registryCacheEntries) bySlug.set(a.slug, a);
-    for (const a of userAgents) bySlug.set(a.slug, withAgentCompatibility(a, this.appVersion));
+    for (const agent of this.registryCacheEntries) {
+      const installs = bundledCounts.get(agent.slug);
+      bySlug.set(agent.slug, installs !== undefined && isPublicRegistryManifest(agent)
+        ? { ...agent, installs }
+        : agent);
+    }
+    for (const agent of userAgents) bySlug.set(agent.slug, withAgentCompatibility(agent, this.appVersion));
     return {
       agents: [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name)),
       invalid: listing.invalid.filter((entry) => entry.source === "user"),
@@ -7240,7 +7248,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         this.privacySettingEnabled("automaticNetworkRequests", persisted.automaticNetworkRequestsEnabled) &&
         this.privacySettingEnabled("registryInstallCounts", persisted.registryInstallCountsEnabled) &&
         !this.isUserAuthoredSlug(slug) &&
-        (!downloaded || downloaded.target.manifestUrl === `${DEFAULT_REGISTRY_SOURCE}/${slug}/manifest.yaml`) &&
+        (!downloaded || isPublicRegistryManifest(downloaded.target)) &&
         (typeof storedYear !== "number" || storedYear < countedYear);
       const installed = toInstalledAgent(compatibleRegistryAgent, installedAt);
       installed.provenance = buildAgentProvenance({

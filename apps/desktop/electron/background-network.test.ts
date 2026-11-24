@@ -137,6 +137,23 @@ test("automatic registry refresh honours the toggle and policy while manual refr
   assert.equal(requests.length, 3);
 });
 
+test("the live registry index and its offline cache keep the bundled install counts", async (t) => {
+  const { store } = await fixture(t);
+  const index = await readFile(new URL("../../../agents/index.json", import.meta.url), "utf8");
+  const desktop = store();
+  const bundledCount = desktop.listRegistryAgents().find((agent) => agent.slug === slug)?.installs;
+  assert.equal(typeof bundledCount, "number");
+  const fetch = t.mock.method(globalThis, "fetch", async () => new Response(index));
+  assert.equal((await desktop.initRegistry()).error, null);
+  assert.equal(desktop.listRegistryAgents().find((agent) => agent.slug === slug)?.installs, bundledCount);
+
+  await desktop.setAutomaticNetworkRequestsEnabled(false);
+  const restarted = store();
+  assert.equal((await restarted.initRegistry("automatic")).fromCache, true);
+  assert.equal(restarted.listRegistryAgents().find((agent) => agent.slug === slug)?.installs, bundledCount);
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
 test("automatic documentation setup needs both switches, while a manual index download works with both off", async (t) => {
   let modelPulls = 0;
   const ollama = createServer((request, response) => {
