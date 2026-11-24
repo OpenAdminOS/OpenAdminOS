@@ -1991,21 +1991,38 @@ An unlocked value is the default until the user saves a choice.
 
 User-initiated support bundles are a separate explicit action, not telemetry.
 The Settings → About action and contextual failure-state actions open an in-app
-support form; issue reporting is not permanent sidebar navigation. OpenAdminOS may export a local diagnostics
-JSON file only after the admin chooses that option. After the admin checks an
-explicit public-issue confirmation and clicks submit, the desktop app posts a
-bounded support report to the OpenAdminOS web API; the server creates the public
-GitHub issue with a repo-scoped GitHub token that is never shipped to the
-desktop app. The endpoint owns the repo mapping, applies server-side
-redaction, enforces request-size limits, rate-limits by IP, and deduplicates
-matching recent reports. The optional diagnostics JSON is bounded to
-app/build/OS, provider status categories, registry/scheduler/cache health,
-aggregate run counts, and hashed error categories. It must not include tenant
-identifiers, account usernames, tenant domains, prompts, LLM output, Graph
-response bodies, run reports, raw run logs, SQLite databases, screenshots, MSAL
-tokens, provider credentials, or keychain values. No support report is
-submitted automatically after a crash or failure, and no screenshot/session
-replay capture is part of this flow. The desktop and support endpoint both run
+support form; issue reporting is not permanent sidebar navigation. The form
+previews the exact public GitHub title and Markdown body on the device.
+Diagnostics are selected by default. With diagnostics selected, the admin must
+open the preview before submitting. Editing report text or toggling
+diagnostics requires a fresh preview. The app sends the same diagnostics
+snapshot the admin reviewed, and the endpoint verifies that the formatted issue
+matches. If formatting differs or the diagnostics are too large, the app clears
+the preview and offers recovery by updating OpenAdminOS or clearing Include
+diagnostics. A duplicate report tells the admin to look for it in recent GitHub
+issues. A successful submission consumes the reviewed snapshot. The admin can
+also export a local diagnostics JSON file.
+After explicit public-issue confirmation and submission, the desktop app posts
+a bounded report to the OpenAdminOS web API. The server creates the public
+GitHub issue with a repo-scoped token it keeps server-side. The endpoint
+applies redaction, limits request size and frequency, and deduplicates recent
+reports. The optional diagnostics JSON covers app, build and OS details,
+provider status, registry, scheduler and cache health, and a run summary.
+Diagnostics schema version 2 shows counts such as cached rows, pages, connected
+organizations, and runs as ranges. Activity times are age ranges relative to
+the report, upcoming due times are marked future, and the report date is a UTC
+calendar date. Error details are limited to categories. An agent is identified
+by its slug when its installation and the official registry confirm it is
+public. Other agents are labeled local. The diagnostics omit run identifiers
+and report text lengths. The server rebuilds diagnostics from the permitted
+fields and values for both schemas. It buckets counts, including numeric
+strings, and strips exact activity timestamps and diagnostic hashes from older
+clients. Diagnostics must not
+include tenant identifiers, account usernames, tenant domains, prompts, LLM
+output, Graph response bodies, run reports, raw run logs, SQLite databases,
+screenshots, MSAL tokens, provider credentials, or keychain values. No support
+report is submitted automatically after a crash or failure, and no
+screenshot/session replay capture is part of this flow. The desktop and support endpoint both run
 a deterministic redaction pass over support issue free text before upload and
 public issue creation. The pass catches common secret shapes such as provider
 API keys, GitHub tokens, AWS/Google/Stripe/npm/Vercel tokens, JWTs, private-key
@@ -4218,7 +4235,7 @@ These must exist and work well before any public release.
 - Manual agent runs open a preflight review before queueing. It shows the active organization, the services the agent reads, provider residency, model, mode, and Graph scopes. With no organization it names the services the agent needs with Connect and Choose an organization, and starts only an agent that calls no service API (updated 2026-11-09; it no longer opens setup first). It blocks when a needed service is not connected, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
 - Provider trust messaging is scoped to the surface: overview/settings/chat/status surfaces use the current active tenant/provider/default model, while queued run reports use the run's pinned tenant, provider, and model rather than the current global tenant/provider selection.
 - Settings -> About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, menu bar launch state, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
-- Support issue reporting is visible from failed-run remediation cards and Settings → About, not as permanent sidebar navigation. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
+- Support issue reporting is visible from failed-run remediation cards and Settings → About, not as permanent sidebar navigation. It previews the public title and body, requires the preview when diagnostics are included, and creates a public GitHub issue only after explicit confirmation; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status) and configurable
   retention for old eligible records
