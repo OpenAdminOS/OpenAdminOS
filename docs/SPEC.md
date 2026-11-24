@@ -275,8 +275,8 @@ Scroll-reveal sections are shown in print, and reveal elements mounted after
 the first pass are picked up by a MutationObserver. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
 under `web/public/videos/`.
-Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
-the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
+Blog articles live as Markdown in `web/content/blog/`, are server-rendered by
+the Next.js blog routes, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
 questions without generic AI-hype language. Markdown sections titled "Related
 reading" and "LinkedIn draft" are editorial notes and are not rendered on the
@@ -310,6 +310,17 @@ run results, analytics events, support diagnostics, tokens, provider credentials
 or Microsoft Graph payloads through website analytics. Privacy copy must keep
 the website analytics boundary separate from the desktop app's no tenant telemetry
 guarantee.
+
+The website sends a Content Security Policy, a referrer policy, MIME sniffing
+protection, a permissions policy, and HSTS on all routes. Next renders HTML
+per request so its scripts, JSON-LD, the theme initializer, and the homepage
+image preload can use a fresh nonce. Fingerprinted static assets keep their
+immutable caching. The policy allows self-hosted assets and limits
+Plausible to its configured script and event URLs on marketing pages. Docs
+HTML allows same-origin connections for search. Inline style attributes are
+needed for chart sizes and SVG graphics. The built-in Next error stylesheet
+is allowed by hash. API responses and static files use a policy with no
+resource loading. Release data keeps its fetch revalidation intervals.
 
 ### LLM provider abstraction
 
@@ -3081,6 +3092,12 @@ endpoints. The host classifies local-provider endpoints conservatively before
 claiming local-only trust. Microsoft Graph, login, registry, and hosted-provider
 traffic should flow through the main process unless a renderer-owned external
 endpoint is explicitly approved and documented.
+
+On Linux the desktop clears Electron's spellchecker dictionary languages
+before opening a window. This disables spellchecking and prevents Chromium's
+Google dictionary download, which runs outside the renderer's CSP. Repeat the
+[startup network capture](network-capture.md) when upgrading Electron.
+On every Next.js upgrade, re-verify the CSP hash for the built-in HTTP error stylesheet.
 
 Desktop copy actions should use the bounded Electron clipboard bridge exposed by
 preload instead of relying on sandboxed renderer clipboard permissions. Browser

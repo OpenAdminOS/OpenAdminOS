@@ -33,6 +33,9 @@ permissions:
   actions: write
 
 env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  TURBO_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: "1"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:

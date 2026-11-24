@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+
+import { GITHUB_URL, SITE_URL } from "~/lib/site-urls";
+
+export { GITHUB_URL, SITE_URL };
 
 export const SITE_NAME = "OpenAdminOS";
-export const SITE_URL = "https://www.openadminos.com";
 export const SITE_HOME_URL = `${SITE_URL}/`;
-export const GITHUB_URL = "https://github.com/OpenAdminOS/OpenAdminOS";
 export const DOCS_URL = "https://docs.openadminos.com/";
 export const ROADMAP_URL = "https://roadmap.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
@@ -101,10 +104,12 @@ export function pageMetadata({
   };
 }
 
-export function JsonLd({ data }: { data: unknown }) {
+export async function JsonLd({ data }: { data: unknown }) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <script
       type="application/ld+json"
+      nonce={nonce}
       dangerouslySetInnerHTML={{
         __html: JSON.stringify(data).replace(/</g, "\\u003c"),
       }}

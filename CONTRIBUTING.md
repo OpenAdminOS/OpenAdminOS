@@ -8,6 +8,12 @@ Thanks for your interest. This project is community-built and contributions are 
 2. Read [`CLAUDE.md`](CLAUDE.md) — even if you're a human, it explains the operating principles for the codebase.
 3. Open an issue before starting non-trivial work. We'd rather discuss approach early than reject a PR after you've spent hours.
 
+## Local website build telemetry
+
+After installing the website dependencies, run `npx next telemetry disable`
+from `web/` to opt out of Next.js telemetry on your machine. For a single
+command, set `NEXT_TELEMETRY_DISABLED=1` in its environment.
+
 ## What kinds of contributions we want
 
 - **Agent contributions** — new agents in the registry are the most direct way to help. See [`docs/agent-sdk.md`](docs/agent-sdk.md).

@@ -4,6 +4,7 @@ import "@fontsource-variable/newsreader/opsz.css";
 import "~/styles/globals.css";
 
 import { type Metadata, type Viewport } from "next";
+import { headers } from "next/headers";
 
 import { RevealObserver } from "./RevealObserver";
 import { THEME_INIT_SCRIPT } from "./theme";
@@ -92,18 +93,21 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const requestHeaders = await headers();
+  const nonce = requestHeaders.get("x-nonce") ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="bg-brand-bg font-sans text-brand-ink antialiased">
         {children}
         <RevealObserver />
-        <SiteAnalytics />
+        {requestHeaders.get("x-site-analytics") === "on" ? <SiteAnalytics nonce={nonce} /> : null}
       </body>
     </html>
   );
