@@ -20,7 +20,7 @@ Each remote host receives your IP address and standard request headers. **Settin
 
 Turning off **Automatic network requests** also cancels automatic registry refreshes and documentation downloads in progress. The app remembers your individual preferences.
 
-The website publishes aggregate counts hourly to GitHub. The public totals and daily aggregates in the Git commit history contain no personal data and are kept indefinitely.
+Our processor, Supabase (Supabase Pte. Ltd.), hosts the website's database in Frankfurt, Germany. The website publishes aggregate counts hourly to GitHub. The public totals and daily aggregates in the Git commit history contain no personal data and are kept indefinitely.
 
 ## Requests enabled by your choices
 

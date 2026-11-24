@@ -13,7 +13,7 @@ const ROUTES = [
   ["/use-cases/intune", "2026-06-02"],
   ["/blog", "2026-06-05"],
   ["/llm-providers", "2026-06-02"],
-  ["/privacy", "2026-06-04"],
+  ["/privacy", "2026-11-25"],
   ["/terms", "2026-06-04"],
   ["/legal-notice", "2026-06-04"],
   ["/benchmarks", "2026-08-31"],

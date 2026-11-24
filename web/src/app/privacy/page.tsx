@@ -18,7 +18,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-11-24";
+const LAST_UPDATED = "2026-11-25";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
   "What OpenAdminOS and its service providers process when you use the desktop app, website, downloads, support, or booking.";
@@ -165,12 +165,14 @@ export default function PrivacyPage() {
               <div>
                 <h3 className="font-medium text-brand-ink">Hosting and access logs</h3>
                 <p>
-                  Vercel hosts the website and its APIs for us. It processes access
-                  logs with IP addresses, browser or app user-agent strings, and
+                  Vercel hosts the website and its APIs for us on its Pro plan.
+                  It processes access logs with IP addresses, browser or app user-agent strings, and
                   timestamps to serve requests, troubleshoot, and protect the site.
                   We rely on our legitimate interest in operating and securing the
-                  site (Art. 6(1)(f) GDPR). Access-log retention depends on the Vercel
-                  plan and is [to be confirmed]. Logging is part of using the site or API.
+                  site (Art. 6(1)(f) GDPR). Vercel keeps these logs for up to 30 days.
+                  We do not export copies of these logs. The website&rsquo;s server
+                  functions run in the United States.
+                  Logging is part of using the site or API.
                   See <Link href="https://vercel.com/legal/privacy-policy" className="text-link">Vercel&rsquo;s privacy policy</Link>.
                 </p>
               </div>
@@ -178,8 +180,8 @@ export default function PrivacyPage() {
                 <h3 className="font-medium text-brand-ink">Rate limits and duplicate reports</h3>
                 <p>
                   Our website derives a keyed hash (HMAC) from the IP address for
-                  each endpoint. Our processor, Supabase Inc., stores these
-                  rate-limit keys in the EU in Frankfurt, Germany
+                  each endpoint. Our processor, Supabase (Supabase Pte. Ltd.),
+                  stores these rate-limit keys in Frankfurt, Germany
                   (<code>eu-central-1</code>). The raw IP address stays out of that
                   database. The keys expire after 60 seconds for install requests
                   and after 1 hour for support reports and agent submissions.
@@ -262,8 +264,8 @@ export default function PrivacyPage() {
                 <p>
                   When you email us, we use your address, message, and any attachments
                   to handle your request. Microsoft 365 Exchange Online hosts the
-                  mailbox for us. For customers, we handle support as part of the
-                  contract (Art. 6(1)(b) GDPR). For other senders, we rely on our
+                  mailbox in our EU tenant. For customers, we handle support
+                  as part of the contract (Art. 6(1)(b) GDPR). For other senders, we rely on our
                   legitimate interest in responding to support requests and resolving
                   reported problems (Art. 6(1)(f) GDPR).
                 </p>
@@ -306,14 +308,20 @@ export default function PrivacyPage() {
               <div>
                 <h3 className="font-medium text-brand-ink">Booking a call</h3>
                 <p>
-                  Our site links to Cal.com. The full list of fields Cal.com collects
-                  is [to be confirmed]. We use booking details to arrange and hold
-                  the call on Microsoft Teams. The Teams hosting location is
-                  [to be confirmed]. Whether calls are recorded is [to be confirmed].
+                  Our site links to Cal.com, which processes booking details in the
+                  United States on our behalf. Both booking forms require your name
+                  and email address. You can add notes and additional guests&rsquo; email addresses.
+                  The &ldquo;We build an OpenAdminOS agent for you&rdquo; booking also
+                  requires an answer to &ldquo;What should the agent do?&rdquo;
+                  We use booking details to arrange and hold the call. Calls run on
+                  Microsoft Teams in our Microsoft 365 tenant, which is hosted in the EU.
+                  We do not record calls.
+                </p>
+                <p className="mt-2">
                   We process booking details to perform a contract or take steps you
                   request before entering into one (Art. 6(1)(b) GDPR). We keep booking
-                  details for 12 months after the call. Booking is optional.
-                  We need your email address and a time to confirm the appointment.
+                  details for 12 months after the call. Booking is optional. Without a
+                  name and email address we cannot confirm a booking.
                   See <Link href="https://cal.com/privacy" className="text-link">Cal.com&rsquo;s privacy policy</Link>.
                 </p>
               </div>
@@ -326,15 +334,41 @@ export default function PrivacyPage() {
             </h2>
             <p className="mt-3">
               Vercel, GitHub, Microsoft, and Cal.com may process data in the United
-              States. For these transfers we rely on the EU-US Data Privacy Framework
-              where the provider is certified and on the European Commission&rsquo;s
-              standard contractual clauses in the providers&rsquo; data processing terms.
-              Supabase Inc. is a US company and hosts our data in Frankfurt,
-              Germany. Supabase&rsquo;s data processing agreement includes
-              standard contractual clauses for international transfers. Data
-              Privacy Framework certification for Vercel, GitHub, Microsoft,
-              Cal.com, and Supabase is [to be confirmed].
+              States. For eligible transfers to Vercel, GitHub, and Cal.com, we
+              rely on the frameworks listed below. For Microsoft 365, we rely on the
+              SCCs in Microsoft&rsquo;s data protection addendum. The standard contractual
+              clauses (SCCs) are those approved by the European Commission.
             </p>
+            <ul className="mt-3 list-disc space-y-2 pl-5">
+              <li>
+                <strong className="text-brand-ink">Vercel Inc.</strong> participates in
+                the EU-U.S. Data Privacy Framework (DPF), its UK Extension, and the
+                Swiss-U.S. DPF. Its data processing addendum includes SCCs where applicable.
+              </li>
+              <li>
+                <strong className="text-brand-ink">GitHub</strong> participates in the
+                EU-U.S. DPF, its UK Extension, and the Swiss-U.S. DPF. Its privacy
+                statement also describes its use of SCCs for international transfers.
+              </li>
+              <li>
+                <strong className="text-brand-ink">Microsoft Corporation</strong> participates in
+                the EU-U.S. DPF, its UK Extension, and the Swiss-U.S. DPF. Microsoft
+                uses the SCCs in its data protection addendum for international
+                transfers through its enterprise services.
+              </li>
+              <li>
+                <strong className="text-brand-ink">Cal.com, Inc.</strong> participates in
+                the EU-U.S. DPF and its UK Extension. Its data processing agreement
+                uses SCCs where the framework does not cover a transfer, including
+                transfers from Switzerland.
+              </li>
+              <li>
+                <strong className="text-brand-ink">Supabase (Supabase Pte. Ltd.)</strong> is
+                based in Singapore and hosts our database in Frankfurt, Germany
+                (<code>eu-central-1</code>). For international transfers we rely on
+                the SCCs in its data processing agreement.
+              </li>
+            </ul>
             <p className="mt-3">
               Plausible hosts our analytics in the EU, with no transfer outside the
               EU. For a copy of the relevant safeguards, email{" "}
