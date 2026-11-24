@@ -1133,7 +1133,7 @@ describe("Sophos Central connection", () => {
 
   it.each([
     ["credentials", /may have expired or been removed/],
-    ["forbidden", /Check the credential’s service principal role/],
+    ["forbidden", /needs the Service Principal Management role/],
     ["rate-limit", /Wait a minute, then test/],
   ] as const)("shows the persisted %s state", async (issue, copy) => {
     render({ ...base, sophosConnections: [{ ...connection, issue }] });
