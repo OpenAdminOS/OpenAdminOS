@@ -2376,8 +2376,9 @@ function IntuneChatContent() {
                   const suggestedAgents = mergeSuggestedAgents(
                     message.agentSuggestions,
                   );
-                  const messageConversation =
-                    conversations.find((entry) => entry.id === message.conversationId);
+                  const knownConversation = conversations.find((entry) => entry.id === message.conversationId);
+                  const messageConversation = knownConversation ??
+                    (activeConversation?.id === message.conversationId ? activeConversation : undefined);
                   const messageTenant = messageConversation?.tenantId
                     ? tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
@@ -2403,7 +2404,7 @@ function IntuneChatContent() {
                         copied={message.id === copiedMessageId}
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
-                        canBrowseCache={Boolean(activeTenant && messageConversation?.tenantId === activeTenant.id)}
+                        canBrowseCache={Boolean(activeTenant && knownConversation?.tenantId === activeTenant.id)}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
                         liveModelFit={modelFitOfferShown && modelFitOffer?.assistantMessageId === message.id}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
