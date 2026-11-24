@@ -79,7 +79,7 @@ export function MarketingShell({
   homeHref?: string;
   /** Full-bleed main area for pages that lay out their own bands. */
   bare?: boolean;
-  /** One-line notice above the header, such as the latest release. */
+  /** Short notice above the header, such as the latest release. */
   announcement?: { href: string; label: string };
 }) {
   return (
@@ -97,7 +97,7 @@ export function MarketingShell({
           rel="noreferrer"
           className="block bg-brand-ink px-6 py-2.5 text-center text-[13px] text-brand-on-ink transition-colors hover:bg-brand-ink-hover"
         >
-          <span className="line-clamp-1">
+          <span className="line-clamp-2 sm:line-clamp-1">
             {announcement.label} <span aria-hidden>→</span>
           </span>
         </Link>

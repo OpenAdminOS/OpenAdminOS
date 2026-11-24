@@ -58,6 +58,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The homepage banner highlights Organizations and Connections, Chat without Microsoft sign-in, and hosted model locations when 0.8.0 becomes the latest stable release.
+- Refresh the homepage screenshots in light and dark, with Marketplace, the Connections reach map, and an Offboarding agent waiting for typed approval in the hero.
 - Before sending to an on-device Ollama model from Chat, agent runs, schedules, Agent Team, or Nova, OpenAdminOS checks that the model still runs on this device and stops if it cannot confirm that.
 - The Splashtop Docs and Splashtop Agentic Packr Docs references name OpenAdminOS as their publisher, and the install footer of a built-in reference names the host it reads; the earlier names ending in MCP still work in Chat.
 - Nightly release notes list only what that nightly adds: its pull requests and commits, and the changelog entries added since the previous release, not the whole unreleased changelog.
@@ -87,6 +89,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Refine the homepage screenshots in both themes. Chat shows which devices missed the seven-day sync window and the cache used to answer, and the mobile write-confirmation hero shows the tenant and local provider.
 - Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
 - Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance. If the source is missing or turned off, Chat points to Marketplace.
 - When a local investigation fails, Chat explains what was checked and offers a retry or model choice. If the roadmap could not be checked, Chat says so in the answer.

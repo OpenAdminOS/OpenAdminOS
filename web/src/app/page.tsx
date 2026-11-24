@@ -110,45 +110,44 @@ const TOUR: readonly TourItem[] = [
   {
     id: "chat",
     title: "Chat",
-    text: "Ask about the tenant in plain language. Each answer states its scope and data age, cites the Graph sources it used, and suggests an installed agent when one fits.",
+    text: "Ask about the tenant in plain language. See the answer’s scope, data age, and source summary, with a suggested installed agent when one fits.",
     screen: "chat-transcript",
-    alt: "Chat answer about stale devices with tenant scope, data age, and two numbered Microsoft Graph sources",
+    alt: "Chat answer listing two devices that missed the seven-day sync window, with tenant scope, data age, a source summary, and a suggested agent",
     tone: "sage",
   },
   {
-    id: "agents",
-    title: "Agents",
-    text: "Browse the registry inside the app. Every agent shows whether it reads or makes changes, the Graph permissions it needs, and when it last ran.",
-    screen: "hub-grid",
-    alt: "Agents page listing registry agents marked read-only or makes changes",
+    id: "marketplace",
+    title: "Marketplace",
+    text: "Browse agents and MCP tools. Review what a listing reads, where its queries go, and where it runs before you install it.",
+    screen: "marketplace",
+    alt: "Marketplace Discover tab featuring the read-only Microsoft Learn MCP tool alongside a spotlight list of MCP tools",
     tone: "sand",
     link: { href: "/registry", label: "How the registry works" },
   },
   {
     id: "team",
     title: "Agent Team",
-    text: "Give a teammate a role, a tenant, a provider, and up to eight installed agents. Run it once or on a schedule; every result links back to the run that produced it.",
+    text: "Give a teammate a role, an organization, a provider, and up to eight installed agents. Run it once or on a schedule. Each result links back to its run.",
     screen: "agent-team",
-    alt: "Agent Team page with the office view and assignment history",
+    alt: "Agent Team office with three teammates and a link to the review inbox",
     tone: "slate",
   },
   {
     id: "changes",
     title: "Write confirmation",
-    text: "A write agent prepares a plan and stops. You see each Microsoft Graph call and what it touches, then type the phrase to apply it.",
+    text: "A write agent prepares a plan and stops for review. Acknowledge flagged actions and type the confirmation phrase before applying a destructive change.",
     screen: "write-confirmation",
     alt: "Write confirmation for the Offboarding agent listing two device retirements and a typed phrase field",
     tone: "clay",
     link: { href: "/trust-model", label: "Read the trust model" },
   },
   {
-    id: "models",
-    title: "Models",
-    text: "Run Ollama, LM Studio, Lemonade, or Apple Foundation locally, or use a hosted provider through its own CLI or Azure OpenAI. Each is marked Local or Hosted.",
-    screen: "settings",
-    alt: "Provider settings with local and hosted model providers",
+    id: "connections",
+    title: "Connections",
+    text: "See what Chat and agents can read for the active organization, which model is in use, and where queries and reports can go.",
+    screen: "connections",
+    alt: "Contoso Connections reach map showing Microsoft 365 services, this device, and where data can go",
     tone: "sage",
-    link: { href: "/llm-providers", label: "Compare model providers" },
   },
 ];
 
@@ -332,6 +331,9 @@ export default async function HomePage() {
     linux: latestRelease.linuxAppImageUrl,
   };
   const latestNote = releases.find((release) => release.version === latestRelease.version);
+  const announcementSummary = latestRelease.version === "v0.8.0"
+    ? "Organizations and Connections, Chat without Microsoft sign-in, and hosted model locations"
+    : latestNote?.summary;
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -359,8 +361,8 @@ export default async function HomePage() {
         latestRelease.version
           ? {
               href: latestRelease.releaseNotesUrl,
-              label: latestNote?.summary
-                ? `${latestRelease.version}: ${latestNote.summary}`
+              label: announcementSummary
+                ? `${latestRelease.version}: ${announcementSummary}`
                 : `${latestRelease.version} is out`,
             }
           : undefined
@@ -411,40 +413,17 @@ export default async function HomePage() {
         >
           <div className="relative mx-auto max-w-6xl">
             <AppWindow
-              screen="chat-transcript"
-              alt="OpenAdminOS Chat answer with tenant scope, data age, and two numbered Microsoft Graph sources"
-              crop={{ x: 780, y: 110, width: 1530, aspect: "4 / 3.6" }}
+              screen="write-confirmation"
+              alt="Offboarding agent paused for approval with two proposed device retirements and the required confirmation phrase"
+              crop={{ x: 536, y: 0, width: 2024, aspect: "2024 / 1600" }}
               className="rounded-b-none sm:hidden"
             />
             <AppWindow
-              screen="chat-transcript"
-              alt="OpenAdminOS Chat answering which managed devices have not synced in the last 7 days, with tenant scope, data age, two Microsoft Graph sources, and a local Ollama model"
+              screen="write-confirmation"
+              alt="Offboarding agent paused for approval with two proposed device retirements and the required confirmation phrase"
               priority
               className="hidden rounded-b-none sm:block"
             />
-            <div className="pointer-events-none absolute -left-10 top-[41%] hidden w-72 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
-              <p className="flex items-center gap-1.5 text-xs text-brand-ok">
-                <LockIcon />
-                Local · Ollama
-              </p>
-              <p className="mt-2 text-sm leading-6">
-                Local model. Tenant data stays on this device.
-              </p>
-            </div>
-            <div className="pointer-events-none absolute -right-10 top-[68%] hidden w-80 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
-              <p className="flex items-center gap-1.5 text-xs text-brand-warn">
-                <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                Awaiting confirmation
-              </p>
-              <p className="mt-2 text-sm font-medium">Offboarding agent</p>
-              <p className="text-sm leading-6 text-brand-muted">
-                Retire two stale Windows devices. Type{" "}
-                <code className="rounded bg-brand-code px-1 text-[12px] text-brand-ink">
-                  RETIRE 2 DEVICES
-                </code>{" "}
-                to apply.
-              </p>
-            </div>
           </div>
         </Stage>
       </section>
@@ -631,9 +610,9 @@ export default async function HomePage() {
             <p className={eyebrow}>Write confirmation</p>
             <h2 className={`${sectionTitle} mt-4`}>Type it to mean it.</h2>
             <p className="mt-6 text-lg leading-8 text-brand-muted">
-              Read-only agents run on their own. Anything that changes the
-              tenant stops here: every Graph call listed, the devices or
-              accounts it touches, and a phrase you type before Apply unlocks.
+              A write agent stops for review with a list of planned changes
+              and the devices or accounts they affect. Destructive changes
+              require a typed confirmation phrase.
             </p>
             <p className="mt-8 font-mono text-[clamp(1.4rem,3vw,2.1rem)] tracking-tight text-brand-danger">
               RETIRE 2 DEVICES
@@ -647,7 +626,7 @@ export default async function HomePage() {
             <div data-reveal>
               <AppWindow
                 screen="write-confirmation"
-                alt="Write confirmation for the Offboarding agent: two device retirements, a Microsoft Graph write warning, and the typed phrase RETIRE 2 DEVICES"
+                alt="Offboarding review with two proposed device retirements and a field requiring RETIRE 2 DEVICES before Apply unlocks"
                 crop={{ x: 680, y: 120, width: 1720, aspect: "1720 / 1480" }}
               />
             </div>
