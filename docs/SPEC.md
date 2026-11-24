@@ -125,6 +125,42 @@ nothing from it, and the privacy policy names Cal.com as the booking service.
 Between the `lg` and `xl` breakpoints the header leaves out Blog and Roadmap so
 both buttons fit; the footer and the mobile menu keep them.
 
+### Advent of Admin (Dec 2026 campaign)
+
+2026-11-23. The campaign aims to increase installs and help Microsoft 365 and
+Intune admins try OpenAdminOS. One guided door opens at 06:00 Europe/Berlin
+each day from 1 to 24 December. Participants follow a short task in the desktop
+app and submit a shared check answer they find in the app. The doors are guided
+practice rather than puzzles. Doors can be completed through 31 December 2026.
+
+An on-time completion enters the daily €25 voucher draw. Complete 12 doors for a
+badge or 18 to enter the grand draw for a mini PC that runs local models and two
+Microsoft certification exam vouchers. A qualifying referral who completes door
+1 adds one grand draw entry, up to five extra entries.
+
+The implementation lives on the marketing website and adds no desktop app
+changes or app telemetry. It uses EU-region Supabase, website-issued magic links
+sent by Resend, and a strictly necessary session cookie as its only cookie.
+Accepted answers are stored only as keyed HMAC-SHA256 hashes in the database. The campaign is
+disabled by default behind `ADVENT_ENABLED`, and registration also requires
+`ADVENT_RULES_APPROVED`.
+
+Participants can opt in to daily reminders separately from release emails.
+An authenticated scheduled GET or POST checks the current Berlin date after the door
+opens, skips participants who already completed it, and claims each participant
+once per door before calling Resend. The default is a count-only dry run.
+`ADVENT_REMINDERS_SEND` explicitly enables delivery. Reminder emails use a signed
+unsubscribe link and a sender domain with open and click tracking disabled.
+
+Signup details and consent are confirmed from the email link before creating an
+account. Sign-out revokes all active sessions for the participant. The admin
+readiness panel lists draft and incomplete doors, missing accepted answers,
+rules approval and missing configuration. Scheduled cleanup removes expired
+login links and wrong-answer attempts. Draw snapshots preserve the original
+eligible entries and support audited replacements for a deleted winner.
+Non-winner records are purged after 90 days and winner records after prize
+fulfilment.
+
 ### Marketing website canonical host
 
 The product domain remains `openadminos.com`. The deployed marketing site

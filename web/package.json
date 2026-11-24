@@ -14,7 +14,10 @@
     "start": "next start",
     "pretypecheck": "npm run sync-stats",
     "typecheck": "tsc --noEmit",
-    "landing-shots": "node ./scripts/landing-shots.mjs"
+    "landing-shots": "node ./scripts/landing-shots.mjs",
+    "test": "node --test --experimental-strip-types src/lib/advent/*.test.ts",
+    "pretest:advent-routes": "npm run sync-stats",
+    "test:advent-routes": "node --test --experimental-strip-types scripts/advent-smoke.test.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

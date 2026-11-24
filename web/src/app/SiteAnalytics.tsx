@@ -6,12 +6,25 @@ import Script from "next/script";
 const PLAUSIBLE_SCRIPT_URL =
   "https://plausible.io/js/pa-XFfGfDtFtmyoJlLIYR5dv.js";
 const PLAUSIBLE_INIT_SCRIPT = `window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
-plausible.init()`;
+function isAdventUrl(value) {
+  if (!value) return false;
+  try {
+    var path = new URL(value, location.origin).pathname;
+    return path === "/advent" || path.startsWith("/advent/");
+  } catch {
+    return false;
+  }
+}
+plausible.init({transformRequest:function(payload){
+  if (isAdventUrl(location.href) || isAdventUrl(payload.u)) return null;
+  if (isAdventUrl(payload.r)) payload.r = null;
+  return payload;
+}})`;
 
 // The privacy page covers Plausible on the marketing website only, so the
-// docs routes (app/docs, app/docs-host) do not load it. The segment comes
+// docs and campaign routes do not load it. The segment comes
 // from the route tree, so it is also correct behind the docs host rewrite.
-const SEGMENTS_WITHOUT_ANALYTICS = new Set(["docs", "docs-host"]);
+const SEGMENTS_WITHOUT_ANALYTICS = new Set(["docs", "docs-host", "advent"]);
 
 export function SiteAnalytics() {
   const segment = useSelectedLayoutSegment();

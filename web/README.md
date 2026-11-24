@@ -49,3 +49,81 @@ Search runs in the browser against `/docs/search-index.json`, which is built wit
 | `npm run start`    | Run the production build.                 |
 | `npm run preview`  | `build` then `start` in one go.           |
 | `npm run typecheck`| TypeScript-only check, no emit.           |
+
+## Advent of Admin
+
+The December 2026 campaign is off by default. Set the flags at build and runtime
+when enabling it. All variables below are server-only and optional for building
+and running the rest of the site.
+
+| Variable | Behavior when set or unset |
+| --- | --- |
+| `ADVENT_ENABLED` | Set to `true` to enable the pages and API. Otherwise the routes return 404, and site navigation, privacy and sitemap omit the campaign. |
+| `ADVENT_RULES_APPROVED` | Set to `true` after legal review to publish the rules and allow registration. Otherwise the rules page displays a placeholder and registration is closed. |
+| `ADVENT_SUPABASE_URL` | HTTPS project origin for the dedicated EU-region Supabase project. If unset or invalid, the public calendar and door content remain visible and account storage is unavailable. |
+| `ADVENT_SUPABASE_SERVICE_KEY` | Supabase server secret key or legacy service-role key. If unset, storage is unavailable. Keep this out of client variables and source control. |
+| `ADVENT_SESSION_SECRET` | At least 32 bytes of entropy for session, login-link and reminder unsubscribe signatures. If unset or shorter than 32 bytes, accounts and login are unavailable. Changing it invalidates active sessions and unredeemed links. |
+| `ADVENT_ANSWER_PEPPER` | Server-only secret with at least 32 bytes for HMAC-SHA256 door answers. Written door checks and answer setup are unavailable when unset. Set accepted answers again after changing the pepper. |
+| `ADVENT_RESEND_API_KEY` | Enables Resend for sign-in emails and, separately, for door reminders. If unset, `next dev` prints the sign-in link to the server console and production sign-in shows a configuration error. |
+| `ADVENT_REMINDERS_SEND` | Set to `true` to enable reminder delivery when the campaign, API key, sender and signing secret are configured. Unset or any other value runs a count-only dry run. |
+| `CRON_SECRET` | Existing bearer secret for cron authorization. If unset, the reminder route rejects requests. |
+| `ADVENT_EMAIL_FROM` | Sender on a verified Resend domain. If unset while the API key is set, sign-in email is unavailable. |
+| `ADVENT_ADMIN_EMAILS` | Comma-separated list of participant email addresses that can access the admin page. When unset, no account has admin access. |
+| `ADVENT_NOW` | ISO timestamp with a time-zone offset, such as `2026-12-01T06:00:00+01:00`. If unset, invalid, or running in production, the campaign uses the system clock. Login-link and session expiry always use the system clock. |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Existing Redis settings used for sign-in rate limits. If either is unset, sign-in and signup are unavailable. |
+
+Provision the EU Supabase project, enable its Data API, and apply
+`supabase/advent/0001_init.sql` before opening registration. Its tables and
+functions are accessible only to the service role. Configure Redis and a verified
+Resend sender, with open and click tracking disabled for its domain. A sign-in email opens a confirmation page
+so automated mail previews leave the one-time link usable.
+
+Review the draft doors against the desktop release and set accepted answers from
+the campaign admin page. The database stores only HMAC-SHA256 hashes of accepted
+answers. The admin page lists missing questions and answers, draft doors, rules
+approval, and missing launch configuration.
+The admin page can export CSVs for manual prize contact and run each draw once
+after its eligibility window closes. The audit snapshot lists participant IDs
+and weights, the SHA-256 digest and the 32-byte seed needed to replay the draw.
+When a winner account is deleted before prizes are fulfilled, the admin can
+draw a replacement for that slot from the original snapshot. Earlier winners
+are excluded, and the replacement has its own linked audit record. Winners CSVs
+show deleted accounts explicitly and track the current winner for each slot.
+
+The non-winner purge opens 90 days after the grand draw. Set the prize fulfilment
+date in the admin page and delete winner records once that date arrives in Berlin.
+Either purge can remove an admin account, so export the records before purging.
+
+Run `npm run test` and `npm run test:advent-routes` in `web/` on Node.js 22 for
+unit and mocked Next.js route tests. Run `supabase/advent/check-migration.sh`
+from `web/` to exercise the migration in a disposable PostgreSQL cluster.
+Point `ADVENT_POSTGRES_BIN` at a PostgreSQL bin directory if the binaries are
+outside the usual path. The cluster needs the `citext` extension.
+
+### Daily door reminders
+
+Reminders are a separate opt-in from release emails. Participants can turn them
+off in My Advent or use the unsubscribe link in any reminder. A signed link
+works without an account session and expires after 90 days.
+
+The authenticated `GET /api/advent/reminders` and `POST /api/advent/reminders`
+routes use the same handler. Vercel calls GET at 05:05 UTC daily with
+`Authorization: Bearer ${CRON_SECRET}`. An enabled campaign uses each invocation
+to delete expired login tokens and pending signups, and wrong-answer attempts
+older than seven days. Door reminders run only from 1 to 24 December after the
+current Berlin day’s door opens. With delivery off, the job counts eligible
+recipients without claiming them. When the campaign is off, both methods
+return 404.
+
+Keep open and click tracking disabled on the sender domain before turning on
+delivery. Rate limits trust the Vercel-managed IP header on Vercel. Deployments
+outside Vercel share an `unknown` IP bucket regardless of forwarded headers.
+Door answers allow 10 wrong submissions per account and door and 100 across
+accounts and doors per IP, each over a rolling hour.
+
+Each run reserves opted-in participants who still need that day’s completion,
+then sends up to 100 emails per Resend batch. The daily send record prevents
+duplicate email on reruns. A rejected or unconfirmed send stays recorded and
+the job continues with later batches. Check the admin page for the current
+opt-in total, per-door send totals, delivery issues and the HTML and plain-text
+preview.

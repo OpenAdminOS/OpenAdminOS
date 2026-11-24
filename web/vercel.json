@@ -4,6 +4,10 @@
     {
       "path": "/api/flush",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/advent/reminders",
+      "schedule": "5 5 * * *"
     }
   ]
 }
