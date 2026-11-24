@@ -7,7 +7,7 @@ function proxyAuthDetail(at: string, status?: number): string {
 interface ModelServerCheck {
   name: string;
   endpoint: string;
-  endpointSetting: string;
+  endpointSetting?: string;
   defaultPort: string;
   isLocal: boolean;
   startHint: string;
@@ -21,7 +21,9 @@ export function describeModelServerCheckFailure(
   const { name, endpoint, endpointSetting, defaultPort, isLocal, startHint } = server;
   const { httpStatus, stopped } = options;
   const at = `${name} on ${endpoint}`;
-  const checkAddress = `Check ${endpointSetting}, then try again.`;
+  const checkAddress = endpointSetting
+    ? `Check ${endpointSetting}, then try again.`
+    : "Check that the server is running at that address, then try again.";
   // JSON parse errors can contain excerpts of the answer. Never classify or display those excerpts.
   const kind = error instanceof SyntaxError && httpStatus !== undefined ? undefined : classifyNetworkFailure(error);
   const notRunning = kind === "refused" && isLocal && httpStatus === undefined && !stopped;
@@ -30,13 +32,16 @@ export function describeModelServerCheckFailure(
   if (stopped) return result(`The check for ${at} was stopped. Try again to check the server.`);
   switch (kind) {
     case "refused":
-      return result(`The connection to ${at} was refused. ${notRunning ? startHint : `Check that the server is running and listening at that address. ${checkAddress}`}`);
+      return result(`The connection to ${at} was refused. ${notRunning ? startHint : checkAddress}`);
     case "blocked-port": {
       const port = URL.parse(endpoint)?.port;
-      return result(`OpenAdminOS could not check ${at} because ${port ? `port ${port} is blocked` : "the port is blocked"}. ${name}'s default port is ${defaultPort}. Set ${endpointSetting} to the server's listening address on an allowed port, then try again.`);
+      const recovery = endpointSetting
+        ? `Set ${endpointSetting} to the server's listening address on an allowed port, then try again.`
+        : "Use the server's listening address on an allowed port, then try again.";
+      return result(`OpenAdminOS could not check ${at} because ${port ? `port ${port} is blocked` : "the port is blocked"}. ${name}'s default port is ${defaultPort}. ${recovery}`);
     }
     case "dns":
-      return result(`The host name for ${at} could not be resolved. Check DNS and ${endpointSetting}, then try again.`);
+      return result(`The host name for ${at} could not be resolved. Check DNS and ${endpointSetting ?? "the server address"}, then try again.`);
     case "unreachable":
       return result(`The network route to ${at} is unavailable. Check the address and network connection, then try again.`);
     case "reset":
@@ -55,7 +60,7 @@ export function describeModelServerCheckFailure(
       return result(`${at} did not answer in time. Check that the server is running and responsive, then try again.`);
     default:
       return result(httpStatus === undefined
-        ? `OpenAdminOS could not connect to ${at}. Check that the server is running. ${checkAddress}`
+        ? `OpenAdminOS could not connect to ${at}. ${checkAddress}`
         : `${at} answered with a response OpenAdminOS could not read (HTTP ${httpStatus}). Check that the endpoint serves the ${name} model list, then try again.`);
   }
 }

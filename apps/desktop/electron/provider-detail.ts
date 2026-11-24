@@ -27,6 +27,7 @@ import {
   resolveLemonadeEndpoint,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
+  ollamaHostEndpoint,
   type LmStudioEndpointTrust,
   type LmStudioProbeResult,
   type LmStudioProviderOptions,
@@ -138,6 +139,11 @@ export async function readLocalOllamaModelCloud(model: string, address = resolve
 }
 
 export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const endpointSetting = process.env.OPENAGENTS_OLLAMA_URL !== undefined
+    ? "OPENAGENTS_OLLAMA_URL"
+    : ollamaHostEndpoint(process.env.OLLAMA_HOST) !== undefined
+      ? "OLLAMA_HOST"
+      : undefined;
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
@@ -267,9 +273,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const { notRunning, detail } = describeModelServerCheckFailure({
       name: "Ollama",
       endpoint,
-      endpointSetting: process.env.OPENAGENTS_OLLAMA_URL === undefined && process.env.OLLAMA_HOST !== undefined
-        ? "OLLAMA_HOST"
-        : "OPENAGENTS_OLLAMA_URL",
+      endpointSetting,
       defaultPort: "11434",
       isLocal: endpointTrust.isLocal,
       startHint: "Start Ollama with ollama serve, then try again.",
@@ -409,7 +413,6 @@ async function checkLocalOpenAiServer(
         isLocal: false,
       };
   const probe = await server.probe({
-    endpoint,
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
   });

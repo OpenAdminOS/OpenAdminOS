@@ -399,7 +399,11 @@ export async function probeOpenAiCompatibleLlm(
   options: OpenAiCompatibleProviderOptions = {},
 ): Promise<OpenAiCompatibleProbeResult> {
   const { name } = server;
-  const endpoint = resolveOpenAiCompatibleEndpoint(server, options.endpoint);
+  const endpointSetting = options.endpoint === undefined && process.env[server.endpointEnv] !== undefined
+    ? server.endpointEnv
+    : undefined;
+  const resolvedEndpoint = resolveOpenAiCompatibleEndpoint(server, options.endpoint);
+  const endpoint = options.endpoint === undefined ? resolvedEndpoint.replace(/\/$/, "") : resolvedEndpoint;
   const endpointTrust = classifyOpenAiCompatibleEndpoint(name, endpoint);
   const controller = new AbortController();
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
@@ -447,7 +451,7 @@ export async function probeOpenAiCompatibleLlm(
     const { notRunning, detail } = describeModelServerCheckFailure({
       name,
       endpoint,
-      endpointSetting: server.endpointEnv,
+      endpointSetting,
       defaultPort: new URL(server.defaultEndpoint).port,
       isLocal: endpointTrust.isLocal,
       startHint: server.startHint,

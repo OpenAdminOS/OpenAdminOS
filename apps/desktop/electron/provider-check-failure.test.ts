@@ -23,14 +23,21 @@ for (const { id, name, check, env, port, path, list } of checks) {
   describe(`${name} check failures`, () => {
     const provider = providerCatalog.find((entry) => entry.id === id)!;
     const endpoint = `http://127.0.0.1:${port}${path}`;
-    async function run(address = endpoint, options?: Parameters<typeof check>[1]) {
+    async function run(address: string | null = endpoint, options?: Parameters<typeof check>[1]) {
       const previous = process.env[env];
-      process.env[env] = address;
+      const previousHost = process.env.OLLAMA_HOST;
+      if (address === null) {
+        delete process.env[env];
+        if (id === "ollama") delete process.env.OLLAMA_HOST;
+      } else {
+        process.env[env] = address;
+      }
       try {
         return await check(provider, options);
       } finally {
         if (previous === undefined) delete process.env[env];
         else process.env[env] = previous;
+        if (id === "ollama" && previousHost !== undefined) process.env.OLLAMA_HOST = previousHost;
       }
     }
     async function expectFailure(
@@ -54,6 +61,16 @@ for (const { id, name, check, env, port, path, list } of checks) {
       assert.ok(detail.includes(env));
     });
 
+    it("gives recovery for the default endpoint without naming an environment variable", async () => {
+      failFetch(new TypeError("fetch failed"));
+      const result = await run(null);
+      assert.equal(result.status, "error");
+      assert.equal(result.checkFailed, true);
+      assert.ok(result.detail?.includes(`${name} on ${endpoint}`), result.detail);
+      assert.match(result.detail!, /Check that the server is running at that address, then try again\./);
+      assert.doesNotMatch(result.detail!, /OPENAGENTS_OLLAMA_URL|OLLAMA_HOST|OPENADMINOS_LM_STUDIO_URL|OPENADMINOS_LEMONADE_URL/);
+    });
+
     it("keeps a refused local server in the not-installed state", async () => {
       failFetch(fetchFailed(coded("ECONNREFUSED")));
       const result = await run();
@@ -64,7 +81,7 @@ for (const { id, name, check, env, port, path, list } of checks) {
 
     it("reports a remote refusal as a failed check", async () => {
       failFetch(fetchFailed(coded("ECONNREFUSED")));
-      await expectFailure(/was refused\. Check that the server is running/, `http://models.example.test:${port}${path}`);
+      await expectFailure(/was refused\. Check .*_URL, then try again/, `http://models.example.test:${port}${path}`);
     });
 
     const transportFailures: Array<[string, unknown, RegExp]> = [
@@ -82,7 +99,7 @@ for (const { id, name, check, env, port, path, list } of checks) {
       ["request timeout", new DOMException("The operation was aborted", "AbortError"), /did not answer in time\. Check that the server/],
       ["connect timeout", fetchFailed(coded("UND_ERR_CONNECT_TIMEOUT")), /did not answer in time\. Check that the server/],
       ["multiple addresses", fetchFailed(new AggregateError([coded("ECONNREFUSED"), coded("ETIMEDOUT")])), /did not answer in time/],
-      ["unclassified fetch failure", new TypeError("fetch failed"), /OpenAdminOS could not connect.*Check that the server/],
+      ["unclassified fetch failure", new TypeError("fetch failed"), /OpenAdminOS could not connect.*then try again/],
     ];
     for (const [label, error, expected] of transportFailures) {
       it(`reports ${label} as a failed check`, async () => {
