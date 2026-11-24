@@ -177,16 +177,13 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <span className="text-brand-ink">Registry install counts.</span> In
-                packaged production builds, the app can send a small registry
-                install count event when you install a public registry agent.
-                You can disable this in Settings. The event contains the agent
-                slug, app version, operating-system platform, and a yearly
-                per-agent SHA-256 hash derived from a random local install ID.
-                It does not include tenant identifiers, user identifiers,
-                prompts, run results, or Microsoft Graph data. The website
-                endpoint also uses your IP address briefly for rate limiting
-                and stores the deduplication hash for up to one year. These
-                counts are used only to publish aggregate registry stats.
+                packaged builds, the app sends an aggregate install count when
+                you install a public registry agent, unless you turn it off in
+                Settings &gt; Privacy. The event contains only the agent slug,
+                app version, and operating-system platform. The app records
+                locally which agents it has reported this UTC year. The server
+                stores aggregate counts and briefly uses your IP address for rate
+                limiting. It ignores install identifiers from older builds.
               </li>
               <li>
                 <span className="text-brand-ink">Support issue reports.</span> If

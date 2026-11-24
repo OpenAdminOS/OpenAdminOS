@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import {
-  DEDUP_TTL_SECONDS,
+  INSTALL_DAY_TTL_SECONDS,
   RATE_LIMIT_MAX_PER_WINDOW,
   RATE_LIMIT_WINDOW_SECONDS,
   getRedis,
@@ -24,12 +24,8 @@ export const dynamic = "force-dynamic";
  *  - JSON shape + per-field regex validation (`lib/stats/validation.ts`)
  *  - Slug must be present in the live `agents/` directory listing on
  *    GitHub (`lib/stats/slugs.ts`, 1h cache)
- *  - Per-IP rate limit, 30/min sliding window via a fixed bucket key
- *  - Per-(installId, slug) dedup — same machine never counts twice for
- *    the same agent during the current annual digest window. TTL is 1y.
- *
- * Idempotent. Same client retrying with the same `installId` returns
- * 200 with `{ counted: false }`.
+ *  - Per-IP rate limit of 30 requests per minute
+ *  - Desktop deduplication before sending the event
  */
 export async function POST(req: Request) {
   let body: unknown;
@@ -44,11 +40,11 @@ export async function POST(req: Request) {
     const ip = clientIp(req);
 
     const redis = getRedis();
+    const now = new Date();
 
     // 1) Per-IP rate limit. The bucket flips every RATE_LIMIT_WINDOW_SECONDS
-    //    so we don't need a sliding-log structure — good enough for abuse
-    //    deterrence at our traffic level.
-    const bucket = Math.floor(Date.now() / 1000 / RATE_LIMIT_WINDOW_SECONDS);
+    //    to bound traffic without a separate entry for every request.
+    const bucket = Math.floor(now.getTime() / 1000 / RATE_LIMIT_WINDOW_SECONDS);
     const rateKey = keys.rate(ip, bucket);
     const count = await redis.incr(rateKey);
     if (count === 1) {
@@ -68,24 +64,12 @@ export async function POST(req: Request) {
       return jsonError(404, `Unknown agent: ${payload.slug}`);
     }
 
-    // 3) Dedup. `SET NX` returns "OK" only when the key was created;
-    //    `null` means it already existed (a re-install attempt).
-    const dedupKey = keys.dedup(payload.installId, payload.slug);
-    const setResult = await redis.set(dedupKey, "1", { nx: true, ex: DEDUP_TTL_SECONDS });
-    if (setResult === null) {
-      return NextResponse.json({ counted: false, reason: "duplicate" });
-    }
-
-    // 4) Increment pending counter + record this install in the 7d set
-    //    so the cron can compute the trailing-7d count.
-    const now = Date.now();
-    await Promise.all([
-      redis.incr(keys.pendingInstalls(payload.slug)),
-      redis.zadd(keys.installs7d(payload.slug), {
-        score: now,
-        member: payload.installId,
-      }),
-    ]);
+    const dailyKey = keys.dailyInstalls(payload.slug, now.toISOString().slice(0, 10));
+    await redis.multi()
+      .incr(keys.pendingInstalls(payload.slug))
+      .incr(dailyKey)
+      .expire(dailyKey, INSTALL_DAY_TTL_SECONDS)
+      .exec();
 
     return NextResponse.json({ counted: true });
   } catch (error) {
