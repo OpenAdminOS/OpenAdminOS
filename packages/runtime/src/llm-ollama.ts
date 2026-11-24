@@ -308,6 +308,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // The size the latest attempt sent: after a think fallback to a model
         // that replaced the one the request was built for, not the kept one.
         const sent = lastSentCtx;
+        const kept = !retry && sent !== undefined && sent === cachedCtx;
         const sentSizeGiven = counted !== undefined && sent !== undefined && counted.available >= sent;
         if (!sentSizeGiven) forgetSize(sent);
         if (memory) {
@@ -351,6 +352,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               limitTokens: limit,
               model,
               sentToProvider: true,
+              ...(kept ? { ollamaKeptContext: true } : {}),
             });
           }
         }
@@ -362,7 +364,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           return new Error(contextTooSmallMessage(model, counted.requested, counted.available, atModelLimit));
         }
-        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : lastSentCtx !== undefined && lastSentCtx === cachedCtx ? { size: lastSentCtx, kept: true } : undefined, text));
+        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : kept ? { size: sent, kept: true } : undefined, text));
       };
       // The context lookup for this request, by the name as given.
       // Takes the signal of the attempt it belongs to; the lookup has its own timeout.

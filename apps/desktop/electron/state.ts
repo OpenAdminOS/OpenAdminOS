@@ -2406,6 +2406,7 @@ export class AppStateStore {
   }
 
   close(): void {
+    this.stopEmbeddingModelDownload();
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
@@ -2504,6 +2505,7 @@ export class AppStateStore {
    */
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
+    this.embeddingDownload?.abort(new Error("OpenAdminOS is resetting."));
     this.auditLog.freezeSideFiles();
     // The work that writes on its own stops first, so a guard that failed
     // to install would still leave nothing running.
@@ -3340,6 +3342,15 @@ export class AppStateStore {
     }
   }
 
+  private embeddingDownload?: AbortController;
+  private embeddingDownloadsStopped = false;
+
+  /** Stops the app's embedding model pull and prevents new ones before exit. */
+  stopEmbeddingModelDownload(): void {
+    this.embeddingDownloadsStopped = true;
+    this.embeddingDownload?.abort(new Error("OpenAdminOS is closing."));
+  }
+
   /**
    * Pull the embedding model in the background when Ollama is running
    * and the model is missing. Same contract as the index install: never
@@ -3349,30 +3360,35 @@ export class AppStateStore {
    * on the next launch rather than a day later.
    */
   async autoInstallEmbeddingModel(): Promise<void> {
+    const skipped = (reason: string) => console.info("[retrieval] automatic embedding model pull skipped:", reason);
+    if (this.embeddingDownloadsStopped) return skipped("OpenAdminOS is closing.");
+    if (this.localResetStarted) return skipped("OpenAdminOS is resetting.");
+    if (this.embeddingDownload) return skipped("An embedding model check or download is already running.");
+    const controller = new AbortController();
+    this.embeddingDownload = controller;
+    const { signal } = controller;
     try {
       const persisted = await this.read();
-      if (persisted.retrievalAutoInstall === false) return;
+      signal.throwIfAborted();
+      if (persisted.retrievalAutoInstall === false) return skipped("Automatic installation is off.");
       const endpoint = embeddingEndpoint();
-      const state = await embeddingModelState(endpoint);
+      const state = await embeddingModelState(endpoint, undefined, undefined, signal);
+      signal.throwIfAborted();
       if (state.error) throw new Error(state.error);
-      if (!state.ollamaReachable || state.installed) return;
+      if (!state.ollamaReachable) return skipped("Ollama is not reachable.");
+      if (state.installed) return skipped("The embedding model is already installed.");
 
       const lastAttempt = persisted.embeddingModelPullAttemptedAt;
       if (lastAttempt) {
         const age = Date.now() - new Date(lastAttempt).getTime();
-        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
+        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return skipped("A download was attempted in the last 24 hours.");
       }
-      await this.serialize(async () => {
-        const current = await this.read();
-        await this.write({
-          ...current,
-          embeddingModelPullAttemptedAt: new Date().toISOString(),
-        });
-      });
-
+      // Record only settled attempts so quitting during a pull doesn't delay the next launch.
+      const attemptedAt = new Date().toISOString();
       try {
-        await pullEmbeddingModel(endpoint);
+        await pullEmbeddingModel(endpoint, undefined, undefined, signal);
       } catch (error) {
+        signal.throwIfAborted();
         // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
         // A stall of the local Ollama is not a registry failure; its own message names the recovery.
         const message = error instanceof EmbeddingPullStalledError ? error.message :
@@ -3381,22 +3397,25 @@ export class AppStateStore {
         // Like an unreachable Ollama, a stalled one is not the day's attempt, so the next launch tries again.
         const stalled = error instanceof EmbeddingPullStalledError;
         await this.serialize(async () => {
-          const { embeddingModelPullAttemptedAt, ...current } = await this.read();
-          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt }), embeddingModelPullError: message });
+          const { embeddingModelPullAttemptedAt: _previous, ...current } = await this.read();
+          signal.throwIfAborted();
+          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt: attemptedAt }), embeddingModelPullError: message });
         });
+        signal.throwIfAborted();
         this.emitStateChanged("retrieval-embedding-failed");
         throw error;
       }
       await this.serialize(async () => {
         const { embeddingModelPullError: _cleared, ...rest } = await this.read();
-        await this.write(rest);
+        signal.throwIfAborted();
+        await this.write({ ...rest, embeddingModelPullAttemptedAt: attemptedAt });
       });
+      signal.throwIfAborted();
       this.emitStateChanged("retrieval-embedding-installed");
     } catch (error) {
-      console.info(
-        "[retrieval] automatic embedding model pull skipped:",
-        error instanceof Error ? error.message : error,
-      );
+      skipped(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.embeddingDownload = undefined;
     }
   }
 

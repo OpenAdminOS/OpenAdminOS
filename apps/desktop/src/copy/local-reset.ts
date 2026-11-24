@@ -36,6 +36,8 @@ export const LOCAL_RESET_COPY = {
     "The OpenAdminOS enterprise application and the admin consent granted to it stay in each tenant. Revoke them in Microsoft Entra.",
   keepsPolicy: "The IT policy file (policy.json) set by whoever manages this device.",
   keepsExports: "Exports and other files you saved outside the data folder.",
+  keepsOllamaModels: "Models in Ollama's own store stay. To remove the index model, run",
+  removeOllamaIndexModel: "ollama rm nomic-embed-text",
   revokeLink: "How to revoke access in Entra",
   revokeUrl: "https://docs.openadminos.com/trust-model/authentication#disconnecting-and-revoking",
   restartNote: "OpenAdminOS closes and opens again at first run.",
@@ -45,7 +47,7 @@ export const LOCAL_RESET_COPY = {
   phrasePlaceholder: "Type the phrase to enable Reset",
   action: "Reset and restart",
   busyAction: "Resetting",
-  progress: "Closing every organization and stopping background work. OpenAdminOS closes in a moment.",
+  progress: "Closing every organization and stopping background work, including the index model download. OpenAdminOS closes in a moment.",
   restarting: "Reset started. OpenAdminOS is closing and opens again at first run.",
   failedFallback:
     "The reset could not start. Nothing was removed. Try again, or quit OpenAdminOS and remove the data folder by hand, as described in Uninstall and reset in the docs.",

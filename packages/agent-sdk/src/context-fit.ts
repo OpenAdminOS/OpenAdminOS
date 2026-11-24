@@ -1,7 +1,7 @@
 /**
  * Typed reason for a model request that does not fit the model's context
- * window. The runtime raises it before anything is sent, so the UI and the
- * provider switch flow can act on the numbers without parsing a message.
+ * window. The UI and the provider switch flow can act on the numbers without
+ * parsing a message.
  */
 export interface ContextTooSmallFailure {
   code: "context-too-small";
@@ -20,6 +20,8 @@ export interface ContextTooSmallFailure {
    * count was larger than the estimate). Unset: nothing was sent.
    */
   sentToProvider?: boolean;
+  /** Ollama refused a request without counts, and the adapter dropped its kept context size. */
+  ollamaKeptContext?: true;
 }
 
 /** Machine readable reasons a run failed. Extend with new codes as they appear. */
@@ -45,6 +47,9 @@ const formatTokens = (value: number) => value.toLocaleString("en-US");
 
 /** Plain copy for the failure. Names the size needed, the limit, and the ways out. */
 export function contextTooSmallMessage(failure: ContextTooSmallFailure): string {
+  if (failure.ollamaKeptContext === true) {
+    return `Ollama context size too small: This request did not fit in the ${formatTokens(failure.limitTokens)} token context kept from an earlier request.`;
+  }
   const model = failure.model ? `${failure.model}` : "The selected model";
   return (
     `This request needs about ${formatTokens(failure.neededTokens)} tokens of context ` +

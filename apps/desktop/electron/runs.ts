@@ -1,5 +1,6 @@
 import { isRemoteBackedModel, providerForModel } from "@openadminos/agent-sdk";
 import { guardModelFitLlm } from "./intune-chat/model-fit.js";
+import { isOllamaKeptContextFailure } from "../src/shared/ollama-failure.js";
 import { classifyModelFitFailure, isListedHostedModel, isOnDeviceModel, isPlaceholderModel, SELF_HOSTED_PROVIDER_IDS } from "../src/shared/model-fit.js";
 import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -2048,7 +2049,7 @@ export class RunService {
     if (run.status !== "failed" || run.modelFit || run.ollamaCloud || !run.providerId || run.origin !== undefined || run.officeContext) return run;
     // A reply with reasoning and no answer has its own cause and recovery card,
     // whatever its error text (a model name) matches.
-    if (run.failureCause === "reasoning-without-answer") return run;
+    if (run.failureCause === "reasoning-without-answer" || isOllamaKeptContextFailure(run.error, run.failureReason)) return run;
     try {
       // Only when the run turns failed: a later snapshot of a failure already checked keeps what
       // that check found (persistRunSnapshot carries an issue over), so no later state decides it.

@@ -646,8 +646,17 @@ lookup fails. Chat leaves it unset,
 so #211's raise still serves a larger request there. A kept `num_ctx` belongs
 to the model revision the lookup that chose it saw (`/api/show`
 `modified_at`), even when the request finishes after the model was created
-again; a model created again under the same name starts from its own settings. LM Studio reports none for now because its
-context fields could not be verified.
+again; a model created again under the same name starts from its own settings.
+When Ollama fails to load or answer with a kept context size, or refuses it
+without reporting token counts, the adapter drops the kept size. An uncounted
+refusal from a kept size carries `ollamaKeptContext: true` in its typed reason
+and names the kept size in the saved error. The run failure panel and schedule
+status advise re-running first. If the failure repeats, the advice is to free memory
+or choose a smaller model. The run page shows this recovery in place of the
+model-fit offer, including when an app error wraps the original failure or
+the run has a saved offer.
+LM Studio reports no context limit for now because its context fields could
+not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
 punctuation and line breaks separately. Calibrated against OpenAdmin 8B
@@ -2969,7 +2978,7 @@ reinstall restored tenant access with no sign-in (tester finding, 18 Nov,
 macOS). Settings > Data has
 **Reset OpenAdminOS**: a product modal with the data folder, what is removed and
 what stays (the enterprise application and admin consent in each tenant, the IT
-`policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
+`policy.json`, exports, and models already in Ollama's own store), and the typed phrase `RESET OPENADMINOS`, checked again
 in the main process. The impact list scrolls and the buttons stay in view at
 the smallest window height; a refusal from the main process is shown in full.
 Mockup: `docs/mockups/34-local-reset.html`.
@@ -2995,6 +3004,10 @@ Mockup: `docs/mockups/34-local-reset.html`.
   scheduler and the menu bar login item (installed builds), stops the gateway
   and MCP servers and drains every organization's work with a bounded wait
   (the SQLite databases stay open until the process exits), and relaunches.
+- **Local index model download.** Reset cancels the app's Ollama model check
+  or download when the reset marker is committed. If the reset is cancelled,
+  a later automatic install can start a fresh download. On exit the app stops
+  the download once any updater handling of the quit request has finished.
 - **No sign-out before the restart** (decided in review round 22; the brief
   listed it as a phase 1 step). Signing out rewrites the token caches in
   place, and that rewrite cannot be bound to the folder the reset was
@@ -3105,6 +3118,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   rejections and resets are gated the same way. A documentation index
   download is refused once a reset has started but does not hold one: the
   commit aborts it, and it stops by itself after 30 minutes.
+  The reset commit and app quit also abort OpenAdminOS's Ollama index model
+  pull. The dialog gives `ollama rm nomic-embed-text` for admins who want to
+  remove the already downloaded model from Ollama.
 - **Data folder guard** (review round 36). Beneath the writers' own checks,
   the commit wraps every path based change through Node's file system API
   in the main process (writes, appends, folders, removals, renames, copies,

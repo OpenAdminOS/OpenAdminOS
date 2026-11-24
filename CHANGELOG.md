@@ -85,6 +85,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Reset OpenAdminOS and quitting the app stop its Ollama index model check or download. A cancelled reset lets the app download the model again. The reset dialog explains how to remove an index model already stored in Ollama.
+- Runs and schedules advise re-running with the same Ollama model when a kept context size fails, including when Ollama refuses a prompt without reporting token counts or the failure happens while rechecking a plan, proposal, or retry. If it fails again, the app suggests freeing memory or choosing a smaller model.
 - The Agent Team smoke rehearsal supplies Ollama model metadata so it checks on-device planning and verifies that the Chief skips redundant work.
 - Schedules paused for model destination review show a pause notice with a link to review the schedule.
 
