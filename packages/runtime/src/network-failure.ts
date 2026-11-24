@@ -59,13 +59,14 @@ function textOf(error: unknown, depth = 0): string {
 }
 
 /** The kind of network failure, or undefined when the error is not one (an HTTP error, a bad response). */
-export function classifyNetworkFailure(error: unknown): NetworkFailureKind | undefined {
+export function classifyNetworkFailure(error: unknown, isLocal = false): NetworkFailureKind | undefined {
   const text = textOf(error);
   // An explicit proxy or blocked-port error explains any socket cause underneath it.
   for (const [kind, pattern] of REQUEST_SETUP_TEXT) if (pattern.test(text)) return kind;
   const codes = codesOf(error);
   // A dual-stack localhost check can refuse one address while the other address family is unavailable.
-  if (codes.includes("ECONNREFUSED") && codes.every((code) => code === "ECONNREFUSED" || code === "EADDRNOTAVAIL")) return "refused";
+  if (isLocal && codes.includes("ECONNREFUSED") &&
+    codes.every((code) => /^(ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|EADDRNOTAVAIL)$/.test(code))) return "refused";
   for (const code of codes) {
     for (const [kind, pattern] of CODES) if (pattern.test(code)) return kind;
   }

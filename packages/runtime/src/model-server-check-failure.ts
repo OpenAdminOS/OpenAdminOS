@@ -25,7 +25,7 @@ export function describeModelServerCheckFailure(
     ? `Check ${endpointSetting}, then try again.`
     : "Check that the server is running at that address, then try again.";
   // JSON parse errors can contain excerpts of the answer. Never classify or display those excerpts.
-  const kind = error instanceof SyntaxError && httpStatus !== undefined ? undefined : classifyNetworkFailure(error);
+  const kind = error instanceof SyntaxError && httpStatus !== undefined ? undefined : classifyNetworkFailure(error, isLocal);
   const notRunning = kind === "refused" && isLocal && httpStatus === undefined && !stopped;
   const result = (detail: string) => ({ notRunning, detail });
 
