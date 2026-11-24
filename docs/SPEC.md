@@ -114,7 +114,12 @@ maintainer, both on Microsoft Teams and booked on Cal.com under the
 maintainer's account: a 30-minute demo (`cal.com/ugur-koc/openadminos-demo`)
 and a 60-minute call where we build an agent for one of the customer's tasks
 (`cal.com/ugur-koc/openadminos-agent-build`, event title "We build an
-OpenAdminOS agent for you"; the booking form asks what the agent should do).
+OpenAdminOS agent for you"). Both booking forms require a name and email address
+and accept optional notes and additional guests' email addresses. The agent-build
+form also requires an answer to "What should the agent do?" Cal.com processes
+booking details in the United States on our behalf. We keep booking details for
+12 months after the call. Calls use our EU-hosted Microsoft 365 tenant, and we
+do not record them.
 The header shows "Book a demo" as an outlined button next to Download and links
 to `/book`, which presents both calls. The homepage hero and closing section
 link to the demo, and a band after the registry section presents the build
@@ -191,31 +196,35 @@ is the [Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-We
 (LDI NRW) in Düsseldorf. People can complain to any EU data protection
 supervisory authority, in particular where they live or work.
 
-Microsoft 365 Exchange Online hosts the support mailbox. The domain receives
-mail through Exchange Online Protection. Support email is deleted 12 months
-after the request closes, with statutory retention for business correspondence
+Microsoft 365 Exchange Online hosts the support mailbox in our EU tenant. The
+domain receives mail through Exchange Online Protection. Support email is
+deleted 12 months after the request closes, with statutory retention for business correspondence
 for six years and records in the ten-year category for ten years (§ 257 HGB
-and § 147 AO). Booking details are kept for 12 months after the call.
+and § 147 AO).
+
+The privacy notice was last updated on 2026-11-25. Vercel hosts the website and
+APIs on its Pro plan, with server functions in Washington, D.C. (`iad1`).
+Runtime logs include request details such as the user agent. Vercel keeps them
+for one day on Pro and up to 30 days with Observability Plus. The notice states
+the 30-day maximum. No log drains are configured. Build logs contain no visitor
+data.
+
 Plausible stores aggregate statistics only, stores no personal data, and uses
 no cookies. Plausible is hosted in the EU with no third-country transfer.
-For US transfers to Vercel, GitHub, Microsoft, and Cal.com, the privacy notice
-names the EU-US Data Privacy Framework where the provider is certified and the
-standard contractual clauses in their data processing terms. Copies are
-available via the support address. Supabase Inc. is a US processor that hosts
-the website's install counts, pseudonymous rate-limit keys and support report
-deduplication hashes in Frankfurt, Germany (`eu-central-1`). Its data
-processing agreement includes standard contractual clauses for international
-transfers.
-
-<!--
-Privacy notice confirmations for /privacy
-
-- TODO(ugur): Confirm access-log retention for the Vercel plan.
-- TODO(ugur): Confirm the Cal.com field list.
-- TODO(ugur): Confirm the Microsoft Teams hosting location.
-- TODO(ugur): Confirm whether calls are recorded.
-- TODO(ugur): Verify Data Privacy Framework certification for Vercel, GitHub, Microsoft, Cal.com, and Supabase.
--->
+The privacy notice lists safeguards for international transfers by provider.
+Vercel Inc., GitHub, and Microsoft Corporation participate in the EU-U.S. Data
+Privacy Framework, its UK Extension, and the Swiss-U.S. Data Privacy Framework.
+Cal.com, Inc. participates in the EU-U.S. framework and its UK Extension.
+Vercel's data processing addendum includes EU standard contractual clauses
+(SCCs) where applicable. GitHub's privacy statement describes its use of SCCs.
+Microsoft uses SCCs under its data protection addendum for enterprise services.
+Cal.com's data processing agreement uses SCCs for transfers outside its
+framework coverage, including Switzerland. Supabase (Supabase Pte. Ltd.) is
+our Singapore-based processor for install counts, pseudonymous rate-limit keys,
+and support report deduplication hashes. It hosts the database in Frankfurt,
+Germany (AWS `eu-central-1`). For international transfers to Supabase, we rely
+on the SCCs in its data processing agreement. Copies of the safeguards are
+available via the support address.
 
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
