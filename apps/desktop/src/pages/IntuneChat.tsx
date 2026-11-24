@@ -3203,7 +3203,7 @@ function ChatNotices({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {onRetry ? (
-              <Button size="sm" variant="secondary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button>
+              <Button size="sm" variant="primary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button>
             ) : (
               <>
                 {onReload ? <Button size="sm" variant="secondary" onClick={onReload}>Reload chat</Button> : null}

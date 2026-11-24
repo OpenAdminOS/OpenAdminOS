@@ -8,7 +8,7 @@ import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import { partIdsFor, qualifyScope, requestedScopes } from "@openadminos/agent-sdk";
+import { partIdsFor, providerCatalog, qualifyScope, requestedScopes } from "@openadminos/agent-sdk";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -497,7 +497,7 @@ describe("Intune Chat host service", () => {
     }
   });
 
-  it("falls back to deterministic streaming when agentic protocol repair fails", async () => {
+  it("stores a failed answer when local agentic protocol repair fails without a cache match", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";
     const statePath = join(dir, "state.json");
@@ -577,20 +577,20 @@ describe("Intune Chat host service", () => {
         () => undefined,
       );
 
-      assert.equal(result.assistantMessage.status, "completed");
-      assert.equal(result.assistantMessage.content, "Deterministic answer.");
-      assert.match(result.assistantMessage.engineNotice ?? "", /malformed tool JSON/i);
+      assert.equal(result.assistantMessage.status, "failed");
+      assert.match(result.assistantMessage.content, /^The local model did not return a valid tool request\./);
+      assert.equal(result.assistantMessage.engineNotice, undefined);
       assert.equal(result.assistantMessage.toolTrace?.length ?? 0, 0);
       const saved = await store.getIntuneChatMessages(result.conversation.id);
-      assert.equal(saved[1]?.content, "Deterministic answer.");
-      assert.match(saved[1]?.engineNotice ?? "", /malformed tool JSON/i);
+      assert.equal(saved[1]?.content, result.assistantMessage.content);
+      assert.equal(saved[1]?.status, "failed");
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("keeps fallback aggregates on the pre-investigation snapshot after a mid-investigation refresh", async () => {
+  it("keeps hosted fallback aggregates on the pre-investigation snapshot after a mid-investigation refresh", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";
     const statePath = join(dir, "state.json");
@@ -598,8 +598,9 @@ describe("Intune Chat host service", () => {
       statePath,
       JSON.stringify(
         {
-          activeProviderId: "ollama",
-          activeModelByProviderId: { ollama: "agg-model" },
+          activeProviderId: "anthropic",
+          providerChosenByUser: true,
+          activeModelByProviderId: { anthropic: "agg-model" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -686,12 +687,17 @@ describe("Intune Chat host service", () => {
       statsApiUrl: "",
       graphFactory: () => graph,
       llmFactory: () => llm,
+      providerListFactory: () => providerCatalog.map((provider) => provider.id === "anthropic"
+        ? { ...provider, status: "available", models: [llm.defaultModel!] } : provider),
     });
 
     try {
       await store.setChatInvestigationMode("always-agentic");
       const result = await store.streamIntuneChatMessage(
-        { content: "Which users should I review?" },
+        {
+          content: "Which users should I review?",
+          hostedProviderConsent: { tenantId: "tenant-1", providerId: "anthropic", model: llm.defaultModel, acknowledgedAt: new Date().toISOString() },
+        },
         () => undefined,
       );
 
@@ -735,7 +741,7 @@ describe("Intune Chat host service", () => {
     }
   });
 
-  it("keeps non-streaming fallback aggregates on the pre-investigation snapshot", async () => {
+  it("keeps non-streaming hosted fallback aggregates on the pre-investigation snapshot", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";
     const statePath = join(dir, "state.json");
@@ -743,8 +749,9 @@ describe("Intune Chat host service", () => {
       statePath,
       JSON.stringify(
         {
-          activeProviderId: "ollama",
-          activeModelByProviderId: { ollama: "agg-model-sync" },
+          activeProviderId: "anthropic",
+          providerChosenByUser: true,
+          activeModelByProviderId: { anthropic: "agg-model-sync" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -833,12 +840,15 @@ describe("Intune Chat host service", () => {
       statsApiUrl: "",
       graphFactory: () => graph,
       llmFactory: () => llm,
+      providerListFactory: () => providerCatalog.map((provider) => provider.id === "anthropic"
+        ? { ...provider, status: "available", models: [llm.defaultModel!] } : provider),
     });
 
     try {
       await store.setChatInvestigationMode("always-agentic");
       const result = await store.sendIntuneChatMessage({
         content: "Which users should I review?",
+        hostedProviderConsent: { tenantId: "tenant-1", providerId: "anthropic", model: llm.defaultModel, acknowledgedAt: new Date().toISOString() },
       });
 
       assert.equal(result.assistantMessage.status, "completed");
@@ -2125,6 +2135,7 @@ for (const path of ["send", "stream"] as const) {
       }),
     });
     try {
+      await store.setChatInvestigationMode("always-deterministic");
       const input = { content: "Show devices with security alerts" };
       const result = path === "send"
         ? await store.sendIntuneChatMessage(input)

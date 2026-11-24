@@ -1233,7 +1233,14 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     if (reasoningWithoutAnswerInChain(caught)) throw caught;
     throw new Error(`the ${entry.serverName} query could not be written: ${caught instanceof Error ? caught.message : String(caught)}. Nothing was sent to ${entry.host}.`);
   }
-  const { args, checked } = canonicalMcpArgs(entry, validateMcpArgs(entry, proposed), hooks.references(entry.serverId));
+  const validated = validateMcpArgs(entry, proposed);
+  // This is a title search inside the M365 roadmap, not a product selector.
+  // A bare suite name does not narrow the list.
+  if (entry.serverId === "release-communications" && entry.tool === "get_recent_m365_roadmaps" &&
+      typeof validated.search === "string" && /^(?:microsoft\s*365|office\s*365|o365|m365)$/i.test(validated.search.trim())) {
+    delete validated.search;
+  }
+  const { args, checked } = canonicalMcpArgs(entry, validated, hooks.references(entry.serverId));
   written.args = args;
   // Each value is checked as plain canonical text. Checking serialized
   // JSON would compare tenant values against escaped quotes and backslashes.

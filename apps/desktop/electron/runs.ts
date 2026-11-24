@@ -2046,10 +2046,9 @@ export class RunService {
    * when it failed, never later against changed provider settings.
    */
   private async withModelFitIssue(run: RunRecord): Promise<RunRecord> {
-    if (run.status !== "failed" || run.modelFit || run.ollamaCloud || !run.providerId || run.origin !== undefined || run.officeContext) return run;
-    // A reply with reasoning and no answer has its own cause and recovery card,
-    // whatever its error text (a model name) matches.
-    if (run.failureCause === "reasoning-without-answer" || isOllamaKeptContextFailure(run.error, run.failureReason)) return run;
+    if (run.status !== "failed" || run.modelFit || run.ollamaCloud || run.ollamaOffDevice || !run.providerId || run.origin !== undefined || run.officeContext) return run;
+    const reasoningOnly = run.failureCause === "reasoning-without-answer";
+    if (!reasoningOnly && isOllamaKeptContextFailure(run.error, run.failureReason)) return run;
     try {
       // Only when the run turns failed: a later snapshot of a failure already checked keeps what
       // that check found (persistRunSnapshot carries an issue over), so no later state decides it.
@@ -2057,7 +2056,9 @@ export class RunService {
       // Classified first, so an unrelated failure (a Graph permission error) is saved without
       // waiting on provider discovery; only a fit candidate checks where its model runs.
       const context = { providerId: run.providerId, model: run.model, isLocal: true };
-      const issue = classifyModelFitFailure(run.failureReason ?? run.error, context) ?? classifyModelFitFailure(run.error, context);
+      const issue = reasoningOnly
+        ? classifyModelFitFailure("thinking-only", context)
+        : classifyModelFitFailure(run.failureReason ?? run.error, context) ?? classifyModelFitFailure(run.error, context);
       if (!issue) return run;
       const provider = (await this.host.listProviders()).find((entry) => entry.id === run.providerId);
       if (!provider || !isOnDeviceModel(provider, run.model)) return run;

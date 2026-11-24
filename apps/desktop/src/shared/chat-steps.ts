@@ -124,7 +124,10 @@ export function egressEntries(steps: readonly IntuneChatStep[]): EgressEntry[] {
     // Graph refreshes and reads send requests to Microsoft Graph (decision 2026-11-04).
     if (step.origin === "graph" && step.status !== "blocked") add(step, "requests", step.detail ? `${step.title}: ${step.detail}` : step.title);
     // The host clears sent text when a call was blocked or failed before it reached the host.
-    if (step.kind === "mcp" && step.status !== "blocked" && step.sent) add(step, "search text", step.sent);
+    if (step.kind === "mcp" && step.status !== "blocked" && step.sent !== undefined) {
+      if (step.sent) add(step, "search text", step.sent);
+      else add(step, "a request", `${step.title}. The request had no arguments.`);
+    }
     if (step.origin === "model" && step.kind === "answer") add(step, "answer context", ANSWER_CONTEXT_DETAIL);
     if (step.origin === "model" && step.kind === "tool") add(step, "search text", step.detail ? `${step.title}: ${step.detail}` : step.title);
   }

@@ -26,7 +26,7 @@ import {
   sourceExcerpt,
   validTitle,
 } from "./chat-steps.js";
-import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
+import { asksAboutMicrosoftRoadmap, classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
 import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { TenantValueIndex } from "./tenant-values.js";
@@ -48,6 +48,27 @@ function kind(question: string): string {
 }
 
 describe("question classification", () => {
+  it("recognizes public roadmaps without diverting roadmap authoring or renewal questions", () => {
+    for (const question of [
+      "are there any relevant roadmap items for my m365 tenant?",
+      "any roadmaps for Microsoft 365?",
+    ]) assert.equal(asksAboutMicrosoftRoadmap(question), true, question);
+    for (const question of [
+      "how do I create a roadmap for our Intune rollout in my tenant?",
+      "how can we build our own Intune rollout roadmap?",
+      "what is coming up for renewal in my tenant?",
+      "what's coming up for expiry in my tenant?",
+    ]) assert.equal(asksAboutMicrosoftRoadmap(question), false, question);
+    for (const question of [
+      "which devices are on the latest Windows feature update",
+      "what changed in my tenant",
+      "what's new in Intune for my devices",
+    ]) {
+      assert.equal(asksAboutMicrosoftRoadmap(question), false, question);
+      assert.equal(kind(question), "tenant", question);
+    }
+  });
+
   it("keeps docs questions off the tenant even when they name a platform", () => {
     for (const question of [
       "What does the microsoft learn say about defender for macos?",

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router";
 import { describe, expect, it } from "vitest";
 
-import { createMockAgent, createMockAppState, makeMockBridge, renderRoute, renderWithAppState } from "../test/test-utils";
+import { createAwaitingConfirmationRun, createMockAgent, createMockAppState, makeMockBridge, renderRoute, renderWithAppState } from "../test/test-utils";
 import Agents from "./Agents";
 
 function ScheduleReviewRoute() {
@@ -52,5 +52,25 @@ describe("Schedules banners", () => {
     const alert = (await screen.findByText("Latest scheduled run failed: Ollama is unavailable.")).closest('[role="alert"]')!;
     expect(within(alert as HTMLElement).getByRole("link", { name: "Open runs" })).toHaveAttribute("href", "/runs?filter=failed");
     expect(screen.queryByRole("button", { name: "Review schedule" })).toBeNull();
+  });
+
+  it("links a reasoning-only scheduled failure to its run page", async () => {
+    const run = createAwaitingConfirmationRun({
+      id: "scheduled-reasoning", status: "failed", trigger: "schedule", providerId: "ollama",
+      error: 'Ollama returned only reasoning from "llama3.1" and no answer.',
+    });
+    const state = createMockAppState({
+      runs: [run],
+      schedulerStatus: { supported: false, enabled: false, lastWakeAt: run.queuedAt, lastError: run.error! },
+    });
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents?filter=scheduled",
+      bridge: makeMockBridge({}, state),
+    });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Latest scheduled run failed: Model reasoned without answering.");
+    expect(within(alert).getByRole("link", { name: "Open run" })).toHaveAttribute("href", "/runs/scheduled-reasoning");
+    expect(within(alert).queryByRole("button")).toBeNull();
   });
 });
