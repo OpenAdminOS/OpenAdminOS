@@ -54,6 +54,15 @@ it("complete preload passes the old page/row caps and deduplicates IDs", async (
   assert.equal(requests,12); assert.equal(result.rows.length,1201); assert.equal(result.pageLimitReached,false);
 });
 
+it("keeps @odata.count only when the request asked for it and it covers the received rows", async () => {
+  const page = (count: number) => ({request:async()=>({value:[{id:"a"},{id:"b"}],"@odata.count":count})} as unknown as RunGraphApi);
+  // mobileApps answers with an unsolicited "@odata.count": 0.
+  assert.equal((await fetchGraphCachePages(page(0),{path:"/deviceAppManagement/mobileApps"})).totalCount, undefined);
+  assert.equal((await fetchGraphCachePages(page(5),{path:"/deviceAppManagement/mobileApps"})).totalCount, undefined);
+  assert.equal((await fetchGraphCachePages(page(5),{path:"/users",query:{$count:"true"}})).totalCount, 5);
+  assert.equal((await fetchGraphCachePages(page(1),{path:"/users",query:{$count:"true"}})).totalCount, undefined);
+});
+
 it("exactly reaching the row cap on the last page is complete", async () => {
   const graph = {request:async()=>({value:Array.from({length:1000},(_,i)=>({id:String(i)}))})} as unknown as RunGraphApi;
   assert.equal((await fetchGraphCachePages(graph,{path:"/users"})).pageLimitReached,false);

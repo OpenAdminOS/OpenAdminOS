@@ -6,7 +6,7 @@ import { Route, Routes, useLocation } from "react-router";
 import IntuneChat, { ChatAnswerTable, createHostedBatchProviderConsent } from "./IntuneChat";
 import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
-import { DataBoundaryProvider, useAppState } from "../state";
+import { ConversationWorkspaceProvider, DataBoundaryProvider, useAppState, useConversations } from "../state";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
@@ -2750,4 +2750,52 @@ it("exports 10,000 cached rows beyond the general text-file size limit", async (
   expect(exported.content.length).toBeLessThan(8 * 1024 * 1024);
   expect(exported.content.trimEnd().split("\n")).toHaveLength(10_001);
   expect(exported.content).toContain("app-9999,");
+});
+
+it.each([
+  ["cache", 3, true],
+  ["live", 3, false],
+  ["cache", 0, false],
+  ["cache", 3, false, "other"],
+  ["cache", 3, false, "unknown"],
+  ["cache", 3, false, "multi"],
+  ["cache", 3, false, "error"],
+  ["cache", 3, false, "pending"],
+] as const)("offers the cached-data link for source %s with %s rows when eligible", async (source, rows, visible, scenario?) => {
+  const conversation: IntuneChatConversation = {
+    id: "cache-footer", title: "Device inventory", tenantId: scenario === "other" ? "tenant-2" : "tenant-1",
+    ...(scenario === "multi" || scenario === "pending" ? { scopeKind: "multi-tenant" } : {}),
+    createdAt: "2026-11-24T09:00:00.000Z", updatedAt: "2026-11-24T09:00:00.000Z",
+  };
+  const bridge = makeMockBridge({
+    listIntuneChatConversations: vi.fn(async () => scenario === "pending" || scenario === "unknown" ? [] : [conversation]),
+    getIntuneChatMessages: vi.fn(async (): Promise<IntuneChatMessage[]> => [{
+      id: "cache-answer", role: "assistant", conversationId: conversation.id, status: "completed",
+      createdAt: conversation.createdAt, content: "Device inventory is ready.",
+      sources: [{ resource: "managedDevices", label: "Managed devices", source, rows, ...(scenario === "error" ? { error: "Refresh failed" } : {}), refreshedAt: conversation.updatedAt }],
+    }]),
+  });
+  function PendingChat() {
+    const { setPendingConversation } = useConversations();
+    return <>
+      <button onClick={() => setPendingConversation(conversation)}>Set pending conversation</button>
+      <IntuneChat />
+    </>;
+  }
+  renderRoute(scenario === "pending"
+    ? <ConversationWorkspaceProvider><PendingChat /></ConversationWorkspaceProvider>
+    : <IntuneChat />, { path: "/chat/:conversationId", route: "/chat/cache-footer", bridge });
+  if (scenario === "pending") {
+    await screen.findByRole("heading", { name: "Conversation not found" });
+    fireEvent.click(screen.getByRole("button", { name: "Set pending conversation" }));
+    const answer = await screen.findByText("Device inventory is ready.");
+    expect(within(answer.closest("[data-message-id]") as HTMLElement).getByText("Multiple tenants")).toBeInTheDocument();
+  } else if (scenario === "other" || scenario === "unknown") {
+    await screen.findByRole("heading", { name: "Conversation not found" });
+  } else {
+    await screen.findByText("Device inventory is ready.");
+  }
+  const link = screen.queryByRole("link", { name: /View cached data/ });
+  if (visible) expect(link).toHaveAttribute("href", "/settings/data?resource=managedDevices");
+  else expect(link).not.toBeInTheDocument();
 });

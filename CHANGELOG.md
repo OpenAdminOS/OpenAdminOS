@@ -22,6 +22,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Highlights
 
+- Browse the active organization's cached rows in Settings > Data or from a Chat answer. Search and page through rows, see cache coverage, and open an individual JSON preview. Open previews refresh with the cache, and the browser closes when you switch organizations.
 - Manage each company as an organization. Use Connections to connect Intune, Entra, and Defender individually and see what each connection reads or sends.
 - Open Chat without signing in to Microsoft 365. Choose a model, ask documentation questions, and connect a service when a question needs tenant data.
 - Deploy `policy.json` to set the provider and model, allow specific public references, and lock settings for managed installs. Allowing `ollama` includes Ollama Cloud with hosted confirmation. To keep Ollama local, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on this device.

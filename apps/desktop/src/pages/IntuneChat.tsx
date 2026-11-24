@@ -3,7 +3,7 @@ import { hasRememberedHostedChatConsent, rememberHostedChatConsent } from "../sh
 import { OLLAMA_CLOUD_NAME, hostedOllamaDestination, type HostedOllamaDestination, isOnDeviceModel, isRemoteBackedModel, providerForModel, resolveRunModel } from "@openadminos/agent-sdk";
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
@@ -2376,9 +2376,9 @@ function IntuneChatContent() {
                   const suggestedAgents = mergeSuggestedAgents(
                     message.agentSuggestions,
                   );
-                  const messageConversation =
-                    conversations.find((entry) => entry.id === message.conversationId) ??
-                    activeConversation;
+                  const knownConversation = conversations.find((entry) => entry.id === message.conversationId);
+                  const messageConversation = knownConversation ??
+                    (activeConversation?.id === message.conversationId ? activeConversation : undefined);
                   const messageTenant = messageConversation?.tenantId
                     ? tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
@@ -2404,6 +2404,7 @@ function IntuneChatContent() {
                         copied={message.id === copiedMessageId}
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
+                        canBrowseCache={Boolean(activeTenant && knownConversation?.tenantId === activeTenant.id)}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
                         liveModelFit={modelFitOfferShown && modelFitOffer?.assistantMessageId === message.id}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
@@ -4632,6 +4633,7 @@ function ChatMessageBubble({
   stopping,
   copied,
   latestAssistant,
+  canBrowseCache,
   tenant,
   liveModelFit = false,
   multiTenant,
@@ -4649,6 +4651,7 @@ function ChatMessageBubble({
   stopping: boolean;
   copied: boolean;
   latestAssistant: boolean;
+  canBrowseCache: boolean;
   tenant?: TenantRecord;
   /** The live model fit notice speaks for this answer. */
   liveModelFit?: boolean;
@@ -4669,6 +4672,11 @@ function ChatMessageBubble({
   const bodyContent = message.content.replace(/\n\nDetected matching agent: [^\n]*$/, "");
   const displayContent = hasWebSources ? bodyContent.split("\n\nPublic web sources:")[0] : bodyContent;
   const timestamp = formatDateTime(message.createdAt);
+  const cacheSources = new Map(
+    (message.sources ?? [])
+      .filter((source) => !source.error && source.source === "cache" && source.rows > 0)
+      .map((source) => [source.resource, source]),
+  );
 
   if (isUser) {
     return (
@@ -4720,6 +4728,11 @@ function ChatMessageBubble({
       {message.dataTables?.map((table, index) => <ChatAnswerTable key={index} table={table} />)}
       <AnswerSources trace={message.toolTrace ?? []} />
       {!progress && displayContent ? <SourceList message={message} content={displayContent} /> : null}
+      {!progress && canBrowseCache && !multiTenant ? [...cacheSources.values()].map((source) => (
+        <Link key={source.resource} className="mr-3 text-sm text-[var(--color-accent)] underline" to={`/settings/data?resource=${source.resource}`}>
+          View cached data · {source.label}
+        </Link>
+      )) : null}
       {!progress ? (
         <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
           <IconButton

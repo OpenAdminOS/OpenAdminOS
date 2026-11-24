@@ -1459,6 +1459,26 @@ export interface IntuneChatConversation {
   multiTenantJobId?: string;
 }
 
+export interface GraphCachePageRequest {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  offset: number;
+  limit: number;
+  search?: string;
+}
+
+export type GraphCacheDetailRequest = Pick<GraphCachePageRequest, "tenantId" | "resource"> & { id: string };
+
+export type GraphCacheDetail =
+  | { status: "ready"; json: string; truncated: boolean }
+  | { status: "unreadable" | "missing" };
+
+export interface GraphCachePage {
+  offset: number;
+  total: number;
+  rows: Array<{ id: string; name: string | null; user: string | null }>;
+}
+
 export interface IntuneChatSource {
   resource: GraphCacheResourceKind;
   label: string;
@@ -3666,6 +3686,8 @@ export interface OpenAdminOSApi {
   startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;
   cancelGraphCachePreload(tenantId: string): Promise<void>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
+  readGraphCacheRow(input: GraphCacheDetailRequest): Promise<GraphCacheDetail>;
+  browseGraphCache(input: GraphCachePageRequest): Promise<GraphCachePage>;
   getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
   getDriftTimeline?(input: DriftTimelineInput): Promise<DriftTimelineResult>;
   getDriftEntryDetail?(input: DriftEntryDetailInput): Promise<DriftEntryDetail>;
