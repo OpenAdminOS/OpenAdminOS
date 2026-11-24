@@ -2412,6 +2412,42 @@ export class IntelligenceSqliteStore {
     }
   }
 
+  browseGraphCache(
+    input: import("@openadminos/agent-sdk").GraphCachePageRequest,
+  ): import("@openadminos/agent-sdk").GraphCachePage {
+    const search = input.search?.trim().toLowerCase() ?? "";
+    const limit = Math.max(1, Math.min(200, input.limit));
+    const filter = "tenant_id = ? AND resource = ? AND instr(COALESCE(NULLIF(search_text, ''), lower(raw_json)), ?) > 0";
+    const args = [input.tenantId, input.resource, search];
+    const { total } = this.db.prepare(
+      `SELECT COUNT(*) AS total FROM graph_resources WHERE ${filter}`,
+    ).get(...args) as { total: number };
+    const offset = input.offset < total
+      ? input.offset
+      : Math.max(0, Math.floor((total - 1) / limit) * limit);
+    const rows = this.db.prepare(
+      `SELECT graph_id, display_name, user_principal_name, raw_json
+       FROM graph_resources WHERE ${filter}
+       ORDER BY lower(COALESCE(display_name, graph_id)), graph_id
+       LIMIT ? OFFSET ?`,
+    ).all(...args, limit, offset) as unknown as Array<{
+      graph_id: string;
+      display_name: string | null;
+      user_principal_name: string | null;
+      raw_json: string;
+    }>;
+    return {
+      offset,
+      total,
+      rows: rows.map((row) => ({
+        id: row.graph_id,
+        name: row.display_name,
+        user: row.user_principal_name,
+        data: JSON.parse(row.raw_json) as unknown,
+      })),
+    };
+  }
+
   queryGraphCache(input: {
     tenantId: string;
     resource: GraphCacheResourceKind;

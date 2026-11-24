@@ -831,7 +831,10 @@ playback and backend work. Local voice remains recording-based, rather than an a
 listening barge-in session.
 
 Data lives in **Settings > Data**, with all 45 supported read-resource types
-selected by default. Search and attention filters do not change the selected
+selected by default. Browse opens a read-only view of the active organization's
+local rows with search, pagination, refresh time, partial coverage and full row
+JSON. Chat links to the same view for resources used in an answer.
+Search and attention filters do not change the selected
 refresh scope. Manual preloads expose progress, cancellation and incomplete-result
 retry. Scheduled refresh uses the same complete collection path. It follows all
 Graph `/beta` continuation links, deduplicates IDs and preserves previous complete

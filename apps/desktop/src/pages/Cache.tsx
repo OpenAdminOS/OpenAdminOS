@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Modal, ModalHeader } from "../components/Modal";
 import {
@@ -25,6 +25,7 @@ import {
   type ServiceId,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
+import { CacheBrowser } from "./CacheBrowser";
 
 type CacheResource = GraphCacheStatus["resources"][number];
 type ClearTarget = "chat" | "graph" | null;
@@ -144,6 +145,15 @@ export function DataSettingsSection() {
         .at(-1),
     [status],
   );
+  const requestedResource = new URLSearchParams(location.search).get("resource");
+  const browserResource = status?.tenantId === tenantId
+    ? status?.resources.find((resource) => resource.resource === requestedResource && !resource.notGrantedService)
+    : undefined;
+  const closeBrowser = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete("resource");
+    navigate({ search: params.toString(), hash: location.hash }, { replace: true });
+  };
   const job = status?.preload;
   const running = busy || job?.status === "running";
 
@@ -240,22 +250,29 @@ export function DataSettingsSection() {
         sortable: true,
         sortValue: (resource) => resource.label,
         render: (resource) => (
-          <label className="flex min-w-44 items-center gap-2 text-base font-medium text-[var(--color-text)]">
-            <input
-              type="checkbox"
-              checked={selected.has(resource.resource)}
-              disabled={running || Boolean(resource.notGrantedService)}
-              onChange={(event) =>
-                setSelected((current) => {
-                  const next = new Set(current);
-                  if (event.target.checked) next.add(resource.resource);
-                  else next.delete(resource.resource);
-                  return next;
-                })
-              }
-            />
-            {resource.label}
-          </label>
+          <div className="min-w-44 space-y-1">
+            <label className="flex items-center gap-2 text-base font-medium text-[var(--color-text)]">
+              <input
+                type="checkbox"
+                checked={selected.has(resource.resource)}
+                disabled={running || Boolean(resource.notGrantedService)}
+                onChange={(event) =>
+                  setSelected((current) => {
+                    const next = new Set(current);
+                    if (event.target.checked) next.add(resource.resource);
+                    else next.delete(resource.resource);
+                    return next;
+                  })
+                }
+              />
+              {resource.label}
+            </label>
+            {!resource.notGrantedService ? (
+              <Link className="ml-5 text-sm text-[var(--color-accent)] underline" to={`?resource=${resource.resource}`} aria-label={`Browse ${resource.label}`}>
+                Browse
+              </Link>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -605,6 +622,17 @@ export function DataSettingsSection() {
         </div>
       ) : null}
 
+      {activeTenant && browserResource ? (
+        <CacheBrowser key={`${activeTenant.id}:${browserResource.resource}`} tenantId={activeTenant.id} resource={browserResource} onClose={closeBrowser} />
+      ) : requestedResource && !activeTenant ? (
+        <Modal open onClose={closeBrowser}>
+          <ModalHeader title="No organization is active" subtitle="Select a connected organization to browse cached data." onClose={closeBrowser} />
+        </Modal>
+      ) : requestedResource && status?.tenantId === tenantId && status ? (
+        <Modal open onClose={closeBrowser}>
+          <ModalHeader title="Cache resource unavailable" subtitle="Close this view and choose an available resource from Data." onClose={closeBrowser} />
+        </Modal>
+      ) : null}
       <ClearLocalDataModal
         target={clearTarget}
         activeTenantName={activeTenant?.displayName}

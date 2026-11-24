@@ -4972,6 +4972,18 @@ export class AppStateStore {
     return this.chatService.getMultiTenantAgentBatch(id);
   }
 
+  async browseGraphCache(input: import("@openadminos/agent-sdk").GraphCachePageRequest) {
+    return this.serialize(async () => {
+      const persisted = await this.read();
+      if (persisted.activeTenantId !== input.tenantId ||
+          !persisted.tenants.some((tenant) => tenant.id === input.tenantId) ||
+          !this.tenantLifecycle.isWritable(input.tenantId)) {
+        throw new Error("Select the connected organization before browsing its cache.");
+      }
+      return this.requireIntelligenceStore().browseGraphCache(input);
+    });
+  }
+
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
     return this.chatService.getGraphCacheStatus(tenantId);
   }

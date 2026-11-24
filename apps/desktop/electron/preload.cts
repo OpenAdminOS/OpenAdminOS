@@ -266,6 +266,7 @@ const api: OpenAdminOSApi = {
   cancelGraphCachePreload: (tenantId) => ipcRenderer.invoke("openadminos:cancel-graph-cache-preload", tenantId),
   refreshGraphCache: (options) =>
     ipcRenderer.invoke("openadminos:refresh-graph-cache", options),
+  browseGraphCache: (input) => ipcRenderer.invoke("openadminos:browse-graph-cache", input),
   getGraphCacheStatus: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-status", tenantId),
   getDriftTimeline: (input) =>

@@ -466,6 +466,7 @@ export function makeMockBridge(
       finishedAt: now,
       resources: [],
     })),
+    browseGraphCache: vi.fn(async () => ({ offset: 0, total: 0, rows: [] })),
     getGraphCacheStatus: vi.fn(async () => createGraphCacheStatus(appState.activeTenantId)),
     getGraphCacheRefreshSchedule: vi.fn(async () => ({
       enabled: false,
