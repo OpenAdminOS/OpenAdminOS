@@ -582,7 +582,7 @@ it('records a fit issue on a failed run only after confirming its model ran on t
   assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
 });
 
-it('offers no model fit for a reply with reasoning and no answer whose text reads like a context failure', async () => {
+it('records reasoning-only model fit from the typed failure cause before reading context text', async () => {
   const h = harness();
   Object.assign(h.host, {
     listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['exceed_context_size_error:latest'], defaultModel: 'exceed_context_size_error:latest', isLocal: true }],
@@ -593,7 +593,9 @@ it('offers no model fit for a reply with reasoning and no answer whose text read
     error: 'Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give exceed_context_size_error:latest 16,384, usually because free memory ran out.' } as unknown as RunRecord;
   await h.host.write({ ...h.state(), runs: [{ ...failed, status: 'running' }] as RunRecord[] });
   await h.service.persistRunSnapshot(failed);
-  assert.equal(h.state().runs.find((run) => run.id === 'r5')?.modelFit, undefined);
+  assert.deepEqual(h.state().runs.find((run) => run.id === 'r5')?.modelFit, {
+    reason: 'thinking-only', providerId: 'ollama', model: 'exceed_context_size_error:latest',
+  });
 });
 
 it('offers nothing for a hosted provider failure that reads like a context failure', async () => {

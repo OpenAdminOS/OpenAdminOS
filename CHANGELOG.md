@@ -6,11 +6,19 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Conditional Access explainer 1.2.0 (needs 0.7.3-nightly.20261123094040 or later) sends one compact record per policy, so a typical set of about 100 policies fits OpenAdmin 8B's 16k context, and the review now leads with concrete recommended changes, maps coverage and explains what each group of policies does.
+- When an on-device model reasons without answering during an agent run, the failed run offers other on-device models and configured hosted providers, including for older failures from script agents. Hosted retries require a run review that names where prompts and data go.
+
 ### Changed
 
 ### Removed
 
 ### Fixed
+
+- Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
+- Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance. If the source is missing or turned off, Chat points to Marketplace.
+- When a local investigation fails, Chat explains what was checked and offers a retry or model choice. If the roadmap could not be checked, Chat says so in the answer.
+- When Chat can recover an answer from a matching cached device query, it uses the same computed result for the count and the device list.
 
 ### Security
 

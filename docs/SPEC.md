@@ -475,9 +475,10 @@ answer the broker never handled (a refused request file) is none; an error
 without an id is the script's own, even with the same text as a failure it
 handled, so the output is never parsed for it, and every matching failure must
 be this cause; that recorded failure also decides before the output is read
-for a context size refusal), and the failure panel shows only the
-"Model reasoned without answering" card; such a run gets no model fit offer
-from text that reads like a context limit, and Chat's compact loop fails the
+for a context size refusal). The failure panel keeps the
+"Model reasoned without answering" card alongside the reasoning-only
+model fit offer for an on-device run. The card points to the model choices
+when they are available and to provider settings otherwise. Chat's compact loop fails the
 message with the cause instead of falling back to cached data. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
@@ -675,8 +676,9 @@ Agent prompts carry summaries, not inventories. The runtime's
 `compact-conditional-access` transform turns each Conditional Access policy
 into one short record (scope as counts or `All`, built-in role names,
 conditions, grant and session controls), and `group-by-age` can keep names
-only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
-follow-up change; with it, 100 policies of the test fixture need about
+only (`pick`). Conditional Access explainer 1.2.0 is planned for OpenAdminOS
+0.8.0 and keeps `0.7.3-nightly.20261123094040` as its minimum app version.
+With the compact manifest, 100 policies of the test fixture need about
 15,500 estimated tokens with an 1,100 token answer and fit a 16k local model,
 and up to 107 fit by the estimate. Grouped
 records reach prompts only as counts (`count-by-field` steps), and breakdowns
@@ -2026,19 +2028,19 @@ Live Graph refreshes triggered by chat write successful rows back into the same
 local SQLite cache used by manual and scheduled refresh.
 
 Single-tenant Intune Chat can run a bounded read-only investigative loop before
-answering. The loop keeps the keyword planner as a cache-warming prefetch hint
-and deterministic fallback, then asks the selected provider to use a prompt
+answering. The loop keeps the keyword planner as a cache-warming prefetch hint,
+then asks the selected provider to use a prompt
 protocol with one fenced JSON tool call per iteration:
 `{"tool":"query_cache","params":{...}}` or a final
 `{"final":true,"answer":"..."}` object. The host parses the response, executes
 only host-owned read tools, appends observations, and stops after at most eight
 iterations. Malformed tool JSON gets up to three repair prompts; another malformed
-response or the iteration cap produces a visible fallback notice and answers
-   through the deterministic planner path. A final answer to a question that
-   planned tenant resources is only accepted after at least one successful
-   tenant-evidence tool call; a prose-only reply gets bounded repair prompts
-   and then the same deterministic fallback with its notice, never a clean
-   completed answer. In a consented voice web-research session a `web_search`
+response or the iteration cap produces a visible recovery result. After a
+   failed local Chat investigation, code answers only when the structured matcher
+   found a relevant cached result. Otherwise Chat explains what it checked and
+   why it could not answer. A final model answer about tenant state requires a
+   successful tenant-evidence tool call. Without one, Chat tries a bounded repair
+   before applying the same recovery rule. In a consented voice web-research session a `web_search`
    attempt counts as evidence instead, and the service owns web-failure
    honesty. The toolset is strictly read-only: `list_cached_resources`,
    `query_cache`, `find_graph_endpoint`, `graph_get`, `refresh_resource`,
@@ -2678,8 +2680,12 @@ Signals. Only a model on this device gets the offer: a local provider, and not
 a remote-backed or Ollama Cloud model, whose prompt already left the device.
 Its locality is confirmed when the request fails (the same fresh check), not
 from a provider list read earlier. For runs the host records the fit issue on
-the run (`RunRecord.modelFit`) when it fails, after that check, and the run page
-offers only from it.
+the run (`RunRecord.modelFit`) when it fails, after that check. For older
+reasoning-only runs without that issue, the run page checks the recorded cause
+or matches Ollama's two reasoning-only messages after removing the app's
+write-plan failure wrappers and the MXC script's `llm.complete` wrapper. The
+offer requires an on-device model and is
+unavailable for runs recorded against Ollama Cloud or an off-device server.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens
   needed and the limit (PR #211 and later), including the form where Ollama could
@@ -2690,10 +2696,11 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   context error, and the agent runtime's own prompt fit message ("This request
   needs about N tokens of context (P for the prompt and A for the answer), but
   <model> accepts L") when only that text survives in a stored run error. The
-  loop's `failureDetail` gives a cached-data fallback its numbers. On a local
-  model in auto mode a context overflow no longer fails the turn (PR #215): the
-  loop ends with `failureReason: "context-too-small"` and Chat answers from
-  cached data, and that answer carries the offer ("Ask this again with"). A
+  loop's `failureDetail` gives the model fit offer its numbers. On a local
+  model in auto mode a context overflow ends the loop with
+  `failureReason: "context-too-small"`. Chat reports the failure or shows a
+  verified cached answer when the structured matcher can supply one. The
+  result carries the offer ("Ask this again with"). A
   context overflow concerns the current request and does not count towards
   disabling tool use on later questions. A `thinking-only` loop failure does the same; repeated malformed or unfinished
   loop answers give the repeated-failure offer once the failure memory takes the
@@ -2704,12 +2711,14 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   typed `failureReason` comes before its error text, so the runtime's prompt
   fit check slots in without a second estimator.
 - The investigation failed on this local model often enough that Chat stops
-  trying it (the in-memory repeated-failure counter); the answer still comes
-  from cached data and carries the offer. When the investigation loop reports
+  trying it (the in-memory repeated-failure counter). Chat explains why the
+  model was skipped and carries the offer. When the investigation loop reports
   a finer `failureReason` with its fallback (`context-too-small` or
   `thinking-only`, from the local model accuracy work), that reason is used.
-- A thinking-only answer that ran out of budget, once the runtime reports it as
-  its own typed reason (`thinking-only`). There is no text guessing for it.
+- A thinking-only answer from the Chat loop or Ollama's typed
+  reasoning-without-answer failure on an agent run. The run records the
+  `thinking-only` fit reason, including when Ollama stops without an answer
+  before reaching the token limit.
 
 The notice replaces the generic error above the composer. It says why in
 plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
@@ -2720,8 +2729,10 @@ and a cost note that says where the cost lands (the app knows no plan or
 price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
 Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
-follows redirects; up to two installed local models with a larger parameter count in
-their name. For a context overflow, local choices must report a context
+follows redirects. The notice also offers up to two installed local models.
+A reasoning-only failure can offer any other on-device model, regardless of
+parameter count or context window. For a context overflow, local choices must
+have at least the same parameter count when the failed model's count is known and report a context
 window at least as large as the request's known token count. This includes
 a 1,024-token answer margin when llama.cpp reports only the prompt size.
 A model of the same parameter count can qualify if its context fits.
@@ -2813,8 +2824,11 @@ uses the model it left; read later, after the admin changed the provider or
 model, the line ends at "for this request only." A failed answer carries `modelFit` with the
 reason and numbers, kept in the answer metadata.
 
-Agent runs. A run that failed on a local provider with a context failure shows
-the same notice on the run page ("Run again with"). Choosing a provider opens
+Agent runs. A run that failed on an on-device model with a context or
+reasoning-only failure shows the model fit notice on the run page. The
+reasoning-only offer says "<model> reasoned without answering" and
+"Run this agent with another model". The scheduled-run banner links to
+the failed run, where the admin can review the choices. Choosing a provider opens
 the run review with that provider and model, which is the run's accept step:
 it names where prompts go and says "<model> could not fit the last run, so
 this run uses <provider>. This run only: the agent keeps its model for later
@@ -2822,7 +2836,8 @@ runs." Start run starts the agent with `providerId` and `model` for that run
 only, pinned to the organization the review showed (`tenantId`), or with
 `expectNoTenant` when it showed none, so an organization switch before the
 host admits the run refuses it instead of running elsewhere. A failed dry run
-stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
+stays a dry run and a write run still pauses for diff confirmation. An
+on-device alternative passes `requireOnDeviceModel`, so the
 host makes the same fresh check before it admits the run, and the run record
 keeps it so every later phase (plan, replan after the diff, apply) checks
 again before it builds the model and before every model call. Every fit rerun passes
@@ -4573,12 +4588,14 @@ Decided by the maintainer on 2026-11-09; built on branch `splashtop/connection` 
 
 Decided with the user after a docs question ("What does the Microsoft Learn say about Defender for macOS?") refreshed eight tenant resources, never called the installed Learn server, cited the hidden local index as Microsoft Learn, and showed only "Investigative mode started." while it ran.
 
-- **Question kinds.** The answering model classifies the question, and the keyword rule is a veto (decision 2026-11-04). In the tool loop, the model's first reply adds `kind` (docs, tenant or mixed) and `sources` (installed server ids or `docs-index`) to its JSON; no extra model call is made. Declared sources are shown in the first step as the model's intent and are never required calls; required stays the servers the question names, topic matches and Learn as the docs default. Docs means public product knowledge only, with no fact about this tenant needed; when unsure, mixed. A missing or invalid kind gets one repair, then `classifyChatQuestion` (keyword rules) decides. A docs label stands only when `hasTenantReference` finds nothing ("our", "which", "your", a possessive such as "Bob's", a value such as "HR-LAPTOP-07"); otherwise it becomes mixed and the first step says "Treated as docs and tenant: the question mentions your tenant." First-person wording in a how-to is not such a reference (decision 2026-11-10, `hasStrongTenantReference`): in a question where the admin asks how to do something themselves ("how do I", "how can we", "how should I", "how would we", "how to"), the words "my", "mine", "our", "we" and "us" are the admin speaking, so "how do I upload my first app?" stays docs when the model says docs. Questions about where the tenant stands ("how do we compare to the baseline", "how does our compliance look", "how do my devices stay compliant") are not how-tos and still veto. Before this, that question was forced to mixed, refreshed Graph, rejected the model's docs answer and sent cached Intune app rows to the provider for an answer that used none of them. A state word ("which", "list", "show", "how many"), "your", a possessive, a tenant value, and first-person wording in any other question form still veto. A tenant value is read from the question as written, so "us@contoso.com" and "US-LAPTOP-07" stay tenant values. A how-to whose own verb is to look at the admin's things also vetoes: see, view, check, verify, confirm, know, find, identify, "tell if", or "look at", "look up", "look for" or "look into" right after the opening (one adverb may sit between), then a first-person word directly or after a word such as "if" or "which of", then something a tenant holds after at most three more words of the same phrase, which a preposition or conjunction ends (devices, users, groups, policies, apps, sign-ins, licenses, "compliant", "encrypted", "score" and the like): "how do I see my noncompliant devices", "how do I check if our devices are compliant", "how can we tell if we are compliant". It does not veto a look that is the purpose of another verb ("how do I configure Intune to monitor our devices"), another clause ("how do I check a policy setting before we deploy it"), other things of the admin's ("how do I see my options for device enrollment", "how do I check my work before deploying apps") or "tell my team". Tenant values are matched in linear time, so a question at the 20,000 character limit does not stall the main process; a name such as HR-LAPTOP-07 is read run by run and has no length limit. The rule is a keyword heuristic on purpose: it prefers leaving a question to the model over forcing tenant access, because a docs answer says "Your tenant is not checked" and offers the tenant check as a follow-up, while a wrong veto sends tenant rows to the provider for a procedure. Where the tenant stands is recognised by the verb with what follows it ("compare to", "stand on", "score on", "do on", "do with", also with an adverb as in "how do we actually stand on Secure Score"), so "how do we perform an unattended installation" and "how do we look up an application ID" stay how-tos. Both rules ask for tenant facts, not for a procedure. Decided 2026-11-10: a how-to about tenant objects in a problem state ("how do I fix our noncompliant devices?") stays with the model, and the rule is not widened for verbs outside the list ("audit our sign-ins", "review our policies") or for an object named before the first-person word ("check the compliance of our devices"), because more verbs would also veto plain procedures such as "review our deployment plan". The keyword fallback and the deterministic path keep `hasTenantReference`. Trust note: a how-to that would be better with tenant data ("how can we improve our secure score?") is now docs when the model says docs; the tenant follow-up chip offers the check. A docs label is also vetoed, for the model and the keyword rules alike, when an answer in the conversation memory window used tenant data ("earlier answers in this chat used your tenant data"), because the memory is in the prompt and a docs answer could repeat tenant numbers. The planned-resources fallback is not a veto. The kind is decided once and can only be upgraded: a docs run that calls a tenant tool becomes mixed, shown as its own step, and then needs tenant evidence like any tenant or mixed answer. The evidence guard keys on the kind, not on planned resources; only small talk is exempt. The graph-cache-refresh no longer runs before the loop: it runs once the kind is tenant or mixed, or at an upgrade, before the first tenant tool, so a docs question that stays docs makes no Graph calls; a loop fallback answers from the pack read right after that refresh. A refresh that fails shows on its step with the real message and the answer continues; a stop during it ends the answer. Questions a direct answer covers keep the refresh before the answer. The deterministic path (small models, the deterministic setting and direct answers) keeps the keyword kind and the refresh before the answer. The first timeline step appears at once and gets the kind and sources when the model's first reply arrives. Trust note: the veto only catches wording, so a tenant question phrased in general words ("What are unmanaged devices?") is docs when the model says docs; the model's own judgement is relied on there.
+- **Question kinds.** The answering model classifies the question, and the keyword rule is a veto (decision 2026-11-04). In the tool loop, the model's first reply adds `kind` (docs, tenant or mixed) and `sources` (installed server ids or `docs-index`) to its JSON; no extra model call is made. Declared sources are shown in the first step as the model's intent and are never required calls; required stays the servers the question names, topic matches and Learn as the docs default. Docs means public product knowledge only, with no fact about this tenant needed; when unsure, mixed. A missing or invalid kind gets one repair, then `classifyChatQuestion` (keyword rules) decides. A docs label stands only when `hasTenantReference` finds nothing ("our", "which", "your", a possessive such as "Bob's", a value such as "HR-LAPTOP-07"); otherwise it becomes mixed and the first step says "Treated as docs and tenant: the question mentions your tenant." First-person wording in a how-to is not such a reference (decision 2026-11-10, `hasStrongTenantReference`): in a question where the admin asks how to do something themselves ("how do I", "how can we", "how should I", "how would we", "how to"), the words "my", "mine", "our", "we" and "us" are the admin speaking, so "how do I upload my first app?" stays docs when the model says docs. Questions about where the tenant stands ("how do we compare to the baseline", "how does our compliance look", "how do my devices stay compliant") are not how-tos and still veto. Before this, that question was forced to mixed, refreshed Graph, rejected the model's docs answer and sent cached Intune app rows to the provider for an answer that used none of them. A state word ("which", "list", "show", "how many"), "your", a possessive, a tenant value, and first-person wording in any other question form still veto. A tenant value is read from the question as written, so "us@contoso.com" and "US-LAPTOP-07" stay tenant values. A how-to whose own verb is to look at the admin's things also vetoes: see, view, check, verify, confirm, know, find, identify, "tell if", or "look at", "look up", "look for" or "look into" right after the opening (one adverb may sit between), then a first-person word directly or after a word such as "if" or "which of", then something a tenant holds after at most three more words of the same phrase, which a preposition or conjunction ends (devices, users, groups, policies, apps, sign-ins, licenses, "compliant", "encrypted", "score" and the like): "how do I see my noncompliant devices", "how do I check if our devices are compliant", "how can we tell if we are compliant". It does not veto a look that is the purpose of another verb ("how do I configure Intune to monitor our devices"), another clause ("how do I check a policy setting before we deploy it"), other things of the admin's ("how do I see my options for device enrollment", "how do I check my work before deploying apps") or "tell my team". Tenant values are matched in linear time, so a question at the 20,000 character limit does not stall the main process; a name such as HR-LAPTOP-07 is read run by run and has no length limit. The rule is a keyword heuristic on purpose: it prefers leaving a question to the model over forcing tenant access, because a docs answer says "Your tenant is not checked" and offers the tenant check as a follow-up, while a wrong veto sends tenant rows to the provider for a procedure. Where the tenant stands is recognised by the verb with what follows it ("compare to", "stand on", "score on", "do on", "do with", also with an adverb as in "how do we actually stand on Secure Score"), so "how do we perform an unattended installation" and "how do we look up an application ID" stay how-tos. Both rules ask for tenant facts, not for a procedure. Decided 2026-11-10: a how-to about tenant objects in a problem state ("how do I fix our noncompliant devices?") stays with the model, and the rule is not widened for verbs outside the list ("audit our sign-ins", "review our policies") or for an object named before the first-person word ("check the compliance of our devices"), because more verbs would also veto plain procedures such as "review our deployment plan". The keyword fallback and the deterministic path keep `hasTenantReference`. Trust note: a how-to that would be better with tenant data ("how can we improve our secure score?") is now docs when the model says docs; the tenant follow-up chip offers the check. A docs label is also vetoed, for the model and the keyword rules alike, when an answer in the conversation memory window used tenant data ("earlier answers in this chat used your tenant data"), because the memory is in the prompt and a docs answer could repeat tenant numbers. The planned-resources fallback is not a veto. The kind is decided once and can only be upgraded: a docs run that calls a tenant tool becomes mixed, shown as its own step, and then needs tenant evidence like any tenant or mixed answer. The evidence guard keys on the kind, not on planned resources; only small talk is exempt. The graph-cache-refresh no longer runs before the loop: it runs once the kind is tenant or mixed, or at an upgrade, before the first tenant tool, so a docs question that stays docs makes no Graph calls. A roadmap question defers the refresh until a tenant tool actually runs. A hosted loop fallback uses the pack read after the refresh. A refresh that fails shows on its step with the real message and the answer continues; a stop during it ends the answer. Questions a direct answer covers keep the refresh before the answer. The deterministic path (small models, the deterministic setting and direct answers) keeps the keyword kind and the refresh before the answer. The first timeline step appears at once and gets the kind and sources when the model's first reply arrives. Trust note: the veto only catches wording, so a tenant question phrased in general words ("What are unmanaged devices?") is docs when the model says docs; the model's own judgement is relied on there.
 - **A how-to reads the article before it answers (decision 2026-11-10).** Search results from an MCP docs server are titles and short excerpts, and they rarely hold the steps. When the admin's question is a how-to and the model writes a final answer after results from a server that also has a tool reading one result by its id (`itemIds` with `params` in the catalog, such as `get_article` or `get_kb_article`) without that tool having answered in this answer, the loop asks once for it (a read that was requested but sent nothing, or failed, does not count): the step reads "Answered from search excerpts · asked the model to read the best match first". The host writes the id from the earlier results as for any MCP call. A second answer without the read is accepted, so the cost is at most one extra model call. Voice answers and small talk are exempt, and the MCP tool rules in the prompt say the same so most models read the article unprompted. The step of such a read names the item ("get_article · Package your own installer with AI"); its sent text stays the exact id.
 - **Citations name what the answer relies on.** The prompt tells the model not to cite a local docs passage or an MCP result only to say that it does not apply, in the tool loop and in the deterministic answer prompt alike; such a source stays under "Also consulted". Tenant sources keep coming from the executed trace, not from citations: they show what was read.
 - **Local docs index titles.** An index built before 2026-11-10 did not strip front matter whose closing line carries a trailing space (1,916 Learn pages in the 2026-08-26 index), so those pages took their title from the YAML comment "# Customer intent: ..." and kept the front matter in their first chunk. `repairFrontMatter` fixes both when the index loads: the front matter title becomes the page title for every chunk and the front matter leaves the text; the vectors are untouched. `model/eval/build-index.mjs` now strips front matter with a BOM, CRLF or trailing spaces and reads the front matter title first, so the next index build needs no repair.
 - **Docs questions never touch the tenant.** No Graph refresh, no direct cache answers and no tenant tools in the prompt. When the model still asks for a tenant tool, the question becomes mixed: a step says so, the planned tenant data is refreshed, the tool runs and the tenant-evidence guard then applies. The evidence guard never forces tenant tools on a docs question. The planner's resources are kept only as the tenant tie-in for a follow-up. A service the tenant has not connected does not block a docs question: the planner's resources come from keywords, so "How does Microsoft Sentinel correlate alerts into incidents?" plans Defender alerts and incidents. When a documentation source is available (an MCP server offered to the model or the local docs index), the access line ("Defender is not connected for this tenant. Add it in Settings, Tenants.") waits for the kind: it is the answer only once the kind settles to tenant or mixed, before any tenant data is read, and a docs kind is answered from documentation. Without any documentation source the access line is the answer at once, as before. Tenant and mixed questions keep the tenant-evidence guard, also after an MCP call.
 - **Source routing is layered.** Each catalog entry carries our own `useFor` line, names an admin may use (`aliases`) and `topics`; the prompt lists the `useFor` lines. A server the question names by name, alias or host is required, and the loop asks the model to call it before it may finish (two retries, then the answer stands with a notice naming each source it skipped: "Microsoft Learn was not consulted for this answer. The model answered without calling it."). For docs and mixed questions, servers whose topics match are chosen too ("kql" chooses KQL Search). For a docs question with none chosen, Microsoft Learn is chosen when installed; a mixed question never gets a third-party call it did not name or match. Servers first, the local index as fallback (Microsoft Learn since 2026-11-04, every server since 2026-11-10): when a server is chosen for the question, and while the model has yet to classify it, the local docs index is not put in the prompt up front. Before 2026-11-10 only Learn held it back, so a Splashtop question answered by the Splashtop servers still got 12 Microsoft passages about other topics. A server counts as in play when the plan chose it, or when the model's classifying reply declares it in `sources` or requests one of its tools; a requested server is treated as declared. The index is searched right after the classification when no server is in play, and otherwise only when no server answered: a call failed, was blocked or returned nothing, and no chosen server is left to ask. That search is its own step naming the reason ("Searched the local docs index, because Microsoft Learn returned nothing", "... because KQL Search returned nothing"), and the first step says so up front ("Sources: KQL Search, then the local docs index if KQL Search does not answer", or "... if none of them answers" for several servers). A declared server is in that sentence too, without becoming a required call: with no server chosen it leads the list ("Sources: KQL Search, chosen by the model, then the local docs index if KQL Search does not answer"), and next to a chosen server the sentence reads "... then the local docs index if no server answers. The model also plans to ask KQL Search." With several chosen or declared servers the index waits until each was asked; once any server returned results it stays out for that answer. When a declared server was never asked, or a chosen one failed and the model then skips another chosen one, the index loads before the final answer is kept and the model answers once more with the passages; the step of a declared server that was never asked reads "Searched the local docs index, because KQL Search was not asked". A chosen server that was never asked at all keeps the "was not consulted" notice and loads no index. A call with no results does not count as that server answering. A tenant question never gets the index, also not as the fallback for a server it names. The rule covers every chosen server, also KQL Search and IntuneAutomation, not only documentation servers (decision 2026-11-10). The `@` picker is out of scope for v1.
+- **Microsoft 365 roadmap.** Roadmap and upcoming-release questions that mention the tenant are mixed. When enabled, Microsoft Release Communications leads, including when the model gives the question a tenant label or leaves the kind out. Chat waits for a public lookup before checking tenant data for relevance. The list tool searches titles, so Chat omits bare Microsoft 365, Office 365, M365 and O365 search terms. Specific title searches, filters and paging arguments are kept. What ran discloses a parameterless request and shows the server's error detail when supplied. If the lookup fails or the server was skipped, Chat says the roadmap could not be checked. When the source is missing or disabled, Chat gives the Marketplace recovery without calling the model or reading tenant data. When only the source needs to recover, Chat suggests trying later. The failure reports tenant coverage for tenant or mixed questions. Local docs and tenant inventory cannot establish current roadmap items.
+
 - **Labels come from the trace.** Answer text is attributed to Microsoft Learn only when a Learn call answered (a failed or blocked call does not count); otherwise attribution phrases ("Microsoft Learn says", "according to Microsoft Learn") outside code name the Microsoft documentation, live while streaming and in the stored answer. Other mentions of Learn are left alone. Cached tenant rows in a deterministic answer count as tenant evidence (`tenantContext`), so its tenant statements get a tenant block. When an answer cites nothing, MCP results from calls that answered are listed as Consulted. Local passages are named the local docs index in the prompt. Documentation and tenant blocks, their labels and the source cards are derived from the stored citation targets and tool trace, never from model text.
 - **Citations.** One registry numbers sources in the order the model sees them: local passages first, then MCP results, at most ten per call. MCP results are read by their structure from the whole result (the host returns the structured content or the parsed JSON next to the text it caps at 12,000 characters): Learn search by `title`, `contentUrl` and `content`, a fetched page by its first heading and the fetched URL, KQL Search and IntuneAutomation items by title or name and their link. A matched item is not searched further, so links inside its content never become cards; only text with no structure falls back to its Markdown links. The model sees each result as "[n] Title, URL" before its excerpt, the excerpts of one page share its number, and one prompt line tells it to cite those numbers. A citation that matches no source stays plain text.
 - **Steps.** `ChatStepRecorder` records plan, docs index, Graph refresh, each MCP call with the exact text sent, each cache or Graph tool, and the model step, each with title, detail, duration and origin (On device, Microsoft Graph, the third-party host, or the model provider; a local model is On device). Steps are append-only and chronological, live and stored; the renderer also keeps visible rows in place. Each model call of the tool loop is its own step: "Working" with the provider and model, "Writing the answer" once a streamed reply is a final answer, then finished with its decision ("Chose to ask Microsoft Learn", "Chose to query cached Intune managed devices", "Wrote the answer", or the repair it needed) before the work it chose appends below it. "Read the question" shows at once and, when the model classifies, finishes as soon as the local plan is ready; the classification and any veto wording show on the model step that made it. The pending scope line names only the current step's title. Each change streams as a `steps` event with the full list; the answer stores the list (`answer_meta_json` with the question kind, citation targets and follow-ups) and reloads with it. The folded summary names what left the device: search text to each MCP host the query reached (`mcpSource.sentToHost`; blocked calls and calls that failed before sending sent nothing) answer context to a hosted provider, and the requests made to Microsoft Graph (they go to the tenant's own Microsoft endpoint and are listed so the admin sees every request that left the device). An MCP step shows "writing the query from your question" and no sent text until the written query passed every check; a call that stopped before sending is titled "Did not send a <server> query" with the reason, and only a call that reached the host and then failed is "Could not reach <server>".
@@ -4746,41 +4763,17 @@ the format. Decisions:
   from the authoritative pack as before.
 - Auto mode, local model, Chat: a compact loop budget (four iterations, one
   repair for malformed, empty, unfinished or evidence-free replies, no repair
-  turn for a missing question kind, at most four model calls before the
-  fallback; the short query-writing call of an MCP tool counts like any other
-  model call, so the tool loop never makes more than four calls (the
-  fallback's own cached-data answer is one more call after it); a lookup that
-  would leave no call for the answer is not run and the model is told to
-  answer from what it has; a repair that asks for a missing source, or for the
-  full article behind search excerpts, runs only when its request, its query
-  writer and the answer still fit, otherwise the answer is kept and says the
-  source was not consulted or that it rests on the excerpts; a late local
-  docs index with no call left is not searched and the answer is kept as
-  written; a tool requested on the fourth call is not run, since no call is
-  left to use its result. Counting the writer without these rules pushed
-  ordinary Microsoft Learn answers into the fallback). After a failed compact
-  loop the cached-data fallback is one model call with no promise retries;
-  a final answer object is the answer when it is the whole reply or the
-  object the loop reads (the last fenced block or balanced object, with
-  prose before or after it), also when it names a tool too; otherwise a
-  "tool" naming a Chat tool makes the reply a request when the request was
-  cut short (an unclosed fence, or a brace left open outside JSON strings),
-  when a sentence outside the JSON announces a lookup in the words a
-  progress message uses ("I will check ...", "Let me look ..."; an offer
-  that depends on the admin does not count), or when that prose is a short
-  lead-in; a longer prose answer that quotes a tool call as an example stays
-  an answer, so a model that writes a long preamble before a real request,
-  and announces the lookup in other words ("We will check ...", "For this
-  organization I will check ..."), gets that reply shown; any other JSON example inside a prose
-  answer stays prose; the fallback call is not shown live, only when
-  complete, and nothing of it when it is stopped; when the reply is empty, a progress message or a request, the
-  message fails with
-  "The local model did not finish an answer ..." instead of showing it. The
-  "Answered from cached data instead" notice is set only once that answer
-  exists, so a provider that refuses every call leaves no such notice on the
-  failed message. A local model the failure memory took off the tool loop
-  gets the same one-call, checked fallback; a model too small for tool use
-  never ran the loop and keeps the normal fallback with its promise retries. Stop pressed while the providers
+  turn for a missing question kind, and at most four model calls). The short query-writing call of an MCP tool counts against the same
+  budget. A lookup that would leave no call for the answer is skipped. A repair
+  for a missing source or a full article runs when the model has room to request
+  it and use it. If the model exhausts the budget, Chat can show a verified
+  cached result only when the structured matcher matched the current question
+  and the matching snapshot is available. Code renders the count and list from
+  that same result. Otherwise Chat records a failed answer that names the
+  reason and which relevant checks ran, and offers retry or model fit as
+  applicable. A model whose repeated failures move it off the tool loop gets
+  the same relevance rule. A model too small for tools keeps the normal
+  deterministic path with its promise retries. Stop pressed while the providers
   are still being read ends
   in the designed cancelled answer, not an abort error. A second
   progress-only reply falls back as `unfinished` instead of being kept, unless
@@ -4788,10 +4781,10 @@ the format. Decisions:
   verified count is available instead of falling back. Only a read of a
   refreshed cache clears a failed lookup; a retry that finds the resource not
   cached keeps it pending. A rejected `count_cached` call blocks a zero answer as a
-  rejected `query_cache` does. A context overflow falls back instead of failing
-  the message and returns the provider's error as `failureDetail`.
-  Always investigative mode and hosted providers keep the established budget,
-  prompts and notices.
+  rejected `query_cache` does. A context overflow returns the provider's error
+  as `failureDetail` for model fit. Always investigative mode keeps its larger
+  loop budget. The verified-cache recovery rule also applies after an always
+  investigative local Chat run fails.
 - The loop returns `failureReason`: `malformed`, `thinking-only` (a reply with
   no text), `context-too-small`, `iteration-cap`, `no-evidence`,
   `empty-answer`, `unfinished` or `provider-unavailable`. Local fallbacks say
@@ -4799,9 +4792,8 @@ the format. Decisions:
   its plan. Answered from cached data instead." The per-model failure memory
   (two failures, in memory until restart) now says what the model did on each
   failed turn since its last success ("did not fit its context window twice")
-  instead of blaming the format. A local model's context overflow counts
-  towards the two failures, since it says the model does not fit Chat; a
-  hosted one does not, since it says more about the question. A local model
+  instead of blaming the format. A context overflow concerns the current
+  question and does not count toward disabling tools on later turns. A local model
   that cannot be reached (connection refused, server not running) ends the
   loop as `provider-unavailable` with the error as `failureDetail`, is not
   counted against the model, and the fallback then shows the provider's

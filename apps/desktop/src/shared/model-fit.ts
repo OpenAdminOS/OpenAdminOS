@@ -1,6 +1,6 @@
 import { isOnDeviceModel, managedLockedModel, managedProviderAllowed, providerCatalog, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type { ManagedPolicyStatus, ModelFitIssue, ModelFitReason, ProviderId, ProviderSummary } from "./openAdminOS.js";
-import { ollamaFailureOwnText } from "./ollama-failure.js";
+import { isOllamaReasoningWithoutAnswerMessage, ollamaFailureOwnText } from "./ollama-failure.js";
 import { isProviderReady } from "./provider-detection.js";
 
 /**
@@ -11,9 +11,6 @@ import { isProviderReady } from "./provider-detection.js";
  * renderer, which offers the choices.
  */
 
-// "thinking-only" comes from the Chat tool loop as its typed `failureReason`
-// (a reply with no answer text), read below as a bare reason; an error that
-// carries the reason as `kind` or `code` is read the same way.
 /**
  * How every host refusal that ends a model fit offer (expired, used, made for
  * another question, the organization or model changed) tells the admin what
@@ -48,6 +45,8 @@ function promptWithAnswerRoom(text: string | undefined): number | undefined {
  */
 function typedIssue(error: unknown, depth = 0): Omit<ModelFitIssue, "providerId" | "model"> | undefined {
   if (!error || typeof error !== "object" || depth > 4) return undefined;
+  // Match the runtime's error name without loading the Node adapter in the renderer.
+  if (error instanceof Error && error.name === "OllamaReasoningWithoutAnswerError") return { reason: "thinking-only" };
   const outer = error as Record<string, unknown>;
   // The failure record's own code wins over a wrapper's ("agent-failed" around "context-too-small").
   // A field the record leaves out falls back to the wrapper's.
@@ -191,7 +190,9 @@ export function classifyModelFitFailure(
   const bare = typeof error === "string" && error !== "repeated-failure" && (FIT_REASONS as readonly string[]).includes(error) ? { reason: error as ModelFitReason } : undefined;
   const typed = bare ?? typedIssue(error);
   const text = typeof error === "string" ? error : error instanceof Error ? error.message : undefined;
-  const found = typed ?? (text ? contextIssueFromText(text) : undefined);
+  const found = typed ?? (context.providerId === "ollama" && isOllamaReasoningWithoutAnswerMessage(text)
+    ? { reason: "thinking-only" as const }
+    : text ? contextIssueFromText(text) : undefined);
   if (!found) return undefined;
   return { ...found, providerId: context.providerId, ...(context.model ? { model: context.model } : {}) };
 }
@@ -260,7 +261,7 @@ export interface ModelFitChoice {
 export interface ModelFitChoices {
   /** Configured, ready hosted providers, in the order the provider list gives. Never preselected. */
   hosted: ModelFitChoice[];
-  /** Larger installed models on ready providers on this device. */
+  /** Installed alternatives on ready providers on this device. */
   local: ModelFitChoice[];
   /** Hosted providers exist in the catalog but none is listed: the managed policy left them out. */
   hostedBlockedByPolicy: boolean;
@@ -323,22 +324,22 @@ export function modelFitLocalCandidates(
   // An unknown parameter count still permits candidates for a context failure,
   // where their reported context is what establishes whether the request fits.
   const contextFailure = issue.reason === "context-too-small";
+  const thinkingOnly = issue.reason === "thinking-only";
   const sizeUnknownContext = currentSize === undefined && contextFailure;
-  if (currentSize !== undefined || sizeUnknownContext) {
-    for (const provider of providers) {
-      if (!provider.isLocal || !isProviderReady(provider) || provider.modelsFromPolicy || !managedProviderAllowed(managedPolicy, provider.id)) continue;
-      for (const model of provider.models) {
-        if (provider.id === issue.providerId && model === issue.model) continue;
-        if (!isOnDeviceModel(provider, model)) continue;
-        // A model the managed policy locks this provider to is the only one it may use.
-        const locked = managedLockedModel(managedPolicy, provider.id);
-        if (locked !== undefined && model !== locked) continue;
-        const size = modelSizeBillions(model);
-        if (size !== undefined && (currentSize === undefined || size > currentSize || (contextFailure && size === currentSize))) {
-          local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
-        }
+  if (!thinkingOnly && currentSize === undefined && !contextFailure) return local;
+  for (const provider of providers) {
+    if (!provider.isLocal || !isProviderReady(provider) || provider.modelsFromPolicy || !managedProviderAllowed(managedPolicy, provider.id)) continue;
+    const locked = managedLockedModel(managedPolicy, provider.id);
+    for (const model of provider.models) {
+      if (provider.id === issue.providerId && model === issue.model) continue;
+      if (!isOnDeviceModel(provider, model) || isPlaceholderModel(model) || (locked !== undefined && model !== locked)) continue;
+      const size = modelSizeBillions(model);
+      if (thinkingOnly || (size !== undefined && (currentSize === undefined || size > currentSize || (contextFailure && size === currentSize)))) {
+        local.push({ providerId: provider.id, providerName: provider.name, isLocal: true, model });
       }
     }
+  }
+  if (!thinkingOnly) {
     // Closest in size first. If the failed size is unknown, check the largest first.
     local.sort((a, b) => (sizeUnknownContext ? -1 : 1) * ((modelSizeBillions(a.model) ?? 0) - (modelSizeBillions(b.model) ?? 0)));
   }

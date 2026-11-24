@@ -13,13 +13,13 @@ import type {
   TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { GRAPH_CACHE_RESOURCES, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
+import { GRAPH_CACHE_RESOURCES, asksAboutMicrosoftRoadmap, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, reasoningWithoutAnswerInChain, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
 import { writeMcpQuery } from "./mcp-query-writer.js";
 import { mcpSentText } from "./chat-steps.js";
-import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
+import { CitationRegistry, LEARN_SERVER_ID, RELEASE_COMMUNICATIONS_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
 import { isSplashtopReadTool, SPLASHTOP_READ_TOOLS } from "../splashtop/reads.js";
 import {
   MCP_TOOL_RULES,
@@ -348,6 +348,8 @@ export async function runAgenticChat(
   input: RunAgenticChatInput,
 ): Promise<RunAgenticChatResult> {
   const compact = input.budget === "compact";
+  const roadmapQuestion = !input.voice && asksAboutMicrosoftRoadmap(input.adminQuestion ?? input.question);
+  const roadmapServer = roadmapQuestion ? input.tools.mcp?.servers?.find((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID) : undefined;
   const limits = compact ? COMPACT_LOOP_LIMITS : { iterations: MAX_AGENTIC_ITERATIONS, malformed: MAX_MALFORMED_RETRIES, unfinished: MAX_UNFINISHED_RETRIES, noEvidence: MAX_NO_EVIDENCE_RETRIES, promiseNudges: MAX_PROMISE_NUDGES, attempts: Number.POSITIVE_INFINITY };
   /** A local model's notice says what happened; a hosted model keeps the established wording. */
   const noticeFor = (failure: AgenticFailureReason, hosted: string) => (compact ? LOCAL_FALLBACK_NOTICES[failure] : hosted);
@@ -468,7 +470,7 @@ export async function runAgenticChat(
       for await (const chunk of input.llm.stream(options)) {
         completion = { text: chunk.accumulated, model: chunk.model };
         const partial = partialFinalAnswer(chunk.accumulated);
-        if (partial !== undefined && partial.trim()) {
+        if (!roadmapQuestion && partial !== undefined && partial.trim()) {
           if (!answerShown) input.modelStep?.writing();
           answerShown = true;
           input.onAnswerText(partial, learnAnswered);
@@ -566,11 +568,14 @@ export async function runAgenticChat(
       const decided = action.questionKind
         ? resolveQuestionKind(action.questionKind, input.classify.tenantReference)
         : { kind: input.questionKind ?? "tenant", vetoed: false };
-      questionKind = decided.kind;
+      const roadmapVeto = roadmapQuestion && decided.kind === "tenant";
+      questionKind = roadmapVeto
+        ? input.questionKind === "docs" && !input.classify.tenantReference ? "docs" : "mixed"
+        : decided.kind;
       // A server whose tool this reply requests is the model's choice as much as one it lists in "sources".
       const requested = action.kind === "tool" ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool)?.serverId : undefined;
       const declaredIds = [...new Set([...action.sources, ...(requested ? [requested] : [])])];
-      const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", declaredIds);
+      const plan = input.classify.onKind(questionKind, !action.questionKind ? "fallback" : roadmapVeto ? "roadmap" : decided.vetoed ? "veto" : "model", declaredIds);
       required = new Set(plan.requiredServerIds);
       classification = plan.detail;
       // A tenant question gets no local docs index; docs and mixed load it unless a server leads:
@@ -579,7 +584,8 @@ export async function runAgenticChat(
       declared = new Set(declaredIds.filter((id) => input.tools.mcp?.servers?.some((server) => server.id === id)));
       const serverInPlay = plan.serversFirst || declared.size > 0;
       const loadIndex = !serverInPlay && fallbackPending && input.documentationFallback;
-      const tenantData = questionKind !== "docs";
+      // Public roadmap evidence comes first. Refresh only if the model actually asks for tenant data.
+      const tenantData = questionKind !== "docs" && !roadmapQuestion;
       // No server is in play for this question, so the withheld local index is loaded now.
       indexLoad = loadIndex
         ? async () => {
@@ -729,7 +735,14 @@ export async function runAgenticChat(
         turns.push({ role: 'repair', content: `A failed data lookup cannot support a final answer or a zero count. Correct the query for ${[...invalidQueries.keys()].join(', ')} using the available fields before answering.` });
         continue;
       }
-      await settleModelStep(finalOutcome(), true);
+      const lookupFailure = roadmapQuestion ? failedRoadmapCheck(toolTrace) : undefined;
+      const sourceUnavailable = roadmapQuestion && !roadmapServer
+        ? "Roadmap items were not checked because Microsoft Release Communications is unavailable in this chat. Check Marketplace before asking again."
+        : undefined;
+      const roadmapFailure = lookupFailure ?? sourceUnavailable ?? (roadmapServer && !attemptedServers.has(roadmapServer.id) ? ROADMAP_NOT_CONSULTED : undefined);
+      const roadmapRecovery = lookupFailure ? "Try again later." : "Retry the question or open What ran for details.";
+      const roadmapAnswer = sourceUnavailable ?? (roadmapFailure ? `${roadmapFailure} ${roadmapRecovery}` : undefined);
+      await settleModelStep(roadmapFailure ? { kind: "repair", reason: "roadmap", ends: true } : finalOutcome(), !roadmapFailure);
       // The repair budget for required sources is spent: the answer is kept, never silently.
       const notConsulted = missingNames.length > 0
         ? `\n\n${missingNames.join(" and ")} ${missingNames.length === 1 ? "was" : "were"} not consulted for this answer. The model answered without calling ${missingNames.length === 1 ? "it" : "them"}.`
@@ -738,16 +751,16 @@ export async function runAgenticChat(
       const excerptsNote = excerptsOnly ? "\n\nThis answer is based on search excerpts; the full article was not read." : "";
       return {
         ok: true,
-        answer: finalAnswer + notConsulted + excerptsNote,
+        answer: roadmapAnswer ?? (finalAnswer + notConsulted + excerptsNote),
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
         // Only sources whose content reached the model that wrote this answer.
-        documentationSources: citations.sources.slice(0, consultedSources),
+        documentationSources: roadmapFailure ? [] : citations.sources.slice(0, consultedSources),
         // Injected text can steer next, so links and tenant values never become a suggestion.
         // After tenant data was read (a tenant or mixed kind; a tenant tool makes docs mixed)
         // the model's next is dropped: a field no index knows could reach the next question.
-        followUps: docsOnly ? validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)) : [],
+        followUps: docsOnly && !roadmapFailure ? validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)) : [],
         ...(input.askTitle ? titleField(validTitle(action.title, (text) => holdsTenantData(input.tools, text))) : {}),
       };
     }
@@ -768,6 +781,16 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: mcpResults.length > 0
         ? `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.`
         : `No model call is left for a lookup, so ${mcpTool.serverName} was not asked. Answer now from what is in this prompt, citing any passages it holds by their numbers, and say that ${mcpTool.serverName} was not consulted.` });
+      continue;
+    }
+    if (roadmapServer && !attemptedServers.has(roadmapServer.id) && mcpTool?.serverId !== roadmapServer.id) {
+      await settleModelStep({ kind: "repair", reason: "roadmap-first" });
+      turns.push({ role: "repair", content: `This question needs the public roadmap first. Call a tool from ${roadmapServer.name} before checking tenant data or another source.` });
+      continue;
+    }
+    if (roadmapQuestion && isTenantTool(action.tool) && failedRoadmapCheck(toolTrace)) {
+      await settleModelStep({ kind: "repair", reason: "roadmap-first" });
+      turns.push({ role: "repair", content: "The public roadmap lookup failed. Retry it or report the lookup failure before checking tenant data." });
       continue;
     }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
@@ -945,6 +968,20 @@ export async function runAgenticChat(
     iterations: compact ? iteration : MAX_AGENTIC_ITERATIONS,
     ...(responseModel ? { model: responseModel } : {}),
   };
+}
+
+export const ROADMAP_NOT_CONSULTED = "The roadmap items were not checked. Microsoft Release Communications was not consulted.";
+
+/** A later successful query, including a confirmed empty result, can recover the source failure. */
+export function failedRoadmapCheck(trace: readonly IntuneChatToolTraceEntry[]): string | undefined {
+  const calls = trace.filter((entry) => entry.mcpSource?.serverId === RELEASE_COMMUNICATIONS_SERVER_ID);
+  if (calls.some((entry) => !entry.error)) return undefined;
+  const source = calls.at(-1)?.mcpSource;
+  if (!source) return undefined;
+  const reason = source.toolError ? `${source.serverName} returned an error`
+    : source.sentToHost ? `${source.serverName} did not respond`
+      : `the query to ${source.serverName} could not be sent`;
+  return `The roadmap items were not checked because ${reason}.`;
 }
 
 const JSON_ESCAPES: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
