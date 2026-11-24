@@ -204,6 +204,8 @@ and § 147 AO).
 
 The privacy notice was last updated on 2026-11-25. Vercel hosts the website and
 APIs on its Pro plan, with server functions in Frankfurt, Germany (`fra1`).
+Routing Middleware (the CSP proxy in `web/src/proxy.ts`) still runs in all
+Vercel regions; it stores nothing and is covered by the edge network disclosure.
 Runtime logs include request details such as the user agent. Vercel keeps them
 for one day on Pro and up to 30 days with Observability Plus. The notice states
 the 30-day maximum. No log drains are configured. Build logs contain no visitor
