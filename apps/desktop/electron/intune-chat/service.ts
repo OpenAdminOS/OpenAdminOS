@@ -1,4 +1,4 @@
-import { addCacheTable, cacheMobileAppAssignments, cacheTableAnswer } from "./cache-table.js";
+import { addCacheTable, cacheMobileAppAssignments, cacheTableAnswer, chatTableNote } from "./cache-table.js";
 import type { ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import { hostedOllamaDestination, providerForModel } from "@openadminos/agent-sdk";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
@@ -2594,11 +2594,14 @@ export class IntuneChatService {
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
+    if (computed?.dataTable && !attachTable(computed.dataTable)) {
+      tableNotices.add(chatTableNote(computed.dataTable.totalCount, false));
+    }
     const assistantMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
       role: "assistant",
-      content: cacheTableAnswer(assistantContent, dataTables.length + Number(Boolean(computed?.dataTable)), tableNotices),
+      content: cacheTableAnswer(assistantContent, dataTables.length, tableNotices),
       status: assistantStatus,
       createdAt: new Date().toISOString(),
       providerId,
@@ -2628,7 +2631,7 @@ export class IntuneChatService {
           : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
-      ...((dataTables.length || computed?.dataTable) ? { dataTables: [...dataTables, ...(computed?.dataTable ? [computed.dataTable] : [])] } : {}),
+      ...(dataTables.length ? { dataTables } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
     };
@@ -3638,11 +3641,14 @@ export class IntuneChatService {
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
+    if (computed?.dataTable && !attachTable(computed.dataTable)) {
+      tableNotices.add(chatTableNote(computed.dataTable.totalCount, false));
+    }
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
       conversationId: conversation.id,
       role: "assistant",
-      content: cacheTableAnswer(assistantContent, dataTables.length + Number(Boolean(computed?.dataTable)), tableNotices),
+      content: cacheTableAnswer(assistantContent, dataTables.length, tableNotices),
       status: assistantStatus,
       createdAt: new Date().toISOString(),
       providerId,
@@ -3691,7 +3697,7 @@ export class IntuneChatService {
           : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
-      ...((dataTables.length || computed?.dataTable) ? { dataTables: [...dataTables, ...(computed?.dataTable ? [computed.dataTable] : [])] } : {}),
+      ...(dataTables.length ? { dataTables } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
     };
