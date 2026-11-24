@@ -5,9 +5,9 @@ import { createPortal } from "react-dom";
 
 import { type DocsBase, docsHref } from "~/lib/docs/paths";
 import type { DocsNavSection } from "~/lib/docs/site";
+import { GITHUB_URL, SITE_URL } from "~/lib/site-urls";
 
 import { Wordmark } from "../../Logo";
-import { GITHUB_URL, SITE_URL } from "../../seo";
 import { DocsSidebarNav, useDocsRoute } from "./DocsSidebarNav";
 
 /** Slide-in page list for narrow screens. Closes on navigation and Escape. */

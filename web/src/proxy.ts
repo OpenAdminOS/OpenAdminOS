@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { PLAUSIBLE_EVENT_URL, PLAUSIBLE_SCRIPT_URL } from "./lib/site-analytics";
 
 // Next's built-in HTTP error page renders this fixed stylesheet without a nonce.
+// Re-verify the hash on every Next.js upgrade.
 const NEXT_ERROR_STYLE_HASH = "'sha256-Z5XTK23DFuEMs0PwnyZDO9SWxemQ5HxcpVaBNuUJyWY='";
 
 export function proxy(request: NextRequest) {
@@ -42,5 +43,7 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Page and router requests need a nonce. API routes and file assets use
   // the static policy from next.config.js.
-  matcher: ["/((?!api(?:/|$)|_next(?:/|$)|_vercel(?:/|$)|.*\\.[^/]+$).*)"],
+  matcher: [
+    "/((?!api(?:/|$)|_next(?:/|$)|_vercel(?:/|$)|.*\\.(?:png|jpe?g|gif|svg|ico|webp|avif|css|js|map|txt|xml|json|woff2?|ttf|md|webmanifest|pdf|mp4)$).*)",
+  ],
 };

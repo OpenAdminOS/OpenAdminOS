@@ -38,8 +38,6 @@ import {
 } from "./seo";
 import { buttonPrimary, buttonSecondary, card, eyebrow, sectionTitle } from "./ui";
 
-export const revalidate = 900;
-
 export const metadata: Metadata = pageMetadata({
   title: HOME_TITLE,
   description: HOME_DESCRIPTION,
