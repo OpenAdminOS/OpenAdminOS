@@ -3907,7 +3907,12 @@ function validateSaveTextFileArgs(value: unknown): SaveTextFileArgs {
     throw new Error("saveTextFile args must be an object.");
   }
   const suggestedName = requireBoundedString(value.suggestedName, "suggestedName", 160);
-  const content = requireBoundedString(value.content, "content", 2_000_000);
+  // CSV quoting and formula escaping fit within twice the chat table's 4 MiB JSON budget.
+  const maxContent = /\.csv$/i.test(suggestedName) ? 8 * 1024 * 1024 : 2_000_000;
+  if (typeof value.content === "string" && value.content.length > maxContent) {
+    throw new Error(`File content exceeds the ${maxContent.toLocaleString()} character export limit.`);
+  }
+  const content = requireBoundedString(value.content, "content", maxContent);
   const args: SaveTextFileArgs = { suggestedName, content };
   if (value.filters !== undefined) {
     if (!Array.isArray(value.filters) || value.filters.length > 10) {

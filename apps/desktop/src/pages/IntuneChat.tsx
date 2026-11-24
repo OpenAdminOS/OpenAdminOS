@@ -4826,18 +4826,23 @@ export function ChatAnswerTable({ table }: { table: NonNullable<IntuneChatMessag
   const refreshedAt = formatCacheRefreshTime(table.refreshedAt, { locale: "en-GB", timeZone: "UTC" });
   const freshness = refreshedAt === "before the last write" ? refreshedAt : `${refreshedAt ?? table.refreshedAt} UTC`;
   const heading = `${table.totalCount.toLocaleString()} rows · ${table.resource} · cached ${freshness}`;
+  const columns = useMemo(() => table.columns.map((header, index) => ({
+    id: header, header, render: ({ cells }: { cells: string[] }) => cells[index],
+  })), [table.columns]);
+  const rows = useMemo(() => table.rows.slice(0, 200).map((cells, index) => ({ cells, index })), [table.rows]);
   const exportCsv = async () => {
     setExportError(undefined);
     try {
       const api = window.openAdminOS;
       if (!api) throw new Error("File export is unavailable.");
+      const scope = table.filters.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 64);
       await api.saveTextFile({
-        suggestedName: `${table.resource}.csv`,
+        suggestedName: `${table.resource}-${scope}-${table.totalCount}-${table.refreshedAt.slice(0, 10)}.csv`,
         content: `${[table.columns, ...table.rows].map(row => row.map(csvCell).join(",")).join("\n")}\n`,
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
-    } catch {
-      setExportError("Could not save the CSV. Choose a writable location and try again.");
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Could not save the CSV file.");
     }
   };
   return (
@@ -4850,14 +4855,18 @@ export function ChatAnswerTable({ table }: { table: NonNullable<IntuneChatMessag
           Export CSV
         </button>
       </div>
+      {table.partial ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">Partial cache. Results cover the cached rows.</p> : null}
       {exportError ? <p role="alert" className="mt-2 text-sm">{exportError}</p> : null}
       {expanded ? (
         <>
           <p className="my-2 break-words text-xs text-[var(--color-text-muted)]">{table.filters}</p>
+          {table.rows.length > rows.length ? (
+            <p className="my-2 text-xs text-[var(--color-text-muted)]">Showing the first 200 of {table.totalCount.toLocaleString()} rows. Export CSV for the full list.</p>
+          ) : null}
           <div className="max-h-80 overflow-auto" tabIndex={0} role="region" aria-label={heading}>
             <DataTable<{ cells: string[]; index: number }>
-              columns={table.columns.map((header, index) => ({ id: header, header, render: ({ cells }) => cells[index] }))}
-              rows={table.rows.map((cells, index) => ({ cells, index }))}
+              columns={columns}
+              rows={rows}
               rowKey={({ index }) => String(index)}
               caption={heading}
             />

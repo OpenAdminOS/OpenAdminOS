@@ -2726,10 +2726,28 @@ it("expands an attached list and exports all rows as safe CSV", async () => {
   const toggle = screen.getByRole("button", { name: /216 rows · mobileApps/ });
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   await userEvent.click(toggle);
-  expect(screen.getByText("App 215")).toBeVisible();
+  expect(screen.getByText("App 199")).toBeVisible();
+  expect(screen.queryByText("App 215")).not.toBeInTheDocument();
+  expect(screen.getByText(/Showing the first 200 of 216 rows/)).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Export CSV" }));
   const lines = saveTextFile.mock.calls[0]?.[0].content.trimEnd().split("\n");
   expect(lines).toHaveLength(217);
   expect(lines[0]).toBe("id,displayName");
   expect(lines[1]).toContain("'=1+1");
+});
+
+it("exports 10,000 cached rows beyond the general text-file size limit", async () => {
+  const saveTextFile = vi.fn().mockResolvedValue({ canceled: false });
+  const rows = Array.from({ length: 10_000 }, (_, index) => [`app-${index}`, "x".repeat(220)]);
+  renderWithAppState(<ChatAnswerTable table={{
+    resource: "mobileApps", filters: "Windows apps", totalCount: rows.length,
+    columns: ["id", "displayName"], rows, refreshedAt: "2026-11-24T06:39:00.000Z",
+  }} />, { bridge: makeMockBridge({ saveTextFile }) });
+  await userEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+  const exported = saveTextFile.mock.calls[0]?.[0];
+  expect(exported.suggestedName).toBe("mobileApps-Windows-apps-10000-2026-11-24.csv");
+  expect(exported.content.length).toBeGreaterThan(2_000_000);
+  expect(exported.content.length).toBeLessThan(8 * 1024 * 1024);
+  expect(exported.content.trimEnd().split("\n")).toHaveLength(10_001);
+  expect(exported.content).toContain("app-9999,");
 });
