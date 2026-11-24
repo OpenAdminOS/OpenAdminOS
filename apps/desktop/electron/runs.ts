@@ -1967,10 +1967,10 @@ export class RunService {
    * knowing no apply still holds it. A stopped run is marked failed with
    * the exact count it applied; the request in flight is aborted.
    */
-  async stopSplashtopApplies(organizationId: string, reason: string): Promise<void> {
+  async stopVendorApplies(origin: "sophos-change" | "splashtop-change", organizationId: string, reason: string): Promise<void> {
     const persisted = await this.host.read();
     const runIds = persisted.runs
-      .filter((run) => run.origin === "splashtop-change" && run.splashtop?.organizationId === organizationId)
+      .filter((run) => run.origin === origin && (origin === "sophos-change" ? run.sophos : run.splashtop)?.organizationId === organizationId)
       .filter((run) => run.status === "running" || run.status === "queued" || this.drives.has(run.id))
       .map((run) => run.id);
     for (const runId of runIds) this.controllers.get(runId)?.abort(new Error(reason));

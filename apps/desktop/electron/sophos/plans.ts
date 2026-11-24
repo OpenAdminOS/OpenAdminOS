@@ -43,6 +43,9 @@ export async function prepareSophosPlan(api: SophosApi, identity: SophosIdentity
     actions: ids.map((id) => {
       const endpoint = endpoints.get(id);
       if (!endpoint) throw new Error(`Sophos Central no longer returned endpoint ${id}. Refresh the endpoint list and try again.`);
+      if (kind !== "scan" && endpoint.isolationStatus !== "isolated" && endpoint.isolationStatus !== "notIsolated") {
+        throw new Error("Sophos Central did not report an isolation state for this endpoint.");
+      }
       if ((kind === "isolate" && endpoint.isolationStatus === "isolated")
           || (kind === "release" && endpoint.isolationStatus === "notIsolated")) {
         throw new Error(`${endpoint.hostname} already has the requested isolation state. Refresh the endpoint list and choose another endpoint.`);
@@ -72,7 +75,7 @@ export async function recheckSophosTarget(
   if (endpoint.isolationStatus === (kind === "isolate" ? "isolated" : "notIsolated")) {
     throw new Error("This endpoint already has the requested isolation state. Refresh the endpoint list and prepare the change again.");
   }
-  if (endpoint.isolationStatus === "Unknown" || endpoint.isolationStatus !== before) {
+  if ((endpoint.isolationStatus !== "isolated" && endpoint.isolationStatus !== "notIsolated") || endpoint.isolationStatus !== before) {
     throw new Error("This endpoint's isolation status changed since the plan was prepared. Prepare the change again.");
   }
 }
@@ -86,9 +89,9 @@ const endpointErrors = new Map([
 ]);
 
 export function verifySophosAcceptance(result: Record<string, unknown>, kind: PrepareSophosChangeInput["kind"], id: string) {
-  const failure = Array.isArray(result.errors) ? result.errors[0] : undefined;
+  const failure = Array.isArray(result.errors) ? result.errors.find((entry) => isSophosId(entry?.id) && entry.id.toLowerCase() === id.toLowerCase()) : undefined;
   const message = endpointErrors.get(failure?.errorCode);
-  if (message) throw new Error(message);
+  if (message) throw new SophosApiError(failure.errorCode === "permissionDenied" ? "forbidden" : "refused", message);
   const item = Array.isArray(result.items)
     ? result.items.find((entry) => isSophosId(entry?.id) && entry.id.toLowerCase() === id.toLowerCase())
     : undefined;

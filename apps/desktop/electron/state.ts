@@ -2104,6 +2104,9 @@ export class AppStateStore {
       serialize: (work) => this.serialize(work),
       clock: () => this.clock(),
       changed: () => this.emitStateChanged("sophos-changed"),
+      stopApplies: (id) => this.runService.stopVendorApplies(
+        "sophos-change", id, "Sophos Central was disconnected while this plan applied. Check the endpoint in Sophos Central before trying again.",
+      ),
       ...(splashtopOptions.userDataPath ? { secretsRoot: join(splashtopOptions.userDataPath, "services", "secrets") } : {}),
       ...(splashtopOptions.sophosFetch ? { fetch: splashtopOptions.sophosFetch } : {}),
     });
@@ -2932,7 +2935,8 @@ export class AppStateStore {
   }
 
   private applySophosAction(run: RunRecord, action: import("@openadminos/agent-sdk").WriteAction, signal: AbortSignal) {
-    return this.localResetGatedWork(() => this.serialize(async () => {
+    return this.localResetGatedWork(async () => {
+      signal.throwIfAborted();
       const plan = run.sophos;
       const state = await this.read();
       if (!plan || run.tenantId !== state.activeTenantId || action.kind !== "sophos-write" || !isSophosId(action.id)) {
@@ -2946,13 +2950,14 @@ export class AppStateStore {
         throw new Error("The Sophos Central connection changed. Prepare the plan again in Connections.");
       }
       const before = action.metadata?.before as { isolation?: unknown } | undefined;
-      await this.sophos.check(plan.organizationId, record.connectionId, () =>
-        recheckSophosTarget(api, record, plan.kind, action.id, before?.isolation, signal), true);
-      this.sophos.requireBinding(await this.read(), plan.organizationId, record.connectionId);
-      signal.throwIfAborted();
-      const result = await api.change(record, plan.kind, [action.id], plan.comment, signal);
-      verifySophosAcceptance(result, plan.kind, action.id);
-    }));
+      await this.sophos.check(plan.organizationId, record.connectionId, async () => {
+        await recheckSophosTarget(api, record, plan.kind, action.id, before?.isolation, signal);
+        await this.serialize(async () => this.sophos.requireBinding(await this.read(), plan.organizationId, record.connectionId));
+        signal.throwIfAborted();
+        const result = await api.change(record, plan.kind, [action.id], plan.comment, signal);
+        verifySophosAcceptance(result, plan.kind, action.id);
+      }, false);
+    });
   }
 
   connectSophos(input: ConnectSophosInput) {
@@ -2997,7 +3002,8 @@ export class AppStateStore {
   private async disconnectSplashtopNow(organizationId: string): Promise<void> {
     this.splashtopDisconnecting.set(organizationId, (this.splashtopDisconnecting.get(organizationId) ?? 0) + 1);
     try {
-      await this.runService.stopSplashtopApplies(
+      await this.runService.stopVendorApplies(
+        "splashtop-change",
         organizationId,
         "Splashtop was disconnected while this plan applied. Nothing more was sent.",
       );
@@ -3102,15 +3108,15 @@ export class AppStateStore {
     if (!organization || !started || !isSophosRegionHost(started.host) || state.activeTenantId !== tenant.id) return undefined;
     return {
       host: started.host,
-      read: async (tool, params, signal) => this.localResetGatedWork(() => this.serialize(async () => {
+      read: async (tool, params, signal) => this.localResetGatedWork(async () => {
         const currentState = await this.read();
         this.sophos.requireBinding(currentState, organization.id, started.connectionId);
         return this.sophos.check(organization.id, started.connectionId, async () => {
           const current = await this.sophos.binding(currentState, organization.id);
           signal?.throwIfAborted();
           return readSophos(current.api, current.record, tool, params, signal);
-        }, true);
-      })),
+        });
+      }),
     };
   }
 

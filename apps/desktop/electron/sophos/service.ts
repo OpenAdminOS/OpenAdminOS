@@ -50,6 +50,7 @@ export class SophosService<S extends SophosState> {
     serialize<T>(work: () => Promise<T>): Promise<T>;
     write(state: S): Promise<void>;
     changed(): void;
+    stopApplies?(id: string): Promise<void>;
     clock(): Date;
     secretsRoot?: string;
     fetch?: typeof fetch;
@@ -115,13 +116,14 @@ export class SophosService<S extends SophosState> {
     if (!credentials.clientId || !credentials.clientSecret) {
       throw new SophosApiError("refused", "Enter the Sophos Central client ID and secret.");
     }
+    const before = this.active(await this.host.read(), organizationId);
+    if (before.connections.sophos !== undefined) throw new SophosApiError("refused", "Disconnect Sophos Central before connecting new credentials.");
+    const api = this.client(credentials);
+    const identity = await api.identify();
     const result = await this.host.serialize(async () => {
-      const before = this.active(await this.host.read(), organizationId);
-      if (before.connections.sophos !== undefined) throw new SophosApiError("refused", "Disconnect Sophos Central before connecting new credentials.");
-      const api = this.client(credentials);
-      const identity = await api.identify();
       const state = await this.host.read();
-      this.active(state, organizationId);
+      const current = this.active(state, organizationId);
+      if (current.connections.sophos !== undefined) throw new SophosApiError("refused", "Disconnect Sophos Central before connecting new credentials.");
       const now = this.host.clock().toISOString();
       const record = { ...identity, connectionId: randomUUID(), connectedAt: now, lastCheckedAt: now };
       const secretKey = key(organizationId);
@@ -160,10 +162,9 @@ export class SophosService<S extends SophosState> {
     return record;
   }
 
-  // Call with the state lock held when the read is part of a serialized operation.
-  async check<T>(id: string, connectionId: string, work: () => Promise<T>, locked = false): Promise<T> {
+  async check<T>(id: string, connectionId: string, work: () => Promise<T>, updateOnSuccess = true): Promise<T> {
     const save = async (issue?: SophosConnectionRecord["issue"]) => {
-      const write = async () => {
+      await this.host.serialize(async () => {
         const state = await this.host.read();
         const { issue: _previous, ...record } = this.requireBinding(state, id, connectionId);
         await this.update(state, id, {
@@ -172,9 +173,7 @@ export class SophosService<S extends SophosState> {
           ...(issue ? { issue } : {}),
         });
         this.host.changed();
-      };
-      if (locked) await write();
-      else await this.host.serialize(write);
+      });
     };
     let result: T;
     try {
@@ -186,33 +185,34 @@ export class SophosService<S extends SophosState> {
       }
       throw error;
     }
-    await save();
+    if (updateOnSuccess) await save();
     return result;
   }
 
   async test(id: string): Promise<SophosConnectionSummary> {
-    return this.host.serialize(async () => {
-      const record = this.active(await this.host.read(), id).connections.sophos;
-      if (!validRecord(record)) {
-        throw new SophosApiError("refused", "Disconnect the unreadable Sophos Central connection record and reconnect.");
+    const record = this.active(await this.host.read(), id).connections.sophos;
+    if (!validRecord(record)) {
+      throw new SophosApiError("refused", "Disconnect the unreadable Sophos Central connection record and reconnect.");
+    }
+    await this.check(id, record.connectionId, async () => {
+      this.clients.delete(id);
+      const api = this.client(await this.credentialsFor(id));
+      const identity = await api.identify();
+      if (identity.tenantId !== record.tenantId || identity.host !== record.host) {
+        throw new SophosApiError("credentials", "The credential now identifies a different Sophos Central tenant or region. Disconnect and reconnect in Connections.");
       }
-      await this.check(id, record.connectionId, async () => {
-        this.clients.delete(id);
-        const api = this.client(await this.credentialsFor(id));
-        const identity = await api.identify();
-        if (identity.tenantId !== record.tenantId || identity.host !== record.host) {
-          throw new SophosApiError("credentials", "The credential now identifies a different Sophos Central tenant or region. Disconnect and reconnect in Connections.");
-        }
-        this.clients.set(id, { connectionId: record.connectionId, api });
-      }, true);
-      return summary(id, this.requireBinding(await this.host.read(), id, record.connectionId));
     });
+    return summary(id, this.requireBinding(await this.host.read(), id, record.connectionId));
   }
 
   async disconnect(id: string): Promise<void> {
     if (this.disconnecting.has(id)) return;
     this.disconnecting.add(id);
     try {
+      if (activeOrganizationOf(await this.host.read())?.id !== id) {
+        throw new SophosApiError("refused", "Switch to the organization in Connections and try again.");
+      }
+      await this.host.stopApplies?.(id);
       await this.host.serialize(async () => {
         const state = await this.host.read();
         if (dataFolderSealed()) throw new DataFolderSealedError();

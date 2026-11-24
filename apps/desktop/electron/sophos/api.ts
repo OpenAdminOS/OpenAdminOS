@@ -139,8 +139,9 @@ export class SophosApi {
     }
   }
 
-  private async acquireToken(): Promise<string> {
+  private async acquireToken(signal?: AbortSignal): Promise<string> {
     const result = await this.request(TOKEN_URL, {
+      ...(signal ? { signal } : {}),
       method: "POST",
       body: new URLSearchParams({
         grant_type: "client_credentials",
@@ -158,8 +159,10 @@ export class SophosApi {
     return access_token;
   }
 
-  private async bearer(): Promise<string> {
+  private async bearer(signal?: AbortSignal | null): Promise<string> {
+    signal?.throwIfAborted();
     if (this.token && this.token.refreshAt > (this.options.now ?? Date.now)()) return this.token.value;
+    if (signal) return this.acquireToken(signal);
     this.refreshing ??= this.acquireToken().finally(() => { this.refreshing = undefined; });
     return this.refreshing;
   }
@@ -168,13 +171,13 @@ export class SophosApi {
     const attempt = (token: string) => this.request(url, {
       ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` },
     }, "read");
-    const token = await this.bearer();
+    const token = await this.bearer(init.signal);
     try {
       return await attempt(token);
     } catch (error) {
       if (!(error instanceof SophosApiError) || error.code !== "credentials") throw error;
       if (this.token?.value === token) this.token = undefined;
-      const refreshed = await this.bearer();
+      const refreshed = await this.bearer(init.signal);
       try {
         return await attempt(refreshed);
       } catch (retryError) {
@@ -212,7 +215,7 @@ export class SophosApi {
     };
     const cancellation = signal ? { signal } : {};
     return body
-      ? this.request(url, { ...cancellation, method: "POST", headers: { ...headers, Authorization: `Bearer ${await this.bearer()}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }, "write")
+      ? this.request(url, { ...cancellation, method: "POST", headers: { ...headers, Authorization: `Bearer ${await this.bearer(signal)}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }, "write")
       : this.authenticatedRead(url, { ...cancellation, headers });
   }
 

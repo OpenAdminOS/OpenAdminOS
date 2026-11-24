@@ -35,6 +35,9 @@ test("Sophos tools and confirmed writes stay in their organization and records n
   const writes: unknown[] = [];
   let isolation = "notIsolated";
   let expired = false;
+  let writeResponse: (() => Response | Promise<Response>) | undefined;
+  let includeSecondEndpoint = false;
+  let writeSignal: AbortSignal | null | undefined;
   let blockedRead: { started: () => void; resume: Promise<void> } | undefined;
   const store = new AppStateStore({
     filePath,
@@ -48,6 +51,8 @@ test("Sophos tools and confirmed writes stay in their organization and records n
       }
       if (target.pathname.endsWith("/isolation")) {
         writes.push(JSON.parse(String(init?.body)));
+        writeSignal = init?.signal;
+        if (writeResponse) return writeResponse();
         return Response.json({ items: [{ id: endpointId, isolation: { enabled: true } }] }, { status: 202 });
       }
       assert.equal(target.pathname, "/endpoint/v1/endpoints");
@@ -55,7 +60,9 @@ test("Sophos tools and confirmed writes stay in their organization and records n
         blockedRead.started();
         await blockedRead.resume;
       }
-      return Response.json({ items: [{ id: endpointId, hostname: "LAB-01", isolation: { status: isolation } }] });
+      return Response.json({ items: [{ id: endpointId, hostname: "LAB-01", isolation: { status: isolation } },
+        ...(includeSecondEndpoint ? [{ id: other.id, hostname: "LAB-02", isolation: { status: isolation } }] : []),
+      ] });
     },
   });
   const context = (which: TenantRecord) => (store as unknown as {
@@ -101,6 +108,67 @@ test("Sophos tools and confirmed writes stay in their organization and records n
       assert.match(refused.error ?? "", message);
       assert.equal(writes.length, 1);
     }
+    isolation = "isolating";
+    for (const kind of ["isolate", "release", "scan"] as const) {
+      const prepare = store.prepareSophosChange({ organizationId, kind, targetIds: [endpointId], comment: "Investigate" });
+      if (kind === "scan") assert.equal((await prepare).status, "awaiting-confirmation");
+      else await assert.rejects(prepare, /did not report an isolation state/);
+    }
+
+    isolation = "notIsolated";
+    const prepare = () => store.prepareSophosChange({ organizationId, kind: "isolate", targetIds: [endpointId], comment: "Investigate" });
+    const confirm = (id: string) => store.confirmRun(id, "ISOLATE 1 DEVICE", { activeOrganizationOnly: true });
+    for (const response of [
+      () => new Response(null, { status: 403 }),
+      () => Response.json({ errors: [{ id: other.id, errorCode: "notFound" }, { id: endpointId, errorCode: "permissionDenied" }] }, { status: 202 }),
+    ]) {
+      writeResponse = response;
+      const run = await prepare();
+      await confirm(run.id);
+      for (let attempt = 0; attempt < 200 && (await store.getRun(run.id))?.status === "running"; attempt++) await delay(10);
+      assert.match((await store.getRun(run.id))?.error ?? "", /Service Principal Management/);
+      assert.equal((await store.getAppState()).sophosConnections?.[0]?.issue, "forbidden");
+    }
+
+    const readStarted = deferred();
+    const readResume = deferred();
+    blockedRead = { started: readStarted.resolve, resume: readResume.promise };
+    const slowRead = started.read("sophos_list_endpoints", {});
+    try {
+      await readStarted.promise;
+      await Promise.race([
+        store.setActiveTenant(tenant.id),
+        delay(1000).then(() => assert.fail("A slow Sophos read blocked the state lock")),
+      ]);
+    } finally {
+      readResume.resolve();
+      await slowRead;
+      blockedRead = undefined;
+    }
+
+    includeSecondEndpoint = true;
+    for (const stop of ["cancel", "disconnect"]) {
+      const sent = deferred();
+      writeResponse = () => {
+        sent.resolve();
+        if (stop === "cancel") return new Response(null, { status: 429, headers: { "Retry-After": "10" } });
+        return new Promise((_resolve, reject) => {
+          writeSignal?.addEventListener("abort", () => reject(writeSignal?.reason), { once: true });
+        });
+      };
+      const run = await store.prepareSophosChange({ organizationId, kind: "isolate", targetIds: [endpointId, other.id], comment: "Investigate" });
+      const count = writes.length;
+      await store.confirmRun(run.id, "ISOLATE 2 DEVICES", { activeOrganizationOnly: true });
+      await sent.promise;
+      if (stop === "cancel") await store.cancelRun(run.id);
+      else await store.disconnectSophos(organizationId);
+      assert.equal(writeSignal?.aborted, true);
+      assert.equal((await store.getRun(run.id))?.status, stop === "cancel" ? "cancelled" : "failed");
+      assert.equal(writes.length, count + 1);
+      if (stop === "disconnect") await store.connectSophos({ organizationId, ...credential });
+    }
+    includeSecondEndpoint = false;
+    writeResponse = undefined;
     expired = true;
     await assert.rejects(store.testSophos(organizationId), /expired/);
     assert.equal((await store.getAppState()).sophosConnections?.[0]?.issue, "credentials");
