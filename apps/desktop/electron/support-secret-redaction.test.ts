@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { redactSupportPublicText } from "./support-secret-redaction.js";
+import { redactSupportPublicText } from "./support-issue-format.js";
 
 const openAiKey = `sk-proj-${"a".repeat(48)}`;
 const githubToken = `github_pat_${"A".repeat(28)}_${"b".repeat(28)}`;
@@ -46,15 +46,15 @@ test("redacts public identity and local path markers", () => {
   );
 });
 
-test("keeps short diagnostic hashes while redacting serialized JSON safely", () => {
+test("keeps serialized JSON readable when redacting user text", () => {
   const serialized = JSON.stringify({
-    detailHash: "dcc246092640dfd5",
+    rows: "11-100",
     userText: `client_secret=${openAiKey}`,
   });
   const redacted = redactSupportPublicText(serialized);
 
   assert.doesNotThrow(() => JSON.parse(redacted));
-  assert(redacted.includes("dcc246092640dfd5"));
+  assert.equal(JSON.parse(redacted).rows, "11-100");
   assert(!redacted.includes(openAiKey));
   assert(redacted.includes("[redacted-secret]"));
 });

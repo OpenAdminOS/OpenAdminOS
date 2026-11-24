@@ -1412,9 +1412,10 @@ export interface AppState {
   registryRefreshError: string | null;
   /** Registry source URL in use (may differ from default if overridden in Settings). */
   registrySource: string;
-  /** Whether packaged builds report aggregate public registry install counts. */
+  /** Whether optional automatic app network requests are enabled. */
+  automaticNetworkRequestsEnabled: boolean;
+  /** Registry install count preference. Reporting also requires automatic network requests. */
   registryInstallCountsEnabled: boolean;
-  usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
   office?: OfficeState;
   /**
@@ -2266,21 +2267,6 @@ export interface DriftBundleCompareResult {
   limit: number;
   /** Resources left out because their service part is not granted now. */
   omittedResources?: DriftOmittedResource[];
-}
-
-// ─── Opt-in usage telemetry (v0.5) ───────────────────────────────────────
-
-export interface UsageTelemetryPayload {
-  schema: "openadminos-usage-1";
-  installId: string;
-  appVersion: string;
-  os: string;
-  arch: string;
-  providerClass: "local" | "hosted";
-  tenants: string;
-  agents: string;
-  runs: string;
-  retrievalIndex: boolean;
 }
 
 // ─── Documentation retrieval (v0.5) ──────────────────────────────────────
@@ -3538,11 +3524,23 @@ export interface SupportBundleExportResult {
   filePath?: string;
 }
 
-export interface SupportIssueSubmissionInput extends SupportBundleInput {
-  /** Explicit acknowledgement that this creates a public GitHub issue. */
-  confirmPublic: true;
+export interface SupportIssuePreviewInput extends SupportBundleInput {
   /** Include the sanitized diagnostics summary in the public issue body. */
   includeDiagnostics: boolean;
+}
+
+export interface SupportIssuePreview {
+  // TODO(ugur): Is previewId the right name for the reviewed report token in the desktop bridge?
+  previewId: string;
+  title: string;
+  body: string;
+}
+
+export interface SupportIssueSubmissionInput extends SupportIssuePreviewInput {
+  /** Explicit acknowledgement that this creates a public GitHub issue. */
+  confirmPublic: true;
+  /** Required when including diagnostics. Identifies the reviewed report. */
+  previewId?: string;
 }
 
 export interface SupportIssueSubmissionResult {
@@ -3570,6 +3568,8 @@ export interface OpenAdminOSApi {
    * attachment to a GitHub issue. This never uploads anything.
    */
   exportSupportBundle(input: SupportBundleInput): Promise<SupportBundleExportResult>;
+  /** Prepare the public issue title and body on this device without uploading. */
+  previewSupportIssue(input: SupportIssuePreviewInput): Promise<SupportIssuePreview>;
   /**
    * Create a public GitHub support issue through the OpenAdminOS web
    * endpoint. GitHub credentials stay server-side.
@@ -3594,6 +3594,7 @@ export interface OpenAdminOSApi {
     url: string,
     options?: { confirmExternalSource?: boolean },
   ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
+  setAutomaticNetworkRequestsEnabled(enabled: boolean): Promise<AppState>;
   setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
@@ -3766,13 +3767,6 @@ export interface OpenAdminOSApi {
     source?: "download";
     baseUrl?: string;
   }): Promise<RetrievalStatus>;
-  getUsageTelemetryPreview?(): Promise<{
-    enabled: boolean;
-    endpointConfigured: boolean;
-    payload: UsageTelemetryPayload;
-  }>;
-  setUsageTelemetryEnabled?(enabled: boolean): Promise<AppState>;
-  sendUsageTelemetryTest?(): Promise<{ sent: boolean }>;
   exportDriftBaseline?(
     input: ExportDriftBaselineInput,
   ): Promise<ExportDriftBaselineResult>;

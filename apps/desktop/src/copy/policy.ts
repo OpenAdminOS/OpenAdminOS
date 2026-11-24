@@ -31,6 +31,8 @@ export const POLICY_COPY = {
       allowedPublicReferences: "Allowed public references",
       appRegistration: "App registration",
       skipFirstRunScan: "Skip first-run model scan",
+      automaticNetworkRequests: "Automatic network requests",
+      registryInstallCounts: "Registry install counts",
       novaVoiceModes: "Nova voice modes",
       novaInstructions: "Nova instructions",
       novaCapabilities: "Nova abilities",

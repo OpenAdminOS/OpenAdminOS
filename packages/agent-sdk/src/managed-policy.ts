@@ -21,6 +21,8 @@ export const MANAGED_POLICY_KEYS = [
   "allowedPublicReferences",
   "appRegistration",
   "skipFirstRunScan",
+  "automaticNetworkRequests",
+  "registryInstallCounts",
   "novaVoiceModes",
   "novaInstructions",
   "novaCapabilities",
@@ -38,6 +40,8 @@ export const MANAGED_POLICY_SETTING_KEYS = [
   "allowedPublicReferences",
   "appRegistration",
   "skipFirstRunScan",
+  "automaticNetworkRequests",
+  "registryInstallCounts",
   "novaVoiceModes",
   "novaInstructions",
   "novaCapabilities",
@@ -76,6 +80,9 @@ export interface ManagedPolicyValues {
   allowedPublicReferences?: string[];
   appRegistration?: ManagedPolicyAppRegistration;
   skipFirstRunScan?: boolean;
+  // TODO(ugur): Are automaticNetworkRequests and registryInstallCounts the final public policy keys?
+  automaticNetworkRequests?: "on" | "off";
+  registryInstallCounts?: "on" | "off";
   /** The voice modes Nova may use. Absent allows both; an empty list allows none. */
   novaVoiceModes?: NovaVoiceMode[];
   /** Standing instructions for Nova. Locked, they replace the admin's own; otherwise they are the default. */

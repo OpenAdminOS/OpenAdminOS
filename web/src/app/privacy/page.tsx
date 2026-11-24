@@ -107,8 +107,8 @@ export default function PrivacyPage() {
               The administrator&rsquo;s organization is the controller for personal
               data about other people in its Microsoft 365 tenant, including user
               records and device records associated with people. The desktop app
-              processes this tenant content on the administrator&rsquo;s device.
-              Ugurlabs does not receive the tenant content the app processes.
+              connects to the tenant and processes the records on the
+              administrator&rsquo;s device.
               For questions about these records, contact the administrator&rsquo;s
               organization.
             </p>
@@ -148,7 +148,9 @@ export default function PrivacyPage() {
               Ollama available, it can download the
               docs index from GitHub Releases and have local Ollama pull its embedding
               model from the Ollama registry. Installing a public agent can send
-              a count to our website. Turn off these requests in Settings &gt; Privacy.
+              a count to our website. Pause these automatic requests in
+              Settings &gt; Privacy. You can still check for updates on supported
+              builds, refresh the registry, or install the docs index manually.
               See the{" "}
               <Link href="/docs/trust-model/network-calls" className="text-link">network calls reference</Link>{" "}
               for timing, payloads, and individual controls.
@@ -175,14 +177,16 @@ export default function PrivacyPage() {
               <div>
                 <h3 className="font-medium text-brand-ink">Rate limits and duplicate reports</h3>
                 <p>
-                  Upstash Redis processes short-lived keys containing the requester&rsquo;s
-                  IP address. Install rate-limit keys expire after 60 seconds. Support and
-                  agent submission rate-limit keys expire after 1 hour. A hash used to
-                  detect repeated support reports expires after 24 hours. The intended
-                  storage region is Frankfurt, Germany (<code>eu-central-1</code>),
-                  [to be confirmed]. We rely on our legitimate interest in preventing
-                  abuse and duplicate issues (Art. 6(1)(f) GDPR).
-                  Rate limiting applies when you use these endpoints.
+                  Our website derives a keyed hash (HMAC) from the IP address for
+                  each endpoint. Our processor, Supabase Inc., stores these
+                  rate-limit keys in the EU in Frankfurt, Germany
+                  (<code>eu-central-1</code>). The raw IP address stays out of that
+                  database. The keys expire after 60 seconds for install requests
+                  and after 1 hour for support reports and agent submissions.
+                  A hash used to detect duplicate support reports expires after
+                  24 hours. Cleanup deletes the expired records. We rely on our
+                  legitimate interest in preventing abuse and duplicate issues
+                  (Art. 6(1)(f) GDPR). Rate limiting applies when you use these endpoints.
                 </p>
               </div>
               <div>
@@ -190,14 +194,18 @@ export default function PrivacyPage() {
                 <p>
                   Packaged builds (stable and nightly) send the public agent slug, app version,
                   and platform when you install a public registry agent. The app
-                  checks for duplicates on your device. Upstash Redis stores aggregate
-                  daily counters for about 8 days. Pending counts stay in Redis until
-                  the hourly update to the public <code>stats/agents.json</code> file.
-                  We keep the published aggregate counts indefinitely. They contain
-                  no personal data. We briefly use your IP address for rate limiting
-                  as described above. Our legitimate interest is improving the
-                  registry by measuring which agents are installed (Art. 6(1)(f) GDPR).
-                  Counts are on by default. Turn them off in Settings &gt; Privacy.
+                  records one attempt per agent and UTC calendar year on your
+                  device, even if the request fails. Supabase stores daily
+                  aggregate counts by agent slug. The count records contain no
+                  installation identifier, app version, or platform. The website
+                  publishes the totals hourly to GitHub in <code>stats/agents.json</code>.
+                  The Git commits also record daily aggregates by agent. The
+                  database keeps each day&rsquo;s totals for about 8 days after
+                  the UTC day ends, then deletes them once published. We keep
+                  the published aggregates indefinitely. They contain no personal data.
+                  Our legitimate interest is improving the registry by measuring
+                  which agents are installed (Art. 6(1)(f) GDPR). Counts are on
+                  by default. Turn them off in Settings &gt; Privacy.
                 </p>
               </div>
               <div>
@@ -235,9 +243,10 @@ export default function PrivacyPage() {
                   available and helping users find updates (Art. 6(1)(f) GDPR).
                   GitHub acts as an independent controller for
                   these requests. Its own statement covers its logging, retention,
-                  and rights requests. To stop update checks and downloads and automatic
+                  and rights requests. To pause background update checks and automatic
                   registry refreshes, turn off Automatic network requests in Settings &gt;
-                  Privacy. See <Link href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" className="text-link">GitHub&rsquo;s privacy statement</Link>.
+                  Privacy. A manual update check can still download an available update.
+                  See <Link href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" className="text-link">GitHub&rsquo;s privacy statement</Link>.
                 </p>
               </div>
             </div>
@@ -272,9 +281,14 @@ export default function PrivacyPage() {
                 <p>
                   If you submit a support report or share a community agent, our
                   website forwards the submitted content to GitHub to open a public
-                  issue. You can preview the report and diagnostics before submitting.
-                  A preview is required when diagnostics are included. Diagnostics group
-                  counts into ranges.
+                  issue. For support reports, you can preview the exact public title
+                  and issue body on your device. The app requires that preview
+                  when you include diagnostics. If you change the report, review
+                  it again before sending with diagnostics. Diagnostics group
+                  counts and activity ages into ranges and summarize errors by
+                  category. They use the UTC calendar date for the report.
+                  Verified public registry agents can appear by slug. Other
+                  agents are labeled local, and run identifiers are omitted.
                   Agent submissions include the manifest, supporting details, and
                   contact information you provide. Our legitimate interest in
                   processing public support reports is diagnosing and resolving
@@ -315,7 +329,11 @@ export default function PrivacyPage() {
               States. For these transfers we rely on the EU-US Data Privacy Framework
               where the provider is certified and on the European Commission&rsquo;s
               standard contractual clauses in the providers&rsquo; data processing terms.
-              We are verifying each provider&rsquo;s certification [to be confirmed].
+              Supabase Inc. is a US company and hosts our data in Frankfurt,
+              Germany. Supabase&rsquo;s data processing agreement includes
+              standard contractual clauses for international transfers. Data
+              Privacy Framework certification for Vercel, GitHub, Microsoft,
+              Cal.com, and Supabase is [to be confirmed].
             </p>
             <p className="mt-3">
               Plausible hosts our analytics in the EU, with no transfer outside the
@@ -342,8 +360,9 @@ export default function PrivacyPage() {
               Email {SUPPORT_EMAIL}. We generally cannot link app traffic to
               you. Install counts carry no installation identifier. Older app versions
               may still send a legacy hash, which the server discards without storing.
-              The date we switched to aggregate-only counts and whether the legacy
-              keys were deleted are [to be confirmed].
+              We switched the website to aggregate-only counts and deleted the
+              former provider&rsquo;s stored install hashes, hash sets, and
+              pending counters on 24 November 2026.
               The updater UUID goes to GitHub. An email address you used
               to contact us, an issue URL, a booking reference, or an approximate
               date and time can help us locate a record. We may ask for enough

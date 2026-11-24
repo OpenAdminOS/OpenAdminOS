@@ -142,7 +142,6 @@ export {
 export {
   createRegistryInstallCountPayload,
   type RegistryInstallCountPayload,
-  type RegistryInstallCountPayloadInput,
 } from "./install-stats.js";
 export {
   ManifestValidationError,

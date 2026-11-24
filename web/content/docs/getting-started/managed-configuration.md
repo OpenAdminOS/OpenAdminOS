@@ -19,7 +19,7 @@ Reading a policy file on one device is part of the free app. OpenAdminOS reads t
 
 ## Automatic network requests
 
-- `automaticNetworkRequests` accepts `"on"` or `"off"`. It controls update checks, automatic registry refreshes, automatic docs index and embedding model downloads, and registry install counts. With `"off"`, **Check for updates** also makes no request. Manual registry refresh and docs index installation remain available.
+- `automaticNetworkRequests` accepts `"on"` or `"off"`. It controls background update checks, automatic registry refreshes, automatic docs index and embedding model downloads, and registry install counts. With `"off"`, you can still check for updates on supported builds, refresh the registry, or install the docs index manually.
 - `registryInstallCounts` accepts `"on"` or `"off"`. It controls aggregate public registry install counts. Counts pause whenever `automaticNetworkRequests` is `"off"`.
 
 See [Network calls](../trust/network-calls.md) for timing, destinations, and the controls in Settings > Privacy.
@@ -73,6 +73,8 @@ The JSON Schema is in the repository at [`schemas/policy.schema.json`](https://g
 | `allowedPublicReferences` | List of public reference ids | Only these public references are shown in the Marketplace and used by Chat. An empty list `[]` allows none. Any other one is refused before anything is sent. |
 | `appRegistration` | Object with `clientId`, optional `tenantId` and `label` | Your own Entra app registration, added to the saved registrations. `tenantId` is the Directory (tenant) ID or a verified domain, required for a single-tenant app. See [Own app registration](own-app-registration.md) for how to create it. |
 | `skipFirstRunScan` | `true` or `false` | With `true` and a `defaultProvider`, a fresh install checks only that provider at launch. When it is ready, the first-run model scan is skipped and the first run opens at Connect Microsoft 365, then Chat with the policy's model. When it is not ready, the scan runs as usual. |
+| `automaticNetworkRequests` | `"on"` or `"off"` | Controls background app update checks, automatic agent registry refreshes, automatic documentation index and embedding model downloads, and install-count pings. Manual update checks, registry refreshes and documentation index installation remain available. Schedules, tenant cache refreshes, connector deliveries and model checks you set up still run. |
+| `registryInstallCounts` | `"on"` or `"off"` | Controls the aggregate public registry install count. Counts are paused whenever automatic network requests are off. |
 | `novaVoiceModes` | List of `"local"` and `"openai"` | The voice modes Nova may use. With `["local"]`, OpenAI voice is refused in the main process and Nova offers only Local voice. An empty list `[]` turns Nova voice off. Without the key, both modes are allowed. |
 | `novaInstructions` | Text, at most 4000 characters | Standing instructions for Nova. Locked, they replace the admin's own, including instructions for one organization, which are kept and not used; unlocked, they apply until the admin writes their own. Nova's fixed safety rules always apply after them and cannot be changed by them. |
 | `novaCapabilities` | Object with `webSearch`, `connectorSends`, `startAgents`, `navigation` | What Nova may do. `false` turns an ability off whether or not the key is locked. `true` is a default the admin can change, unless the key is locked. `connectorSends` also takes a list of connector ids, the only connectors Nova may prepare messages for. An ability named twice is reported, and the more restrictive value is used. Sends and agent runs always wait for a click. |
@@ -97,6 +99,22 @@ Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `rele
 Including `ollama` in `allowedProviders` also allows Ollama Cloud models and aliases listed by a signed-in Ollama. Each Chat send to one requires the usual hosted confirmation. When no model is pinned, OpenAdminOS prefers an installed local model.
 
 To keep Ollama and exclude its cloud models, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on the device. Include `defaultModel` in `lock` if you set that list. The lock pins the model name, so keep that name backed by a local model. To exclude Ollama entirely, leave `ollama` out of `allowedProviders`.
+
+### Privacy
+
+Set `"automaticNetworkRequests": "off"` to turn off the requests listed above.
+Set `"registryInstallCounts": "off"` to stop install counts on their own.
+Both settings default to on. A locked value overrides the user's saved choice
+and Settings > Privacy marks it as **Set by your IT department**. An unlocked
+value applies until the user saves a choice.
+
+```json
+{
+  "automaticNetworkRequests": "off",
+  "registryInstallCounts": "off",
+  "lock": ["automaticNetworkRequests", "registryInstallCounts"]
+}
+```
 
 ### Nova
 

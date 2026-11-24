@@ -3,15 +3,22 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
 import { IconDownload, IconExternal, IconWarning } from "./icons";
+import {
+  SUPPORT_DIAGNOSTICS_TOO_LARGE,
+  SUPPORT_PREVIEW_MISMATCH,
+} from "../shared/support-issue-errors";
 import type {
   SupportBundleInput,
+  SupportIssuePreview,
   SupportIssueSubmissionResult,
 } from "../shared/openAdminOS";
 
@@ -78,12 +85,36 @@ function ReportIssueModal({
   const [form, setForm] = useState<ReportIssueForm>(defaultForm);
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const [publicConfirmed, setPublicConfirmed] = useState(false);
+  const [preview, setPreview] = useState<SupportIssuePreview | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewRequest = useRef(0);
+  const previewPanelId = useId();
+  const previewHintId = useId();
+  const previewRegion = useRef<HTMLDivElement>(null);
+  const errorRegion = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [issueResult, setIssueResult] = useState<SupportIssueSubmissionResult | null>(null);
 
+  const resetPreview = useCallback(() => {
+    previewRequest.current += 1;
+    setPreview(null);
+    setPreviewExpanded(false);
+    setPreviewLoading(false);
+  }, []);
+
+  const showSupportError = (caught: unknown) => {
+    const message = supportErrorMessage(caught);
+    if (message === SUPPORT_PREVIEW_MISMATCH || message === SUPPORT_DIAGNOSTICS_TOO_LARGE) {
+      resetPreview();
+    }
+    setError(message);
+  };
+
   useEffect(() => {
+    resetPreview();
     if (!open) return;
     setForm({
       title: prefill?.title ?? "",
@@ -101,20 +132,72 @@ function ReportIssueModal({
     setError(null);
     setNotice(null);
     setIssueResult(null);
-  }, [open, prefill]);
+  }, [open, prefill, resetPreview]);
+
+  useEffect(() => {
+    if (previewExpanded) previewRegion.current?.scrollIntoView?.({ block: "nearest" });
+  }, [previewExpanded]);
+
+  useEffect(() => {
+    if (error) errorRegion.current?.scrollIntoView?.({ block: "nearest" });
+  }, [error]);
 
   const hasRequiredFields = useMemo(
     () => form.title.trim().length > 0 && form.description.trim().length > 0,
     [form.description, form.title],
   );
-  const canSubmit = hasRequiredFields && publicConfirmed;
+  const needsPreview = includeDiagnostics && !preview;
+  const canSubmit = hasRequiredFields && publicConfirmed && !needsPreview;
+  const previewLabel = previewExpanded ? "Hide public issue preview" : "Preview public issue";
 
   const update = (key: keyof ReportIssueForm, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
+    resetPreview();
+  };
+
+  const togglePreview = async () => {
+    if (preview) {
+      setPreviewExpanded(!previewExpanded);
+      return;
+    }
+
+    const api = window.openAdminOS;
+    if (!api) {
+      setError("Desktop bridge unavailable. Use the Electron app to preview the report.");
+      return;
+    }
+    const request = ++previewRequest.current;
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      const result = await api.previewSupportIssue({
+        ...toSupportBundleInput(form),
+        includeDiagnostics,
+      });
+      if (request === previewRequest.current) {
+        setPreview(result);
+        setPreviewExpanded(true);
+      }
+    } catch (caught) {
+      if (request === previewRequest.current) {
+        showSupportError(caught);
+      }
+    } finally {
+      if (request === previewRequest.current) setPreviewLoading(false);
+    }
   };
 
   const handleClose = () => {
     if (!busy) onClose();
+  };
+
+  const openIssue = async (url: string) => {
+    setError(null);
+    try {
+      await window.openAdminOS?.openExternal(url);
+    } catch {
+      setError("OpenAdminOS could not open GitHub. Use Open issue to try again.");
+    }
   };
 
   const submitIssue = async () => {
@@ -123,7 +206,7 @@ function ReportIssueModal({
       setError("Desktop bridge unavailable. Use the Electron app to submit an issue.");
       return;
     }
-    if (!canSubmit) return;
+    if (!canSubmit || previewLoading) return;
 
     setBusy(true);
     setError(null);
@@ -135,12 +218,15 @@ function ReportIssueModal({
         ...toSupportBundleInput(form),
         confirmPublic: true,
         includeDiagnostics,
+        ...(preview ? { previewId: preview.previewId } : {}),
       });
+      resetPreview();
+      setPublicConfirmed(false);
       setIssueResult(result);
       setNotice(`Public GitHub issue #${result.issueNumber} created.`);
-      await api.openExternal(result.issueUrl);
+      await openIssue(result.issueUrl);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      showSupportError(caught);
     } finally {
       setBusy(false);
     }
@@ -166,7 +252,7 @@ function ReportIssueModal({
       }
       setNotice("Diagnostics file exported locally. Review it before sharing.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(supportErrorMessage(caught));
     } finally {
       setBusy(false);
     }
@@ -237,15 +323,62 @@ function ReportIssueModal({
           <input
             type="checkbox"
             checked={includeDiagnostics}
-            onChange={(event) => setIncludeDiagnostics(event.target.checked)}
+            onChange={(event) => {
+              setIncludeDiagnostics(event.target.checked);
+              resetPreview();
+            }}
             className="mt-0.5"
           />
           <span>
-            Include the sanitized diagnostics summary in the public issue. It
+            Include diagnostics in the public issue. The summary
             excludes tenant identifiers, prompts, Graph response bodies, run
             results, raw logs, secrets, screenshots, and local databases.
           </span>
         </label>
+
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Button
+              variant="secondary"
+              onClick={() => void togglePreview()}
+              disabled={!hasRequiredFields || busy || previewLoading}
+              aria-expanded={previewExpanded}
+              aria-controls={previewPanelId}
+              aria-busy={previewLoading}
+            >
+              {previewLoading ? "Preparing preview..." : previewLabel}
+            </Button>
+            {needsPreview && (
+              <span id={previewHintId} className="text-xs text-[var(--color-text-muted)]">
+                Open the preview before submitting with diagnostics.
+              </span>
+            )}
+          </div>
+          <div className="sr-only" aria-live="polite">
+            {previewExpanded ? "Public issue preview is ready." : ""}
+          </div>
+          <div id={previewPanelId} ref={previewRegion} hidden={!previewExpanded}>
+            {preview && (
+              <div
+                className="mt-2 max-h-64 overflow-auto overscroll-contain rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs leading-relaxed focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                role="region"
+                aria-label="Public issue preview"
+                tabIndex={0}
+              >
+                <div className="text-[var(--color-text-muted)]">Title</div>
+                <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[var(--color-text)]">
+                  {preview.title}
+                </pre>
+                <div className="mt-3 border-t border-[var(--color-border-soft)] pt-2 text-[var(--color-text-muted)]">
+                  Body (Markdown)
+                </div>
+                <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[var(--color-text)]">
+                  {preview.body}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
 
         <label className="mt-3 flex items-start gap-3 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] p-3 text-sm text-[var(--color-danger)]">
           <input
@@ -265,7 +398,7 @@ function ReportIssueModal({
             {notice}{" "}
             {issueResult && (
               <button
-                onClick={() => void window.openAdminOS?.openExternal(issueResult.issueUrl)}
+                onClick={() => void openIssue(issueResult.issueUrl)}
                 className="inline-flex items-center gap-1 underline"
               >
                 Open issue <IconExternal size={11} />
@@ -273,11 +406,13 @@ function ReportIssueModal({
             )}
           </div>
         )}
-        {error && (
-          <div className="mt-4 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger)]">
-            {error}
-          </div>
-        )}
+        <div aria-live="polite" ref={errorRegion}>
+          {error && (
+            <div className="mt-4 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger)]">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex shrink-0 items-center justify-between border-t border-[var(--color-border-soft)] px-6 py-4">
@@ -300,7 +435,8 @@ function ReportIssueModal({
           <Button
             variant="primary"
             onClick={() => void submitIssue()}
-            disabled={!canSubmit || busy}
+            disabled={!canSubmit || busy || previewLoading}
+            aria-describedby={needsPreview ? previewHintId : undefined}
             leadingIcon={<IconExternal size={13} />}
           >
             {busy ? "Submitting..." : "Submit public issue"}
@@ -309,6 +445,14 @@ function ReportIssueModal({
       </div>
     </Modal>
   );
+}
+
+function supportErrorMessage(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/^Error invoking remote method '[^']+': Error: /, "");
+  return message === "Diagnostics payload is too large."
+    ? SUPPORT_DIAGNOSTICS_TOO_LARGE
+    : message;
 }
 
 function toSupportBundleInput(form: ReportIssueForm): SupportBundleInput {
