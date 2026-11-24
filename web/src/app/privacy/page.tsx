@@ -171,7 +171,7 @@ export default function PrivacyPage() {
                   We rely on our legitimate interest in operating and securing the
                   site (Art. 6(1)(f) GDPR). Vercel keeps these logs for up to 30 days.
                   We do not export copies of these logs. The website&rsquo;s server
-                  functions run in the United States.
+                  functions run in Vercel&rsquo;s Frankfurt region (Germany).
                   Logging is part of using the site or API.
                   See <Link href="https://vercel.com/legal/privacy-policy" className="text-link">Vercel&rsquo;s privacy policy</Link>.
                 </p>
@@ -333,8 +333,9 @@ export default function PrivacyPage() {
               International transfers
             </h2>
             <p className="mt-3">
-              Vercel, GitHub, Microsoft, and Cal.com may process data in the United
-              States. For eligible transfers to Vercel, GitHub, and Cal.com, we
+              Vercel, GitHub, Microsoft, and Cal.com may still process data in the United
+              States. For Vercel, this can include its global edge network and support.
+              For eligible transfers to Vercel, GitHub, and Cal.com, we
               rely on the frameworks listed below. For Microsoft 365, we rely on the
               SCCs in Microsoft&rsquo;s data protection addendum. The standard contractual
               clauses (SCCs) are those approved by the European Commission.
