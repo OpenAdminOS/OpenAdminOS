@@ -852,13 +852,18 @@ describe("Settings provider section", () => {
     }));
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
 
-    const switches = await screen.findAllByRole("switch");
-    expect(switches).toHaveLength(3);
-    for (const control of switches) {
+    const network = await screen.findByRole("switch", { name: "Automatic network requests" });
+    const counts = screen.getByRole("switch", { name: "Registry install counts" });
+    const docs = screen.getByRole("switch", { name: "Automatically install the documentation index" });
+    for (const control of [network, counts, docs]) {
       expect(control).toHaveAttribute("aria-checked", "false");
       expect(control).toBeDisabled();
     }
-    expect(screen.getAllByText("Set by your IT department")).toHaveLength(2);
+    for (const control of [network, counts]) {
+      const row = control.closest(".setting-row");
+      expect(row).not.toBeNull();
+      expect(within(row as HTMLElement).getByText("Set by your IT department")).toBeVisible();
+    }
   });
 
   it("states in About that product names and logos belong to their owners", async () => {

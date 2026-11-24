@@ -3778,14 +3778,16 @@ function PrivacySwitch({ name, enabled, disabled, locked, onChange }: {
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       {locked && <SetByItBadge />}
-      <Switch
-        className="w-auto gap-3"
-        checked={enabled}
-        disabled={disabled || locked}
-        aria-label={name}
-        label={enabled ? "On" : "Off"}
-        onCheckedChange={onChange}
-      />
+      <div className="w-fit shrink-0">
+        <Switch
+          className="gap-3"
+          checked={enabled}
+          disabled={disabled || locked}
+          aria-label={name}
+          label={enabled ? "On" : "Off"}
+          onCheckedChange={onChange}
+        />
+      </div>
     </div>
   );
 }
@@ -3825,7 +3827,7 @@ function PrivacySection({
       ? "stable"
       : updateChannelSettings.channel
     : null;
-  const [privacySaving, setPrivacySaving] = useState<string | null>(null);
+  const [privacySaving, setPrivacySaving] = useState(false);
   const [privacyError, setPrivacyError] = useState<string | null>(null);
   const [retrievalAutoInstall, setRetrievalAutoInstall] = useState<boolean | null>(null);
   const networkLocked = policy?.locked.includes("automaticNetworkRequests") ?? false;
@@ -3921,7 +3923,7 @@ function PrivacySection({
   }, []);
 
   const savePrivacySetting = async (label: string, save: () => Promise<void>) => {
-    setPrivacySaving(label);
+    setPrivacySaving(true);
     setPrivacyError(null);
     try {
       await save();
@@ -3929,7 +3931,7 @@ function PrivacySection({
       const reason = error instanceof Error ? error.message : String(error);
       setPrivacyError(`${label} could not be changed. ${reason}`);
     } finally {
-      setPrivacySaving(null);
+      setPrivacySaving(false);
     }
   };
 
@@ -3960,7 +3962,7 @@ function PrivacySection({
             <PrivacySwitch
               name="Automatic network requests"
               enabled={automaticNetworkRequestsEnabled}
-              disabled={privacySaving !== null}
+              disabled={privacySaving}
               locked={networkLocked}
               onChange={(enabled) => void savePrivacySetting(
                 "Automatic network requests", () => onSetAutomaticNetworkRequestsEnabled(enabled),
@@ -3977,7 +3979,7 @@ function PrivacySection({
             <PrivacySwitch
               name="Registry install counts"
               enabled={automaticNetworkRequestsEnabled && registryInstallCountsEnabled}
-              disabled={privacySaving !== null || !automaticNetworkRequestsEnabled}
+              disabled={privacySaving || !automaticNetworkRequestsEnabled}
               locked={countsLocked}
               onChange={(enabled) => void savePrivacySetting(
                 "Registry install counts", () => onSetRegistryInstallCountsEnabled(enabled),
@@ -3994,7 +3996,7 @@ function PrivacySection({
             <PrivacySwitch
               name="Automatically install the documentation index"
               enabled={automaticNetworkRequestsEnabled && retrievalAutoInstall === true}
-              disabled={privacySaving !== null || retrievalAutoInstall === null ||
+              disabled={privacySaving || retrievalAutoInstall === null ||
                 !automaticNetworkRequestsEnabled || !window.openAdminOS?.setRetrievalAutoInstall ||
                 retrievalInstalling}
               onChange={(enabled) => void savePrivacySetting(
