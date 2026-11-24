@@ -702,8 +702,12 @@ export function isExplicitDocsRequest(question: string): boolean {
 
 export function asksAboutMicrosoftRoadmap(question: string): boolean {
   const lower = question.toLowerCase().replace(/\u2019/g, "'");
-  return /\b(?:roadmap|what(?:'s| is) coming|upcoming (?:features|releases)|what(?:'s| is) rolling out)\b/.test(lower) &&
-    /\b(?:m365|microsoft 365|office 365|intune|entra|defender|azure|tenant|release communications)\b/.test(lower);
+  if (!/\b(?:m365|microsoft 365|office 365|intune|entra|defender|azure|tenant|release communications)\b/.test(lower)) return false;
+  if (/\broadmaps?\b/.test(lower)) {
+    return !(asksHowTo(lower) && /\b(?:create|build|plan|draft|make|write|design|develop|put together)\b[^.?!]*\broadmaps?\b/.test(lower));
+  }
+  if (/\b(?:renew(?:s|al|als|ed|ing)?|expir(?:y|es?|ed|ing|ations?))\b/.test(lower)) return false;
+  return /\b(?:what(?:'s| is) coming|upcoming (?:features|releases)|what(?:'s| is) rolling out)\b/.test(lower);
 }
 
 export function classifyChatQuestion(
