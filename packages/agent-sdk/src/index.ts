@@ -1412,9 +1412,10 @@ export interface AppState {
   registryRefreshError: string | null;
   /** Registry source URL in use (may differ from default if overridden in Settings). */
   registrySource: string;
-  /** Whether packaged builds report aggregate public registry install counts. */
+  /** Whether optional automatic app network requests are enabled. */
+  automaticNetworkRequestsEnabled: boolean;
+  /** Registry install count preference. Reporting also requires automatic network requests. */
   registryInstallCountsEnabled: boolean;
-  usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
   office?: OfficeState;
   /**
@@ -2266,21 +2267,6 @@ export interface DriftBundleCompareResult {
   limit: number;
   /** Resources left out because their service part is not granted now. */
   omittedResources?: DriftOmittedResource[];
-}
-
-// ─── Opt-in usage telemetry (v0.5) ───────────────────────────────────────
-
-export interface UsageTelemetryPayload {
-  schema: "openadminos-usage-1";
-  installId: string;
-  appVersion: string;
-  os: string;
-  arch: string;
-  providerClass: "local" | "hosted";
-  tenants: string;
-  agents: string;
-  runs: string;
-  retrievalIndex: boolean;
 }
 
 // ─── Documentation retrieval (v0.5) ──────────────────────────────────────
@@ -3608,6 +3594,7 @@ export interface OpenAdminOSApi {
     url: string,
     options?: { confirmExternalSource?: boolean },
   ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
+  setAutomaticNetworkRequestsEnabled(enabled: boolean): Promise<AppState>;
   setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
@@ -3780,13 +3767,6 @@ export interface OpenAdminOSApi {
     source?: "download";
     baseUrl?: string;
   }): Promise<RetrievalStatus>;
-  getUsageTelemetryPreview?(): Promise<{
-    enabled: boolean;
-    endpointConfigured: boolean;
-    payload: UsageTelemetryPayload;
-  }>;
-  setUsageTelemetryEnabled?(enabled: boolean): Promise<AppState>;
-  sendUsageTelemetryTest?(): Promise<{ sent: boolean }>;
   exportDriftBaseline?(
     input: ExportDriftBaselineInput,
   ): Promise<ExportDriftBaselineResult>;

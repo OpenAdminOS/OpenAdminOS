@@ -82,6 +82,7 @@ import {
   getUpdateChannelSettings,
   getUpdateState,
   setUpdateChannel,
+  setUpdateChecksEnabled,
   startAutoUpdater,
   stopAutoUpdater,
   subscribeToUpdateState,
@@ -3225,7 +3226,7 @@ async function createSupportBundle(input: SupportBundleInput) {
           state.registrySource === DEFAULT_REGISTRY_SOURCE ? "official" : "custom",
         lastRefresh: age(state.lastRegistryRefresh),
         refreshErrorCategory: classifyDiagnosticText(state.registryRefreshError),
-        installCountsEnabled: state.registryInstallCountsEnabled,
+        installCountsEnabled: state.automaticNetworkRequestsEnabled && state.registryInstallCountsEnabled,
       },
       scheduler: {
         supported: state.schedulerStatus?.supported ?? releaseDiagnostics.scheduler.supported,
@@ -3527,7 +3528,7 @@ async function refreshRegistryInBackground(
   if (localResetRequested) return;
   lastBackgroundRefreshAt = Date.now();
   try {
-    const result = await store.initRegistry();
+    const result = await store.initRegistry("automatic");
     if (result.error || result.fromCache) return;
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("openadminos:registry-refreshed", {
@@ -6214,6 +6215,17 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:set-automatic-network-requests-enabled",
+    handleTrusted(async (_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("Automatic network requests enabled must be a boolean.");
+      }
+      await store.setAutomaticNetworkRequestsEnabled(enabled);
+      setUpdateChecksEnabled(await store.getAutomaticNetworkRequestsEnabled());
+      return store.getAppState();
+    }),
+  );
+  ipcMain.handle(
     "openadminos:set-registry-install-counts-enabled",
     handleTrusted((_event, enabled: unknown) => {
       if (typeof enabled !== "boolean") {
@@ -6720,23 +6732,6 @@ function registerIpcHandlers() {
       }
       return store.getDriftBundleCompare(compare);
     }),
-  );
-  ipcMain.handle(
-    "openadminos:get-usage-telemetry-preview",
-    handleTrusted(() => store.getUsageTelemetryPreview()),
-  );
-  ipcMain.handle(
-    "openadminos:set-usage-telemetry-enabled",
-    handleTrusted((_event, enabled: unknown) => {
-      if (typeof enabled !== "boolean") {
-        throw new Error("Usage telemetry enabled must be a boolean.");
-      }
-      return store.setUsageTelemetryEnabled(enabled);
-    }),
-  );
-  ipcMain.handle(
-    "openadminos:send-usage-telemetry-test",
-    handleTrusted(() => store.sendUsageTelemetry()),
   );
   ipcMain.handle(
     "openadminos:get-retrieval-status",
@@ -7981,6 +7976,9 @@ if (!gotLock) {
           }
         : {}),
     });
+    await store.removeLegacyTelemetryState().catch((error) =>
+      console.warn("[upgrade] removing legacy telemetry state failed", error),
+    );
     // The policy's provider, model and registration are in state before the window reads it.
     await store.applyManagedPolicy().catch((error) =>
       console.error("[policy] applying the IT policy file failed", error),
@@ -8061,7 +8059,11 @@ if (!gotLock) {
     void store.pruneDriftHistory("startup").catch((error) => {
       console.warn("[drift-history] startup prune failed:", error);
     });
-    startAutoUpdater(() => mainWindow ?? undefined, await store.getUpdateChannel());
+    startAutoUpdater(
+      () => mainWindow ?? undefined,
+      await store.getUpdateChannel(),
+      await store.getAutomaticNetworkRequestsEnabled(),
+    );
 
     // Agent scheduler: for normal visible launches, wait for the
     // regular minute tick instead of immediately catching up. Immediate

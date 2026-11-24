@@ -251,8 +251,8 @@ export function createMockAppState(overrides: Partial<AppState> = {}): AppState 
     lastRegistryRefresh: now,
     registryRefreshError: null,
     registrySource: "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents",
+    automaticNetworkRequestsEnabled: true,
     registryInstallCountsEnabled: true,
-    usageTelemetryEnabled: false,
     ...overrides,
   };
 }
@@ -324,30 +324,16 @@ export function makeMockBridge(
     listRegistryAgents: vi.fn(async () => appState.registryAgents),
     refreshRegistry: vi.fn(async () => ({ error: null, fromCache: false, cachedAt: now })),
     setRegistrySource: vi.fn(async () => ({ error: null, fromCache: false, cachedAt: now })),
+    setAutomaticNetworkRequestsEnabled: vi.fn(async (enabled: boolean) =>
+      updateState({ ...appState, automaticNetworkRequestsEnabled: enabled }),
+    ),
     setRegistryInstallCountsEnabled: vi.fn(async (enabled: boolean) =>
       updateState({ ...appState, registryInstallCountsEnabled: enabled }),
     ),
-    getUsageTelemetryPreview: vi.fn(async () => ({
-      enabled: appState.usageTelemetryEnabled ?? false,
-      endpointConfigured: true,
-      payload: {
-        schema: "openadminos-usage-1" as const,
-        installId: "oao_test_install",
-        appVersion: appState.appVersion,
-        os: "linux",
-        arch: "x64",
-        providerClass: appState.trust.isLocal ? "local" as const : "hosted" as const,
-        tenants: "1",
-        agents: "1",
-        runs: "0",
-        retrievalIndex: false,
-      },
-    })),
-    setUsageTelemetryEnabled: vi.fn(async (enabled: boolean) =>
-      updateState({ ...appState, usageTelemetryEnabled: enabled }),
-    ),
-    sendUsageTelemetryTest: vi.fn(async () => ({
-      sent: appState.usageTelemetryEnabled ?? false,
+    getRetrievalAutoInstall: vi.fn(async () => true),
+    setRetrievalAutoInstall: vi.fn(async () => ({
+      available: false,
+      reason: "not documentation-grounded yet",
     })),
     getRetrievalStatus: vi.fn(async () => ({
       available: false,

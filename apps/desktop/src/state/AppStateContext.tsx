@@ -59,8 +59,8 @@ interface AppStateContextValue {
   dismissProviderAutoSelectNotice: () => Promise<void>;
   dismissManagedPolicyNotice: () => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
+  setAutomaticNetworkRequestsEnabled: (enabled: boolean) => Promise<void>;
   setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
-  setUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
   startRun: (agentSlug: string, options?: StartRunOptions) => Promise<RunRecord>;
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
@@ -165,6 +165,7 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
     lastRegistryRefresh: null,
     registryRefreshError: null,
     registrySource: "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents",
+    automaticNetworkRequestsEnabled: true,
     registryInstallCountsEnabled: true,
   };
 }
@@ -432,6 +433,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const setAutomaticNetworkRequestsEnabled = useCallback(async (enabled: boolean) => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Automatic network settings are unavailable in this build.");
+    const nextState = await api.setAutomaticNetworkRequestsEnabled(enabled);
+    setState(nextState);
+    setRegistryAgents(nextState.registryAgents);
+  }, []);
+
   const setRegistryInstallCountsEnabled = useCallback(async (enabled: boolean) => {
     const api = getOpenAdminOSApi();
     if (!api) {
@@ -445,28 +454,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     setError(null);
     try {
       const nextState = await api.setRegistryInstallCountsEnabled(enabled);
-      setState(nextState);
-      setRegistryAgents(nextState.registryAgents);
-    } catch (caughtError) {
-      const settingsError = toError(caughtError);
-      setError(settingsError);
-      throw settingsError;
-    }
-  }, []);
-
-  const setUsageTelemetryEnabled = useCallback(async (enabled: boolean) => {
-    const api = getOpenAdminOSApi();
-    if (!api?.setUsageTelemetryEnabled) {
-      const fallbackError = new Error(
-        "Usage telemetry settings are unavailable in this build.",
-      );
-      setError(fallbackError);
-      throw fallbackError;
-    }
-
-    setError(null);
-    try {
-      const nextState = await api.setUsageTelemetryEnabled(enabled);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
     } catch (caughtError) {
@@ -1219,8 +1206,8 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveProvider,
       dismissProviderAutoSelectNotice,
       dismissManagedPolicyNotice,
+      setAutomaticNetworkRequestsEnabled,
       setRegistryInstallCountsEnabled,
-      setUsageTelemetryEnabled,
       startRun,
       confirmRun,
       rejectRun,
@@ -1287,8 +1274,8 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveProvider,
       dismissProviderAutoSelectNotice,
       dismissManagedPolicyNotice,
+      setAutomaticNetworkRequestsEnabled,
       setRegistryInstallCountsEnabled,
-      setUsageTelemetryEnabled,
       setRegistrySource,
       setActiveTenant,
       setActiveOrganization,

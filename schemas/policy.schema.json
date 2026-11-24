@@ -64,6 +64,14 @@
       "type": "boolean",
       "description": "Skip the first-run model scan when the policy's provider is ready, and open Chat with it."
     },
+    "automaticNetworkRequests": {
+      "enum": ["on", "off"],
+      "description": "Controls app update checks, automatic registry refreshes, documentation index and embedding model downloads, and public registry install counts."
+    },
+    "registryInstallCounts": {
+      "enum": ["on", "off"],
+      "description": "Controls aggregate public registry install counts. Counts are paused whenever automaticNetworkRequests is off."
+    },
     "novaVoiceModes": {
       "type": "array",
       "description": "The voice modes Nova may use. Without this key both are allowed. An empty list turns Nova voice off.",
@@ -116,7 +124,7 @@
       "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "splashtop-kb", "splashtop-packr-kb", "endoflife-ai"]
     },
     "settingKey": {
-      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan", "novaVoiceModes", "novaInstructions", "novaCapabilities", "novaMemory"]
+      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan", "automaticNetworkRequests", "registryInstallCounts", "novaVoiceModes", "novaInstructions", "novaCapabilities", "novaMemory"]
     }
   }
 }

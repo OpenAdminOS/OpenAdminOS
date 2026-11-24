@@ -15,6 +15,7 @@ import { RELEASE_FEED, ReleaseProvider } from "./update-provider.js";
 export type { UpdateState };
 
 let controller: UpdateController | undefined;
+let checksEnabled = true;
 let idleState: UpdateState = { status: "idle" };
 const listeners = new Set<(state: UpdateState) => void>();
 
@@ -81,7 +82,7 @@ export async function checkForUpdatesNow(): Promise<UpdateState> {
     return idleState;
   }
   if (!controller) return getUpdateState();
-  return controller.check();
+  return controller.check("manual");
 }
 
 /**
@@ -104,7 +105,9 @@ export async function checkForUpdatesNow(): Promise<UpdateState> {
 export function startAutoUpdater(
   getMainWindow: () => BrowserWindow | undefined,
   channel: UpdateChannel,
+  enabled: boolean,
 ): void {
+  setUpdateChecksEnabled(enabled);
   if (controller || unavailableReason()) return;
   const { autoUpdater } = electronUpdater;
 
@@ -141,7 +144,13 @@ export function startAutoUpdater(
     },
     notify,
   });
+  controller.setChecksEnabled(checksEnabled);
   controller.configure(channel);
+}
+
+export function setUpdateChecksEnabled(enabled: boolean): void {
+  checksEnabled = enabled;
+  controller?.setChecksEnabled(enabled);
 }
 
 export function stopAutoUpdater(): void {
