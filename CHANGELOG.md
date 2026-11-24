@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
+
 ### Removed
 
 ### Fixed

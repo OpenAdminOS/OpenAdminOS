@@ -49,6 +49,7 @@ changed="$(git diff --name-only "$base" "$commit" -- . \
   ':(exclude)scripts/*.test.mjs' \
   ':(exclude)scripts/capture-screenshots.mjs' \
   ':(exclude)scripts/check-release-compatibility.mjs' \
+  ':(exclude)scripts/decide-release.sh' \
   ':(exclude)scripts/docs-site-routes.mjs' \
   ':(exclude)scripts/generate-gitbook-docs.mjs' \
   ':(exclude)scripts/nightly-app-changes.sh' \

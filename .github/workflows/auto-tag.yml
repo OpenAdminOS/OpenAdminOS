@@ -1,33 +1,29 @@
 name: Auto-tag release versions
 
-# After CI succeeds on main, this workflow decides what the green commit ships:
+# This workflow decides what the current green main commit ships:
 #
-#   - Stable: the repository version has no tag yet (a release-prep merge).
-#     It pushes the tag and dispatches release.yml against it. Waiting for
-#     green CI is important because a squash merge can change path-specific
-#     generated-doc metadata; the documentation workflow may need to land its
-#     reconciliation PR before the release source is ready to tag.
-#   - Nightly: the version is already tagged and an app path changed since the
-#     newest v* tag of either channel. It dispatches release.yml on main with
+#   - Stable: the repository version has no tag and STABLE_RELEASE_APPROVED
+#     equals that version. It pushes the tag and dispatches release.yml against it.
+#   - Nightly: stable is not due and an app path changed since the newest
+#     v* tag of either channel. It dispatches release.yml on main with
 #     nightly_sha set; release.yml computes the nightly version and creates the
 #     prerelease tag only when it publishes. Comparing with the newest tag
 #     rather than the parent commit means a merge whose CI was cancelled by a
 #     later push (the hourly install-stats commit, for example) still ships in
 #     the next nightly.
-#   - Nothing: the version is tagged and only non-app paths changed.
+#   - Nothing: stable is not due and no app paths changed.
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
-  # The "Dispatch release workflow" step calls
-  # `gh workflow run release.yml`, which goes through the
-  # repos/.../actions/workflows/release.yml/dispatches endpoint —
-  # that needs actions:write, separate from contents:write.
+  # Dispatching release.yml uses the workflow dispatch API, which needs
+  # actions:write in addition to contents:write.
   actions: write
 
 env:
@@ -36,19 +32,20 @@ env:
 jobs:
   tag:
     if: >-
-      ${{ github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main' }}
+      ${{ (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.event == 'push' &&
+           github.event.workflow_run.head_branch == 'main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
-      - name: Verify the green commit is still current
+      - name: Verify the checkout is current main
         id: current
         run: |
           set -euo pipefail
@@ -60,42 +57,35 @@ jobs:
             echo "matches=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "sha=$green_sha" >> "$GITHUB_OUTPUT"
           echo "matches=true" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve tag
-        id: tag
-        if: ${{ steps.current.outputs.matches == 'true' }}
+      - name: Verify CI passed before a manual run
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.current.outputs.matches == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAIN_SHA: ${{ steps.current.outputs.sha }}
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
-          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$'; then
-            echo "::error::package.json contains an invalid release version: $version" >&2
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --branch main --event push --commit "$MAIN_SHA" --limit 1 \
+            --json conclusion --jq '.[0].conclusion // ""')"
+          if [ "$conclusion" != success ]; then
+            echo "::error::CI has not passed for main commit $MAIN_SHA. Wait for green CI, then run this workflow again." >&2
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Verify tag doesn't already exist
-        id: existing
+      - name: Decide release channel
+        id: decision
         if: ${{ steps.current.outputs.matches == 'true' }}
         env:
-          TAG: v${{ steps.tag.outputs.version }}
-        run: |
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "::warning::Tag $TAG already exists locally — skipping."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-            echo "::warning::Tag $TAG already exists on origin — skipping."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "exists=false" >> "$GITHUB_OUTPUT"
+          STABLE_RELEASE_APPROVED: ${{ vars.STABLE_RELEASE_APPROVED }}
+        run: bash scripts/decide-release.sh
 
       - name: Push tag
-        if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists != 'true' }}
+        if: ${{ steps.decision.outputs.channel == 'stable' }}
         env:
-          TAG: v${{ steps.tag.outputs.version }}
+          TAG: v${{ steps.decision.outputs.version }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -105,46 +95,22 @@ jobs:
           echo "Pushed $TAG."
 
       - name: Dispatch release workflow
-        if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists != 'true' }}
-        # The tag push above does NOT trigger release.yml on its own —
-        # GitHub deliberately suppresses workflow chaining when one
-        # workflow's GITHUB_TOKEN is the actor that pushed (anti-loop
-        # safeguard). So we dispatch release.yml explicitly here,
-        # against the freshly-pushed tag.
+        if: ${{ steps.decision.outputs.channel == 'stable' }}
+        # Release runs only on dispatch. Use a fully qualified tag ref to
+        # avoid selecting a branch with the same name.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ steps.tag.outputs.version }}
+          TAG: v${{ steps.decision.outputs.version }}
         run: |
           set -euo pipefail
           gh workflow run release.yml --ref "refs/tags/$TAG"
           echo "Dispatched release.yml for $TAG."
 
-      - name: Decide whether main needs a nightly build
-        id: nightly
-        if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists == 'true' }}
-        run: |
-          set -euo pipefail
-          changed="$(bash scripts/nightly-app-changes.sh HEAD)"
-          if [ -z "$changed" ]; then
-            echo "::notice::No app changes since the newest v* tag; skipping the nightly build."
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # A nightly that is still building has not tagged its commit yet,
-          # so later green commits (the hourly install-stats commit, for
-          # example) dispatch again. release.yml queues those runs behind the
-          # running one and skips them when nothing is left to build.
-          echo "App changes:"
-          # sed reads all of its input; head would close the pipe early and
-          # fail this step under pipefail when many paths changed.
-          printf '%s\n' "$changed" | sed -n '1,50p'
-          echo "build=true" >> "$GITHUB_OUTPUT"
-
       - name: Dispatch nightly build
-        if: ${{ steps.nightly.outputs.build == 'true' }}
+        if: ${{ steps.decision.outputs.channel == 'nightly' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NIGHTLY_SHA: ${{ github.event.workflow_run.head_sha }}
+          NIGHTLY_SHA: ${{ steps.current.outputs.sha }}
         run: |
           set -euo pipefail
           gh workflow run release.yml --ref main -f nightly_sha="$NIGHTLY_SHA"
