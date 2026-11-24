@@ -3,7 +3,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -12,6 +14,7 @@ import { Modal, ModalHeader } from "./Modal";
 import { IconDownload, IconExternal, IconWarning } from "./icons";
 import type {
   SupportBundleInput,
+  SupportIssuePreview,
   SupportIssueSubmissionResult,
 } from "../shared/openAdminOS";
 
@@ -78,12 +81,26 @@ function ReportIssueModal({
   const [form, setForm] = useState<ReportIssueForm>(defaultForm);
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true);
   const [publicConfirmed, setPublicConfirmed] = useState(false);
+  const [preview, setPreview] = useState<SupportIssuePreview | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewRequest = useRef(0);
+  const previewPanelId = useId();
+  const previewRegion = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [issueResult, setIssueResult] = useState<SupportIssueSubmissionResult | null>(null);
 
+  const resetPreview = useCallback(() => {
+    previewRequest.current += 1;
+    setPreview(null);
+    setPreviewExpanded(false);
+    setPreviewLoading(false);
+  }, []);
+
   useEffect(() => {
+    resetPreview();
     if (!open) return;
     setForm({
       title: prefill?.title ?? "",
@@ -101,16 +118,55 @@ function ReportIssueModal({
     setError(null);
     setNotice(null);
     setIssueResult(null);
-  }, [open, prefill]);
+  }, [open, prefill, resetPreview]);
+
+  useEffect(() => {
+    if (previewExpanded) previewRegion.current?.scrollIntoView?.({ block: "nearest" });
+  }, [previewExpanded]);
 
   const hasRequiredFields = useMemo(
     () => form.title.trim().length > 0 && form.description.trim().length > 0,
     [form.description, form.title],
   );
-  const canSubmit = hasRequiredFields && publicConfirmed;
+  const canSubmit =
+    hasRequiredFields && publicConfirmed && (!includeDiagnostics || preview !== null);
+  const previewLabel = previewExpanded ? "Hide public issue preview" : "Preview public issue";
 
   const update = (key: keyof ReportIssueForm, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
+    resetPreview();
+  };
+
+  const togglePreview = async () => {
+    if (preview) {
+      setPreviewExpanded(!previewExpanded);
+      return;
+    }
+
+    const api = window.openAdminOS;
+    if (!api) {
+      setError("Desktop bridge unavailable. Use the Electron app to preview the report.");
+      return;
+    }
+    const request = ++previewRequest.current;
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      const result = await api.previewSupportIssue({
+        ...toSupportBundleInput(form),
+        includeDiagnostics,
+      });
+      if (request === previewRequest.current) {
+        setPreview(result);
+        setPreviewExpanded(true);
+      }
+    } catch (caught) {
+      if (request === previewRequest.current) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
+    } finally {
+      if (request === previewRequest.current) setPreviewLoading(false);
+    }
   };
 
   const handleClose = () => {
@@ -123,7 +179,7 @@ function ReportIssueModal({
       setError("Desktop bridge unavailable. Use the Electron app to submit an issue.");
       return;
     }
-    if (!canSubmit) return;
+    if (!canSubmit || previewLoading) return;
 
     setBusy(true);
     setError(null);
@@ -135,6 +191,7 @@ function ReportIssueModal({
         ...toSupportBundleInput(form),
         confirmPublic: true,
         includeDiagnostics,
+        ...(preview ? { previewId: preview.previewId } : {}),
       });
       setIssueResult(result);
       setNotice(`Public GitHub issue #${result.issueNumber} created.`);
@@ -237,7 +294,10 @@ function ReportIssueModal({
           <input
             type="checkbox"
             checked={includeDiagnostics}
-            onChange={(event) => setIncludeDiagnostics(event.target.checked)}
+            onChange={(event) => {
+              setIncludeDiagnostics(event.target.checked);
+              resetPreview();
+            }}
             className="mt-0.5"
           />
           <span>
@@ -246,6 +306,46 @@ function ReportIssueModal({
             results, raw logs, secrets, screenshots, and local databases.
           </span>
         </label>
+
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <Button
+              variant="secondary"
+              onClick={() => void togglePreview()}
+              disabled={!hasRequiredFields || busy || previewLoading}
+              aria-expanded={previewExpanded}
+              aria-controls={previewPanelId}
+            >
+              {previewLoading ? "Preparing preview..." : previewLabel}
+            </Button>
+            {includeDiagnostics && !preview && (
+              <span className="text-xs text-[var(--color-text-muted)]">
+                Open the preview before submitting with diagnostics.
+              </span>
+            )}
+          </div>
+          <div id={previewPanelId} ref={previewRegion} hidden={!previewExpanded}>
+            {preview && (
+              <div
+                className="mt-2 max-h-64 overflow-auto overscroll-contain rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-xs leading-relaxed focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                role="region"
+                aria-label="Public issue preview"
+                tabIndex={0}
+              >
+                <div className="text-[var(--color-text-muted)]">Title</div>
+                <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[var(--color-text)]">
+                  {preview.title}
+                </pre>
+                <div className="mt-3 border-t border-[var(--color-border-soft)] pt-2 text-[var(--color-text-muted)]">
+                  Body (Markdown)
+                </div>
+                <pre className="whitespace-pre-wrap wrap-anywhere font-mono text-[var(--color-text)]">
+                  {preview.body}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
 
         <label className="mt-3 flex items-start gap-3 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] p-3 text-sm text-[var(--color-danger)]">
           <input
@@ -300,7 +400,7 @@ function ReportIssueModal({
           <Button
             variant="primary"
             onClick={() => void submitIssue()}
-            disabled={!canSubmit || busy}
+            disabled={!canSubmit || busy || previewLoading}
             leadingIcon={<IconExternal size={13} />}
           >
             {busy ? "Submitting..." : "Submit public issue"}

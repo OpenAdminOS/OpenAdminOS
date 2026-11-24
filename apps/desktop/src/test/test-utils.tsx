@@ -291,6 +291,11 @@ export function makeMockBridge(
       canceled: false,
       filePath: "/tmp/openadminos-support.json",
     })),
+    previewSupportIssue: vi.fn(async (input) => ({
+      previewId: "support-preview",
+      title: `[Support] ${input.title}`,
+      body: input.description,
+    })),
     submitSupportIssue: vi.fn(async () => ({
       issueUrl: "https://github.com/OpenAdminOS/OpenAdminOS/issues/1",
       issueNumber: 1,

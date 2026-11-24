@@ -9,6 +9,12 @@ When a local LLM provider is selected, tenant data, prompts, agent outputs, run 
 
 OpenAdminOS does not send tenant-content telemetry. Registry install counts, when enabled, are limited to non-content metadata such as agent slug, app version, platform, and a yearly per-agent hash.
 
+## Public Support Reports
+
+Use **Settings > About > Report a problem** to prepare a public GitHub issue. The form can preview the exact title and Markdown body on your device. If you include diagnostics, open the preview before submitting. Review the text for sensitive information and confirm that the issue will be public.
+
+Diagnostics show cache row and page counts and other activity counts as ranges. Errors are summarized by category. You can clear the diagnostics checkbox or export the diagnostics JSON to a local file.
+
 ## Tenant Content in Prompts
 
 Names, descriptions, records, connector responses, and saved evidence can contain instructions written by someone in the tenant. OpenAdminOS marks this content as untrusted data when sending it to a model. The model is told to ignore those instructions, keep the admin's task and tools, and report embedded instructions as a finding. These markers are hidden from answers and do not change the records shown in the app.

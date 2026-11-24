@@ -58,9 +58,10 @@ import {
   type IpcMainInvokeEvent,
   type LoginItemSettingsOptions,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from "electron";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease, tmpdir } from "node:os";
@@ -96,6 +97,11 @@ import {
   windowsTaskBinary,
   windowsTaskState,
 } from "./scheduler-registration.js";
+import {
+  bucketSupportCount,
+  formatSupportIssue,
+  supportIssuePreviewDigest,
+} from "./support-issue-format.js";
 import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   ConnectSplashtopInput,
@@ -151,6 +157,8 @@ import type {
   SendIntuneChatMessageInput,
   ChatModelOverride,
   SupportBundleInput,
+  SupportIssuePreview,
+  SupportIssuePreviewInput,
   SupportIssueSubmissionInput,
   SupportIssueSubmissionResult,
   IntuneChatStreamEvent,
@@ -1184,9 +1192,11 @@ async function runReportIssueSmoke(): Promise<void> {
     throw new Error("Report smoke diagnostics privacy flags were not false.");
   }
 
+  const { preview, ...checks } = result;
+  await writeFile(join(app.getPath("userData"), "preview.json"), JSON.stringify(preview));
   console.log(
     "[report-issue-smoke] passed",
-    JSON.stringify({ ...result, issueUrl: capturedUrl }),
+    JSON.stringify({ ...checks, issueUrl: capturedUrl }),
   );
   app.exit(0);
 }
@@ -2404,6 +2414,16 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
     "diagnostics export notice",
   );
   await clickCheckbox(1);
+  if (!findButton("Submit public issue")?.disabled) {
+    throw new Error("Support issue submission must wait for the diagnostics preview.");
+  }
+  await clickButton("Preview public issue");
+  const previewRegion = '[aria-label="Public issue preview"]';
+  await waitFor(
+    () => document.querySelectorAll(`${previewRegion} pre`).length === 2,
+    "public issue preview",
+  );
+  const [previewTitle, previewBody] = document.querySelectorAll(`${previewRegion} pre`);
   await clickButton("Submit public issue");
   await waitFor(
     () =>
@@ -2417,6 +2437,7 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
     hasModalPrivacyCopy: bodyText().includes("This creates a public GitHub issue"),
     hasPublicConfirmation: bodyText().includes("I understand this creates a public GitHub issue"),
     hasCreatedIssueNotice: bodyText().includes("Public GitHub issue #12345 created"),
+    preview: { title: previewTitle?.textContent, body: previewBody?.textContent },
   };
 }
 
@@ -2827,32 +2848,68 @@ async function exportSupportBundle(
   return { canceled: false, filePath: result.filePath };
 }
 
+const supportIssuePreviews = new WeakMap<
+  WebContents,
+  ReturnType<typeof prepareSupportIssue>
+>();
+
+async function prepareSupportIssue(input: SupportIssuePreviewInput) {
+  const payload = {
+    issue: {
+      title: input.title,
+      description: input.description,
+      stepsToReproduce: input.stepsToReproduce,
+      expectedBehavior: input.expectedBehavior,
+      actualBehavior: input.actualBehavior,
+      source: input.source ?? "sidebar",
+      appVersion: app.getVersion(),
+    },
+    diagnostics: input.includeDiagnostics ? await createSupportBundle(input) : undefined,
+  };
+  const formatted = formatSupportIssue(payload);
+  if ("error" in formatted) throw new Error(formatted.error);
+
+  const { title, body } = formatted.payload;
+  return {
+    input: JSON.stringify(input),
+    payload,
+    preview: { previewId: randomUUID(), title, body },
+  };
+}
+
+async function previewSupportIssue(
+  sender: WebContents,
+  input: SupportIssuePreviewInput,
+): Promise<SupportIssuePreview> {
+  const pending = prepareSupportIssue(input);
+  supportIssuePreviews.set(sender, pending);
+  return (await pending).preview;
+}
+
 async function submitSupportIssue(
-  input: SupportIssueSubmissionInput,
+  sender: WebContents,
+  { confirmPublic, previewId, ...input }: SupportIssueSubmissionInput,
 ): Promise<SupportIssueSubmissionResult> {
   const baseUrl = supportApiBaseUrl();
   if (!baseUrl) {
     throw new Error("Support issue endpoint is not configured in this build.");
   }
 
-  const diagnostics = input.includeDiagnostics
-    ? await createSupportBundle(input)
-    : undefined;
+  const reviewed = previewId ? await supportIssuePreviews.get(sender) : undefined;
+  if (
+    (input.includeDiagnostics || previewId) &&
+    (reviewed?.preview.previewId !== previewId || reviewed?.input !== JSON.stringify(input))
+  ) {
+    throw new Error("Open the current public issue preview before submitting.");
+  }
+  const { payload, preview } = reviewed ?? (await prepareSupportIssue(input));
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/support-issues`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      confirmPublic: true,
-      issue: {
-        title: input.title,
-        description: input.description,
-        stepsToReproduce: input.stepsToReproduce,
-        expectedBehavior: input.expectedBehavior,
-        actualBehavior: input.actualBehavior,
-        source: input.source ?? "sidebar",
-        appVersion: app.getVersion(),
-      },
-      diagnostics,
+      confirmPublic,
+      ...payload,
+      ...(reviewed ? { previewDigest: supportIssuePreviewDigest(preview.title, preview.body) } : {}),
     }),
     signal: AbortSignal.timeout(15_000),
   });
@@ -2902,6 +2959,8 @@ function supportApiBaseUrl(): string {
 async function createSupportBundle(input: SupportBundleInput) {
   const state = await store.getAppState();
   const releaseDiagnostics = await getReleaseDiagnostics();
+  const activeScheduleCount =
+    state.schedulerStatus?.activeScheduleCount ?? releaseDiagnostics.scheduler.activeScheduleCount;
   const activeProvider = state.providers.find(
     (provider) => provider.id === state.activeProviderId,
   );
@@ -2915,7 +2974,7 @@ async function createSupportBundle(input: SupportBundleInput) {
     .slice(0, 5);
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     createdAt: new Date().toISOString(),
     notice:
       "Generated locally by OpenAdminOS for support review. Exported files stay local; public issue submission sends this summary only after explicit confirmation.",
@@ -2926,8 +2985,8 @@ async function createSupportBundle(input: SupportBundleInput) {
       hasStepsToReproduce: Boolean(input.stepsToReproduce?.trim()),
       hasExpectedBehavior: Boolean(input.expectedBehavior?.trim()),
       hasActualBehavior: Boolean(input.actualBehavior?.trim()),
-      ...(input.agentSlug ? { agentSlugHash: diagnosticHash(input.agentSlug) } : {}),
-      ...(input.runId ? { runIdHash: diagnosticHash(input.runId) } : {}),
+      ...(input.agentSlug ? { agentSlugHash: diagnosticIdentifierHash(input.agentSlug) } : {}),
+      ...(input.runId ? { runIdHash: diagnosticIdentifierHash(input.runId) } : {}),
     },
     app: {
       version: releaseDiagnostics.appVersion,
@@ -2959,38 +3018,35 @@ async function createSupportBundle(input: SupportBundleInput) {
             id: activeProvider.id,
             isLocal: activeProvider.isLocal,
             status: activeProvider.status,
-            modelCount: activeProvider.models.length,
+            modelCount: bucketSupportCount(activeProvider.models.length),
             hasDefaultModel: Boolean(activeProvider.defaultModel),
             detailCategory: classifyDiagnosticText(activeProvider.detail),
-            detailHash: diagnosticHash(activeProvider.detail),
           }
         : null,
       providers: state.providers.map((provider) => ({
         id: provider.id,
         isLocal: provider.isLocal,
         status: provider.status,
-        modelCount: provider.models.length,
+        modelCount: bucketSupportCount(provider.models.length),
         hasDefaultModel: Boolean(provider.defaultModel),
         detailCategory: classifyDiagnosticText(provider.detail),
-        detailHash: diagnosticHash(provider.detail),
       })),
       tenants: {
-        connectedCount: state.tenants.length,
+        connectedCount: bucketSupportCount(state.tenants.length),
         hasActiveTenant: Boolean(state.activeTenantId),
       },
       agents: {
-        installedCount: state.installedAgents.length,
-        registryCount: state.registryAgents.length,
-        scheduledCount: state.installedAgents.filter(
-          (agent) => agent.schedule?.enabled === true,
-        ).length,
+        installedCount: bucketSupportCount(state.installedAgents.length),
+        registryCount: bucketSupportCount(state.registryAgents.length),
+        scheduledCount: bucketSupportCount(
+          state.installedAgents.filter((agent) => agent.schedule?.enabled === true).length,
+        ),
       },
       registry: {
         sourceKind:
           state.registrySource === DEFAULT_REGISTRY_SOURCE ? "official" : "custom",
         lastRefresh: state.lastRegistryRefresh,
         refreshErrorCategory: classifyDiagnosticText(state.registryRefreshError),
-        refreshErrorHash: diagnosticHash(state.registryRefreshError),
         installCountsEnabled: state.registryInstallCountsEnabled,
       },
       scheduler: {
@@ -2998,8 +3054,7 @@ async function createSupportBundle(input: SupportBundleInput) {
         enabled: releaseDiagnostics.scheduler.enabled,
         requiresTenant: releaseDiagnostics.scheduler.requiresTenant,
         activeScheduleCount:
-          state.schedulerStatus?.activeScheduleCount ??
-          releaseDiagnostics.scheduler.activeScheduleCount,
+          activeScheduleCount === undefined ? undefined : bucketSupportCount(activeScheduleCount),
         lastWakeAt:
           state.schedulerStatus?.lastWakeAt ?? releaseDiagnostics.scheduler.lastWakeAt,
         lastSuccessAt:
@@ -3008,9 +3063,6 @@ async function createSupportBundle(input: SupportBundleInput) {
         nextDueAt:
           state.schedulerStatus?.nextDueAt ?? releaseDiagnostics.scheduler.nextDueAt,
         lastErrorCategory: classifyDiagnosticText(
-          state.schedulerStatus?.lastError ?? releaseDiagnostics.scheduler.lastError,
-        ),
-        lastErrorHash: diagnosticHash(
           state.schedulerStatus?.lastError ?? releaseDiagnostics.scheduler.lastError,
         ),
       },
@@ -3023,16 +3075,19 @@ async function createSupportBundle(input: SupportBundleInput) {
       },
       runs: summarizeRuns(state.runs),
       recentFailures: runFailures.map((run) => ({
-        runIdHash: diagnosticHash(run.id),
-        agentSlugHash: diagnosticHash(run.agentSlug),
+        runIdHash: diagnosticIdentifierHash(run.id),
+        agentSlugHash: diagnosticIdentifierHash(run.agentSlug),
         trigger: run.trigger ?? "manual",
         providerId: run.providerId,
         queuedAt: run.queuedAt,
         finishedAt: run.finishedAt,
-        failedStepCount: run.steps.filter((step) => step.status === "failed").length,
-        errorLogCount: run.logs.filter((log) => log.level === "error").length,
+        failedStepCount: bucketSupportCount(
+          run.steps.filter((step) => step.status === "failed").length,
+        ),
+        errorLogCount: bucketSupportCount(
+          run.logs.filter((log) => log.level === "error").length,
+        ),
         errorCategory: classifyDiagnosticText(run.error),
-        errorHash: diagnosticHash(run.error),
       })),
       graphCache: await graphCacheDiagnostics(state.activeTenantId),
     },
@@ -3055,7 +3110,7 @@ async function graphCacheDiagnostics(activeTenantId: string | undefined) {
     const cache = await store.getGraphCacheStatus(activeTenantId);
     return {
       available: true,
-      resourceCount: cache.resources.length,
+      resourceCount: bucketSupportCount(cache.resources.length),
       schedule: cache.schedule
         ? {
             enabled: cache.schedule.enabled,
@@ -3065,18 +3120,16 @@ async function graphCacheDiagnostics(activeTenantId: string | undefined) {
             lastSuccessAt: cache.schedule.lastSuccessAt,
             nextRunAt: cache.schedule.nextRunAt,
             lastErrorCategory: classifyDiagnosticText(cache.schedule.lastError),
-            lastErrorHash: diagnosticHash(cache.schedule.lastError),
           }
         : undefined,
       resources: cache.resources.map((resource) => ({
         resource: resource.resource,
-        rows: resource.rows,
-        pages: resource.pages,
+        rows: bucketSupportCount(resource.rows),
+        pages: resource.pages === undefined ? undefined : bucketSupportCount(resource.pages),
         pageLimitReached: resource.pageLimitReached,
         refreshedAt: resource.refreshedAt,
-        scopeCount: resource.scopeSet.length,
+        scopeCount: bucketSupportCount(resource.scopeSet.length),
         lastErrorCategory: classifyDiagnosticText(resource.lastError),
-        lastErrorHash: diagnosticHash(resource.lastError),
       })),
     };
   } catch (error) {
@@ -3084,7 +3137,6 @@ async function graphCacheDiagnostics(activeTenantId: string | undefined) {
       available: false,
       reason: "status-unavailable",
       errorCategory: classifyDiagnosticText(error),
-      errorHash: diagnosticHash(error),
     };
   }
 }
@@ -3116,9 +3168,13 @@ function summarizeRuns(runs: RunRecord[]) {
   }
 
   return {
-    total: runs.length,
-    byStatus,
-    byTrigger,
+    total: bucketSupportCount(runs.length),
+    byStatus: Object.fromEntries(
+      Object.entries(byStatus).map(([status, count]) => [status, bucketSupportCount(count)]),
+    ),
+    byTrigger: Object.fromEntries(
+      Object.entries(byTrigger).map(([trigger, count]) => [trigger, bucketSupportCount(count)]),
+    ),
     latestRunAt,
   };
 }
@@ -3140,7 +3196,7 @@ function classifyDiagnosticText(value: unknown): string | undefined {
   return "other";
 }
 
-function diagnosticHash(value: unknown): string | undefined {
+function diagnosticIdentifierHash(value: string): string | undefined {
   const text = redactedDiagnosticText(value, 1_000);
   if (!text) return undefined;
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
@@ -3906,22 +3962,26 @@ function validateSupportBundleInput(value: unknown): SupportBundleInput {
   };
 }
 
-function validateSupportIssueSubmissionInput(
-  value: unknown,
-): SupportIssueSubmissionInput {
-  if (!isPlainRecord(value)) {
-    throw new Error("support issue input must be an object.");
-  }
-  if (value.confirmPublic !== true) {
-    throw new Error("Public issue confirmation is required.");
-  }
-  if (typeof value.includeDiagnostics !== "boolean") {
+function validateSupportIssuePreviewInput(value: unknown): SupportIssuePreviewInput {
+  if (!isPlainRecord(value) || typeof value.includeDiagnostics !== "boolean") {
     throw new Error("includeDiagnostics must be a boolean.");
   }
   return {
     ...validateSupportBundleInput(value),
-    confirmPublic: true,
     includeDiagnostics: value.includeDiagnostics,
+  };
+}
+
+function validateSupportIssueSubmissionInput(
+  value: unknown,
+): SupportIssueSubmissionInput {
+  if (!isPlainRecord(value) || value.confirmPublic !== true) {
+    throw new Error("Public issue confirmation is required.");
+  }
+  return {
+    ...validateSupportIssuePreviewInput(value),
+    confirmPublic: true,
+    previewId: optionalBoundedString(value.previewId, "previewId", 64),
   };
 }
 
@@ -5913,9 +5973,15 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:preview-support-issue",
+    handleTrusted((event, input: unknown) =>
+      previewSupportIssue(event.sender, validateSupportIssuePreviewInput(input)),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:submit-support-issue",
-    handleTrusted((_event, input: unknown) =>
-      submitSupportIssue(validateSupportIssueSubmissionInput(input)),
+    handleTrusted((event, input: unknown) =>
+      submitSupportIssue(event.sender, validateSupportIssueSubmissionInput(input)),
     ),
   );
   ipcMain.handle(

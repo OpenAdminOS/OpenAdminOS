@@ -3538,11 +3538,23 @@ export interface SupportBundleExportResult {
   filePath?: string;
 }
 
-export interface SupportIssueSubmissionInput extends SupportBundleInput {
-  /** Explicit acknowledgement that this creates a public GitHub issue. */
-  confirmPublic: true;
+export interface SupportIssuePreviewInput extends SupportBundleInput {
   /** Include the sanitized diagnostics summary in the public issue body. */
   includeDiagnostics: boolean;
+}
+
+export interface SupportIssuePreview {
+  // TODO(ugur): Is previewId the right name for the reviewed report token in the desktop bridge?
+  previewId: string;
+  title: string;
+  body: string;
+}
+
+export interface SupportIssueSubmissionInput extends SupportIssuePreviewInput {
+  /** Explicit acknowledgement that this creates a public GitHub issue. */
+  confirmPublic: true;
+  /** Required when including diagnostics. Identifies the reviewed report. */
+  previewId?: string;
 }
 
 export interface SupportIssueSubmissionResult {
@@ -3570,6 +3582,8 @@ export interface OpenAdminOSApi {
    * attachment to a GitHub issue. This never uploads anything.
    */
   exportSupportBundle(input: SupportBundleInput): Promise<SupportBundleExportResult>;
+  /** Prepare the public issue title and body on this device without uploading. */
+  previewSupportIssue(input: SupportIssuePreviewInput): Promise<SupportIssuePreview>;
   /**
    * Create a public GitHub support issue through the OpenAdminOS web
    * endpoint. GitHub credentials stay server-side.

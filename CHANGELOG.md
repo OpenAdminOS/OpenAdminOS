@@ -18,6 +18,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+- Public support reports require an exact preview when diagnostics are included. Diagnostics group cache and activity counts into ranges and report errors by category only.
+
 ## [0.8.0] - 2026-11-24
 
 ### Highlights

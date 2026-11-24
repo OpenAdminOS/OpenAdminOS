@@ -10,6 +10,7 @@ import type {
   SaveTextFileArgs,
   SetAzureOpenAIProviderConfigInput,
   SupportBundleInput,
+  SupportIssuePreviewInput,
   SupportIssueSubmissionInput,
   StartRunOptions,
   UpdateChannel,
@@ -56,6 +57,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
   exportSupportBundle: (input: SupportBundleInput) =>
     ipcRenderer.invoke("openadminos:export-support-bundle", input),
+  previewSupportIssue: (input: SupportIssuePreviewInput) =>
+    ipcRenderer.invoke("openadminos:preview-support-issue", input),
   submitSupportIssue: (input: SupportIssueSubmissionInput) =>
     ipcRenderer.invoke("openadminos:submit-support-issue", input),
   writeClipboardText: (text: string) =>

@@ -1,9 +1,17 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tsImport } from "tsx/esm/api";
+import { IntelligenceSqliteStore } from "../apps/desktop/dist-electron/electron/intune-chat/sqlite-store.js";
+
+const { formatSupportIssue, supportIssuePreviewDigest } = await tsImport(
+  "../web/src/lib/support/issue-format.ts",
+  import.meta.url,
+);
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const viteBin = resolve(
@@ -24,6 +32,22 @@ const electronEnv = { ...process.env };
 delete electronEnv.ELECTRON_RUN_AS_NODE;
 
 try {
+  const store = new IntelligenceSqliteStore(join(userDataDir, "openadminos.db"));
+  try {
+    store.replaceGraphResources({
+      tenantId: "report-smoke-tenant",
+      resource: "managedDevices",
+      label: "Managed devices",
+      scopeSet: [],
+      rows: Array.from({ length: 137 }, (_, index) => ({ id: `report-smoke-device-${index}` })),
+      pageCount: 14,
+      pageLimitReached: true,
+      refreshedAt: new Date().toISOString(),
+    });
+  } finally {
+    store.close();
+  }
+
   supportServer = createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/api/support-issues") {
       res.writeHead(404, { "content-type": "application/json" });
@@ -84,9 +108,10 @@ try {
     throw new Error(`Electron report issue smoke exited with code ${code}.`);
   }
 
-  const [externalUrl, supportBundle] = await Promise.all([
+  const [externalUrl, supportBundle, rawPreview] = await Promise.all([
     readFile(externalUrlFile, "utf8"),
     readFile(supportBundleFile, "utf8"),
+    readFile(join(userDataDir, "preview.json"), "utf8"),
   ]);
   if (externalUrl.trim() !== issueUrl) {
     throw new Error(`Unexpected GitHub issue URL: ${externalUrl}`);
@@ -109,12 +134,19 @@ try {
     throw new Error("Support issue submission did not include diagnostics.");
   }
 
+  const formatted = formatSupportIssue(submission);
+  assert.ok("payload" in formatted, "The web formatter must accept the submitted report.");
+  const { title, body } = formatted.payload;
+  assert.deepEqual(JSON.parse(rawPreview), { title, body });
+  assert.equal(submission.previewDigest, supportIssuePreviewDigest(title, body));
+
   const submittedText = JSON.stringify(submission);
   for (const forbidden of [
     "Report Smoke Tenant",
     "admin@report-smoke.invalid",
     "report-smoke-agent",
     "report-smoke-run",
+    "report-smoke-device",
   ]) {
     if (submittedText.includes(forbidden)) {
       throw new Error(`Report smoke leaked ${forbidden} into the support issue payload.`);
@@ -122,6 +154,21 @@ try {
   }
 
   const parsedBundle = JSON.parse(supportBundle);
+  for (const diagnostics of [parsedBundle, submission.diagnostics]) {
+    assert.equal(diagnostics.schemaVersion, 2);
+    const { graphCache, tenants, runs, recentFailures } = diagnostics.state;
+    const devices = graphCache.resources.find(({ resource }) => resource === "managedDevices");
+    assert.ok(devices);
+    assert.equal(devices.rows, "101-1000");
+    assert.equal(devices.pages, "11-100");
+    assert.equal(devices.pageLimitReached, true);
+    assert.equal(tenants.connectedCount, "1-10");
+    assert.equal(runs.total, "1-10");
+    assert.equal(runs.byStatus.failed, "1-10");
+    assert.equal(recentFailures[0].errorCategory, "ollama");
+    assert.equal(recentFailures[0].failedStepCount, "0");
+    assert.doesNotMatch(JSON.stringify(diagnostics), /"(?:detailHash|errorHash|\w+ErrorHash)":/);
+  }
   if (parsedBundle.privacy?.automaticUploadByOpenAdminOS !== false) {
     throw new Error("Diagnostics bundle did not declare automaticUploadByOpenAdminOS=false.");
   }
