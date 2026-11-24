@@ -470,7 +470,7 @@ export async function runAgenticChat(
       for await (const chunk of input.llm.stream(options)) {
         completion = { text: chunk.accumulated, model: chunk.model };
         const partial = partialFinalAnswer(chunk.accumulated);
-        if (partial !== undefined && partial.trim()) {
+        if (!roadmapQuestion && partial !== undefined && partial.trim()) {
           if (!answerShown) input.modelStep?.writing();
           answerShown = true;
           input.onAnswerText(partial, learnAnswered);
@@ -735,7 +735,9 @@ export async function runAgenticChat(
         turns.push({ role: 'repair', content: `A failed data lookup cannot support a final answer or a zero count. Correct the query for ${[...invalidQueries.keys()].join(', ')} using the available fields before answering.` });
         continue;
       }
-      await settleModelStep(finalOutcome(), true);
+      const roadmapFailure = roadmapQuestion ? failedRoadmapCheck(toolTrace) ??
+        (!roadmapServer || !attemptedServers.has(roadmapServer.id) ? ROADMAP_NOT_CONSULTED : undefined) : undefined;
+      await settleModelStep(roadmapFailure ? { kind: "repair", reason: "roadmap", ends: true } : finalOutcome(), !roadmapFailure);
       // The repair budget for required sources is spent: the answer is kept, never silently.
       const notConsulted = missingNames.length > 0
         ? `\n\n${missingNames.join(" and ")} ${missingNames.length === 1 ? "was" : "were"} not consulted for this answer. The model answered without calling ${missingNames.length === 1 ? "it" : "them"}.`
@@ -744,16 +746,16 @@ export async function runAgenticChat(
       const excerptsNote = excerptsOnly ? "\n\nThis answer is based on search excerpts; the full article was not read." : "";
       return {
         ok: true,
-        answer: finalAnswer + notConsulted + excerptsNote,
+        answer: roadmapFailure ? `${roadmapFailure} Retry the question or open What ran for details.` : finalAnswer + notConsulted + excerptsNote,
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
         // Only sources whose content reached the model that wrote this answer.
-        documentationSources: citations.sources.slice(0, consultedSources),
+        documentationSources: roadmapFailure ? [] : citations.sources.slice(0, consultedSources),
         // Injected text can steer next, so links and tenant values never become a suggestion.
         // After tenant data was read (a tenant or mixed kind; a tenant tool makes docs mixed)
         // the model's next is dropped: a field no index knows could reach the next question.
-        followUps: docsOnly ? validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)) : [],
+        followUps: docsOnly && !roadmapFailure ? validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)) : [],
         ...(input.askTitle ? titleField(validTitle(action.title, (text) => holdsTenantData(input.tools, text))) : {}),
       };
     }
@@ -779,6 +781,11 @@ export async function runAgenticChat(
     if (roadmapServer && !attemptedServers.has(roadmapServer.id) && mcpTool?.serverId !== roadmapServer.id) {
       await settleModelStep({ kind: "repair", reason: "roadmap-first" });
       turns.push({ role: "repair", content: `This question needs the public roadmap first. Call a tool from ${roadmapServer.name} before checking tenant data or another source.` });
+      continue;
+    }
+    if (roadmapQuestion && isTenantTool(action.tool) && failedRoadmapCheck(toolTrace)) {
+      await settleModelStep({ kind: "repair", reason: "roadmap-first" });
+      turns.push({ role: "repair", content: "The public roadmap lookup failed. Retry it or report the lookup failure before checking tenant data." });
       continue;
     }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
@@ -956,6 +963,20 @@ export async function runAgenticChat(
     iterations: compact ? iteration : MAX_AGENTIC_ITERATIONS,
     ...(responseModel ? { model: responseModel } : {}),
   };
+}
+
+export const ROADMAP_NOT_CONSULTED = "The roadmap items were not checked. Microsoft Release Communications was not consulted.";
+
+/** A later successful query, including a confirmed empty result, can recover the source failure. */
+export function failedRoadmapCheck(trace: readonly IntuneChatToolTraceEntry[]): string | undefined {
+  const calls = trace.filter((entry) => entry.mcpSource?.serverId === RELEASE_COMMUNICATIONS_SERVER_ID);
+  if (calls.some((entry) => !entry.error)) return undefined;
+  const source = calls.at(-1)?.mcpSource;
+  if (!source) return undefined;
+  const reason = source.toolError ? `${source.serverName} returned an error`
+    : source.sentToHost ? `${source.serverName} did not respond`
+      : `the query to ${source.serverName} could not be sent`;
+  return `The roadmap items were not checked because ${reason}.`;
 }
 
 const JSON_ESCAPES: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };

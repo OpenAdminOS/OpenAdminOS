@@ -304,7 +304,8 @@ export class McpHost {
     }
     const text = resultText(result);
     if (result.isError === true) {
-      throw new McpHostError("tool-error", `${endpoint.name} returned an error: ${clip(text || "no detail", 300)}`);
+      const detail = toolErrorDetail(result.structuredContent ?? parseJson(text));
+      throw new McpHostError("tool-error", `${endpoint.name} returned an error: ${clip(detail || text || "no detail", 300)}`);
     }
     const structured = result.structuredContent ?? parseJson(text);
     const data = structured !== null && typeof structured === "object" ? { structured } : {};
@@ -494,6 +495,15 @@ function parseJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** An MCP tool can give a specific structured error alongside generic text. */
+function toolErrorDetail(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { detail, message, error } = value as { detail?: unknown; message?: unknown; error?: unknown };
+  const nested = error && typeof error === "object" ? error as { detail?: unknown; message?: unknown } : undefined;
+  return [detail, nested?.detail, nested?.message, message, error]
+    .find((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))?.trim();
 }
 
 function isTimeout(error: unknown): boolean {

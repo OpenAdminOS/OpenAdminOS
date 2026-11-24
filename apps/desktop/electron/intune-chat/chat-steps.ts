@@ -492,7 +492,12 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry, readsItem = fals
     }
     // A call that stopped before sending (bad params, the query writer, the cache index, a server turned off) sent nothing.
     if (entry.error && !entry.mcpSource.sentToHost) return { status: "failed", title: `Did not send a ${serverName} query`, detail: `${tool} · ${entry.error}`, sent: undefined, durationMs };
-    if (entry.error && entry.mcpSource.toolError) return { status: "failed", title: `${serverName} returned an error`, detail: `${tool} · ${entry.error}`, durationMs };
+    if (entry.error && entry.mcpSource.toolError) {
+      const title = `${serverName} returned an error`;
+      const prefix = `${title}: `;
+      const detail = entry.error.startsWith(prefix) ? entry.error.slice(prefix.length) : entry.error;
+      return { status: "failed", title, detail: `${tool} · ${detail}`, durationMs };
+    }
     if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs };
     if (entry.mcpSource.empty) return { status: "completed", title: `${serverName} found nothing`, detail: `${tool} · no results for this query`, durationMs };
     const count = results?.length ?? 0;
@@ -537,7 +542,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent" | "roadmap-first"; ends?: true }
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "empty" | "documentation" | "excerpts" | "budget" | "budget-spent" | "roadmap-first" | "roadmap"; ends?: true }
   /** The prompt did not fit the model's context window: the loop ends and Chat answers from cached data. */
   | { kind: "context-limit" }
   /** The request did not reach the model: the loop ends with provider-unavailable. */
@@ -572,6 +577,7 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
   budget: "Lookup skipped: no model call left",
   "budget-spent": "Tool skipped: no model call left",
   "roadmap-first": "Asked the model to check the roadmap first",
+  "roadmap": "Could not verify the roadmap answer",
 };
 
 /** A resource label inside a sentence: product names keep their capital, other labels read as plain words. */

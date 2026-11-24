@@ -85,6 +85,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
 - Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance.
 
 - Model checks for Ollama, LM Studio and Lemonade show why the endpoint could not be checked and how to retry after fixing it. Recovery names an environment variable only when it supplied the address.
