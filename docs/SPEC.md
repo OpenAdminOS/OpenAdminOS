@@ -2681,7 +2681,8 @@ from a provider list read earlier. For runs the host records the fit issue on
 the run (`RunRecord.modelFit`) when it fails, after that check. For older
 reasoning-only runs without that issue, the run page checks the recorded cause
 or matches Ollama's two reasoning-only messages after removing the app's
-write-plan failure wrappers. The offer requires an on-device model and is
+write-plan failure wrappers and the MXC script's `llm.complete` wrapper. The
+offer requires an on-device model and is
 unavailable for runs recorded against Ollama Cloud or an off-device server.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens

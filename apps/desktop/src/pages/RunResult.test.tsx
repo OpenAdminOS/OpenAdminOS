@@ -928,10 +928,13 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5", tenantId: "tenant-1", bindProviderEndpoint: true, expectedProviderDestination: "dest-openai" })));
   });
 
-  it("keeps the recovery card and offers on-device alternatives for an older wrapped reasoning-only failure", async () => {
+  it.each([
+    "Nothing was applied: The proposal could not be checked against the tenant before applying, so nothing was applied. ",
+    'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: ',
+  ])("keeps the recovery card and offers on-device alternatives for an older reasoning-only failure wrapped with %s", async (prefix) => {
     const run = createAwaitingConfirmationRun({
       status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1",
-      error: "Nothing was applied: The proposal could not be checked against the tenant before applying, so nothing was applied. " + REASONING_ERROR,
+      error: prefix + REASONING_ERROR,
     });
     const providers = mockProviders.map((provider) => provider.id === "ollama"
       ? { ...provider, models: ["llama3.1", "cloud-alias", "qwen:32b-cloud", "qwen:4b", "custom"], remoteModels: ["cloud-alias"] }
