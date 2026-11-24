@@ -1731,8 +1731,8 @@ Distribution semantics:
 
 Cache lifecycle:
 
-- The first registry refresh starts in the background when the desktop host initializes. Browsing Chat does not wait for network, MSAL, or provider detection.
-- On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
+- With Automatic network requests on, the first registry refresh starts in the background when the desktop host initializes. Browsing Chat does not wait for network, MSAL, or provider detection.
+- While automatic registry refresh is enabled, refresh `index.json` on launch, every six hours and on focus after an hour. Compare to cached per-agent versions and surface per-agent update badges.
 - Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
 - Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must retain a valid revision, and all cached entries pass the same schema and manifest-metadata validation as fetched entries. Legacy signature metadata is ignored.
 - Failed refresh is silent: keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
@@ -1947,13 +1947,47 @@ and `EBUSY` failures with bounded backoff (seven attempts, 1.26 seconds of waiti
 The previous destination remains intact throughout; persistent errors still surface.
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
-error-reporting telemetry. Packaged production builds may send a minimal public
-registry install count event when a public agent is installed: agent slug, app
-version, OS platform, and a yearly per-agent SHA-256 hash derived from a random
-local install ID. Users can disable registry install counts in Settings. The
-stats endpoint may use IP addresses for short-lived rate limiting. These events
-must never include tenant identifiers, user identifiers, prompts, run results,
-or Microsoft Graph data.
+error-reporting telemetry. Packaged builds count public registry installs by
+default. An event contains only the agent slug, app version, and OS platform.
+Before sending, the desktop records the attempt for that slug and UTC year in
+local state. A failed or interrupted request still uses that year's attempt.
+This can undercount installs. Existing installs are not reported retroactively.
+Agent Hub uses bundled counts.
+
+The stats endpoint keeps aggregate pending counters and eight-day UTC daily
+counters. The cron sums the current day and six preceding UTC days. IP addresses
+are used briefly for rate limiting. Legacy clients can still send an install ID,
+which the endpoint ignores. The desktop removes its former identifier and usage
+telemetry preference when upgrading.
+
+Run the install-count migration in this order.
+
+1. Deploy the web app with the updated install endpoint and stats cron.
+2. POST a valid public agent slug, app version, and platform to `/api/install`
+   without `installId`. Confirm an HTTP 200 response with `{"counted":true}`.
+3. With the web dependencies installed and `UPSTASH_REDIS_REST_URL` and
+   `UPSTASH_REDIS_REST_TOKEN` set for the deployed database, run
+   `node scripts/delete-legacy-install-keys.mjs` and review the count. Then run
+   `node scripts/delete-legacy-install-keys.mjs --apply` to remove the legacy
+   `oa:dedup:<id>:<slug>` and `oa:installs7d:<slug>` keys. The script preserves
+   support deduplication, rate limits, pending install keys and per-day counts.
+4. Release the updated desktop app.
+
+The stats cron preserves lifetime totals and applies existing pending deltas.
+The seven-day total starts from the new daily counters.
+
+Settings > Privacy offers Automatic network requests, on by default. Turning it
+off stops background app update checks, startup, focus and periodic registry
+refreshes, automatic documentation index and embedding model downloads, and
+install-count pings. In-flight automatic registry refreshes and documentation
+downloads are cancelled. Manual app update checks, registry refreshes and
+documentation index installations remain available. Schedules, tenant cache
+refreshes, connector deliveries and model checks you set up still run.
+The separate registry install counts and documentation auto-install
+preferences also default to on and are retained when automatic requests are
+paused. In `policy.json`, `automaticNetworkRequests` and `registryInstallCounts`
+take `"on"` or `"off"`. A locked value overrides the user's saved preference.
+An unlocked value is the default until the user saves a choice.
 
 User-initiated support bundles are a separate explicit action, not telemetry.
 The Settings → About action and contextual failure-state actions open an in-app
@@ -2350,10 +2384,12 @@ that cannot embed queries never fetches the index. Making a local runtime
 a hard product requirement was considered and deliberately deferred: the
 positioning is local-first by default, not local-only.
 
-Documentation grounding has two prerequisites and both install themselves:
-the versioned index (downloaded from the published release into userData)
-and the embedding model it was built with (`nomic-embed-text`, pulled
-through the local Ollama). One Settings switch governs both. The app never
+Documentation grounding has two prerequisites: the versioned index (downloaded
+from the published release into userData) and the embedding model it was built
+with (`nomic-embed-text`, pulled through the local Ollama). The Privacy setting
+Automatically install the documentation index governs both at launch and depends
+on Automatic network requests. Users can download or import an index manually
+from Privacy. The app never
 installs Ollama itself; when Ollama is absent the model pull is skipped
 and Settings names the missing prerequisite instead of showing grounding
 as available. Embedding always runs against loopback, so questions never
@@ -3642,7 +3678,7 @@ These were debated and decided. Don't relitigate without explicit reason.
 | Write-mode agent confirmation | Always pause for diff, every time | Trust requires no exceptions |
 | Activity stream default | Plain language with raw-log toggle | Admins want comprehension first, debug detail on demand |
 | Default LLM provider | Ollama (local) | Trust positioning starts with the default |
-| Tenant/prompt/run/error telemetry default | Off | Local-first means local-first; registry install counts are a separate aggregate counter with a Settings opt-out |
+| Registry install counts | On | Settings > Privacy can disable them individually or with Automatic network requests |
 | Update model for agents | Pin by default, explicit upgrade | Avoids surprise behavior changes mid-shift |
 | Tenant scope expiry behavior | Block all agent runs until re-auth | No partial-trust states |
 | Multi-tenant switcher | Color-coded, search-first, scope-guarded | MSPs may manage 100+ tenants |
@@ -4291,7 +4327,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `19-fleet.html` | v0.5 multi-tenant fleet drift status and per-tenant write confirmation | ✅ Done |
 | `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
 | `22-office.html` | Office room, original persona avatars, and assignment briefing | ✅ Done |
-| `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
+| `21-telemetry.html` | Historical v0.5 Privacy design | Retired |
 | `27-calm-shell.html` | Calm shell desktop redesign | ✅ Done |
 | `28-logo-explorations.html` | Logo concepts; concept A (oa ligature) shipped | ✅ Done |
 | `29-first-run.html` | Two-choice welcome, pilot mode, and connected-stage summary | ✅ Done |
@@ -4364,8 +4400,6 @@ v0.5 adds four capability areas on top of the drift timeline; each maps to an ac
 **Retrieval.** Local documentation grounding ported from the model bench's `retrieve.mjs`: a locally installed index (Intune/Entra/Defender docs, matched to one embedding model) is cosine-ranked against the question, with source-file provenance on every hit. Query embedding hits a loopback embedding server and refuses any non-loopback endpoint, so a local provider never sends the question off-device. A missing index is a designed "not documentation-grounded yet" state, not an error. Index distribution uses GitHub release assets on a dedicated `docs-index-<date>` tag: release assets allow files just under 2 GiB and are downloaded with no bandwidth limit or charge, which suits a 264 MB index, while the marketing host caps static uploads at 100 MB on its lower tier and bills egress on blob storage. The index ships on its own tag so it can be rebuilt on the documentation's cadence without cutting an app release, and `scripts/publish-docs-index.mjs` generates the SHA-256 manifest and creates the release. Downloads are hash-verified and staged before replacing a working index. Machines without network access install the same files from a folder.
 
 Query embedding reuses the Ollama instance the app already manages (`nomic-embed-text`, 768 dimensions, matching the index) rather than supervising a second embedding server, and refuses non-loopback endpoints.
-
-**Opt-in usage telemetry.** Off by default. Counts and versions only: a resettable anonymous install id, app version, OS/arch, whether the active provider is local or hosted, and bucketed (never exact) tenant/agent/run counts, plus whether a retrieval index is installed. Never tenant content, tenant ids, prompts, run results, or error text. The Privacy preview shows the exact JSON, and the send path serializes that same payload, so preview and wire can never diverge. Nothing is sent unless the user opts in AND the build has a collector URL configured (empty by default).
 
 **Fleet.** For installs with two or more tenants, a Fleet view aggregates each tenant's active baseline, drift counts, and last capture time, filterable by tenant group. Multi-tenant runs keep per-tenant confirmation for writes.
 

@@ -16,35 +16,37 @@ export function getRedis(): Redis {
 }
 
 /**
- * Redis key layout — all keys live under the `oa:` prefix so the same
+ * Redis key layout. All keys live under the `oa:` prefix so the same
  * Upstash database can host other projects without collision.
  *
  *   oa:pending:installs:<slug>             integer     pending install delta
- *   oa:dedup:<installId>:<slug>            string      "1" + 1y TTL; installId is a yearly per-agent digest for current clients
  *   oa:rate:install:<ip>:<bucket>          integer     rate-limit counter (60s TTL)
  *   oa:rate:agent-submit:<ip>:<bucket>     integer     rate-limit counter (1h TTL)
  *   oa:rate:support-issue:<ip>:<bucket>    integer     rate-limit counter (1h TTL)
  *   oa:dedup:support-issue:<hash>          string      "1" + 24h TTL
- *   oa:installs7d:<slug>                   zset        installId → unix-ms score
+ *   oa:installs:day:<date>:<slug>          integer     UTC day count (8-day TTL)
  *   oa:slugs                               string      JSON-encoded array, 1h TTL
  */
 export const keys = {
   pendingInstalls: (slug: string) => `oa:pending:installs:${slug}`,
-  dedup: (installId: string, slug: string) => `oa:dedup:${installId}:${slug}`,
   rate: (ip: string, bucket: number) => `oa:rate:install:${ip}:${bucket}`,
   agentSubmissionRate: (ip: string, bucket: number) => `oa:rate:agent-submit:${ip}:${bucket}`,
   supportIssueRate: (ip: string, bucket: number) => `oa:rate:support-issue:${ip}:${bucket}`,
   supportIssueDedup: (hash: string) => `oa:dedup:support-issue:${hash}`,
-  installs7d: (slug: string) => `oa:installs7d:${slug}`,
+  dailyInstalls: (slug: string, day: string) => `oa:installs:day:${day}:${slug}`,
   knownSlugs: () => `oa:slugs`,
 } as const;
-
-/** Lifetime of a dedup entry. Current clients rotate install ids annually. */
-export const DEDUP_TTL_SECONDS = 365 * 24 * 60 * 60;
 
 /** Rate-limit window for `/api/install` per IP. */
 export const RATE_LIMIT_WINDOW_SECONDS = 60;
 export const RATE_LIMIT_MAX_PER_WINDOW = 30;
 
-/** 7d window for `installs7d` snapshots. */
-export const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+export const INSTALL_DAY_TTL_SECONDS = 8 * 24 * 60 * 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Seven UTC calendar days ending today. */
+export function recentInstallDays(now: Date): string[] {
+  return Array.from({ length: 7 }, (_, offset) =>
+    new Date(now.getTime() - offset * DAY_MS).toISOString().slice(0, 10),
+  );
+}

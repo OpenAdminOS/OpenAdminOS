@@ -6,13 +6,21 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Settings > Privacy controls automatic app update checks, registry refreshes, documentation index and embedding model downloads, and registry install counts. IT can lock automatic requests and install counts with policy.json.
+
 ### Changed
+
+- Public registry install counts send only the agent slug, app version, and platform. OpenAdminOS records one attempt per agent and UTC year on the device, including failed requests. About shows counts as paused when automatic requests are off and the count preference is on.
 
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
 
 ### Removed
 
+- Removed the unused usage telemetry setting and its local install identifier.
+
 ### Fixed
+
+- Manual update checks still work while automatic checks are paused. Turning off automatic network requests cancels in-flight automatic registry refreshes.
 
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
 

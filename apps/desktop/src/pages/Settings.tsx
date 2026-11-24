@@ -67,7 +67,6 @@ import {
   type TrustState,
   type UpdateChannelSettings,
   type UpdateState,
-  type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
 import { GATEWAY_TENANT_NOT_CONNECTED_COPY } from "../shared/gateway-copy";
@@ -181,8 +180,8 @@ export default function Settings() {
     setActiveProvider,
     setActiveModel,
     setRegistrySource,
+    setAutomaticNetworkRequestsEnabled,
     setRegistryInstallCountsEnabled,
-    setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
   // An explicit refresh checks every provider in full, also right after the first-run scan.
@@ -511,11 +510,12 @@ export default function Settings() {
                 registrySource={state.registrySource}
                 registryRefreshError={state.registryRefreshError}
                 lastRegistryRefresh={state.lastRegistryRefresh}
+                automaticNetworkRequestsEnabled={state.automaticNetworkRequestsEnabled}
                 registryInstallCountsEnabled={state.registryInstallCountsEnabled}
-                usageTelemetryEnabled={state.usageTelemetryEnabled ?? false}
+                policy={state.managedPolicy}
+                onSetAutomaticNetworkRequestsEnabled={setAutomaticNetworkRequestsEnabled}
                 onSetRegistrySource={setRegistrySource}
                 onSetRegistryInstallCountsEnabled={setRegistryInstallCountsEnabled}
-                onSetUsageTelemetryEnabled={setUsageTelemetryEnabled}
               />
             </SettingsPageSection>
             <SettingsPageSection id="about" visible={visibleSectionIds.has("about")} query={settingsQuery}>
@@ -3768,29 +3768,55 @@ function AppearanceSection() {
   );
 }
 
+function PrivacySwitch({ name, enabled, disabled, locked, onChange }: {
+  name: string;
+  enabled: boolean;
+  disabled: boolean;
+  locked?: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {locked && <SetByItBadge />}
+      <div className="w-fit shrink-0">
+        <Switch
+          className="gap-3"
+          checked={enabled}
+          disabled={disabled || locked}
+          aria-label={name}
+          label={enabled ? "On" : "Off"}
+          onCheckedChange={onChange}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PrivacySection({
   trust,
   registrySource,
   registryRefreshError,
   lastRegistryRefresh,
+  automaticNetworkRequestsEnabled,
   registryInstallCountsEnabled,
-  usageTelemetryEnabled,
+  policy,
+  onSetAutomaticNetworkRequestsEnabled,
   onSetRegistrySource,
   onSetRegistryInstallCountsEnabled,
-  onSetUsageTelemetryEnabled,
 }: {
   trust: TrustState;
   registrySource: string;
   registryRefreshError: string | null;
   lastRegistryRefresh: string | null;
+  automaticNetworkRequestsEnabled: boolean;
   registryInstallCountsEnabled: boolean;
-  usageTelemetryEnabled: boolean;
+  policy: ManagedPolicyStatus | undefined;
+  onSetAutomaticNetworkRequestsEnabled: (enabled: boolean) => Promise<void>;
   onSetRegistrySource: (
     url: string,
     options?: { confirmExternalSource?: boolean },
   ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   onSetRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
-  onSetUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
 }) {
   const platform = window.openAdminOS?.platform ?? "unknown";
   const { settings: updateChannelSettings, loadError: updateChannelError } = useUpdateChannel();
@@ -3801,53 +3827,18 @@ function PrivacySection({
       ? "stable"
       : updateChannelSettings.channel
     : null;
-  const [savingInstallCounts, setSavingInstallCounts] = useState(false);
-  const [installCountsError, setInstallCountsError] = useState<string | null>(null);
+  const [privacySaving, setPrivacySaving] = useState(false);
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const [retrievalAutoInstall, setRetrievalAutoInstall] = useState<boolean | null>(null);
+  const networkLocked = policy?.locked.includes("automaticNetworkRequests") ?? false;
+  const countsLocked = policy?.locked.includes("registryInstallCounts") ?? false;
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
-  const [telemetryPreview, setTelemetryPreview] = useState<{
-    enabled: boolean;
-    endpointConfigured: boolean;
-    payload: UsageTelemetryPayload;
-  } | null>(null);
-  const [telemetryPreviewLoading, setTelemetryPreviewLoading] = useState(true);
-  const [telemetrySaving, setTelemetrySaving] = useState(false);
-  const [telemetryTestSending, setTelemetryTestSending] = useState(false);
-  const [telemetryError, setTelemetryError] = useState<string | null>(null);
-  const [telemetryTestResult, setTelemetryTestResult] = useState<string | null>(null);
   const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus | null>(null);
   const [retrievalLoading, setRetrievalLoading] = useState(true);
   const [retrievalRefreshing, setRetrievalRefreshing] = useState(false);
   const [retrievalInstalling, setRetrievalInstalling] = useState(false);
   const [retrievalError, setRetrievalError] = useState<string | null>(null);
   const isOfficialRegistry = isOfficialRegistrySource(registrySource);
-  const telemetryToggleAvailable = Boolean(
-    window.openAdminOS?.setUsageTelemetryEnabled,
-  );
-
-  const loadTelemetryPreview = useCallback(async () => {
-    const getPreview = window.openAdminOS?.getUsageTelemetryPreview;
-    setTelemetryPreviewLoading(true);
-    setTelemetryError(null);
-    if (!getPreview) {
-      setTelemetryPreview(null);
-      setTelemetryError("The exact telemetry preview is unavailable in this build.");
-      setTelemetryPreviewLoading(false);
-      return;
-    }
-
-    try {
-      setTelemetryPreview(await getPreview());
-    } catch (error) {
-      setTelemetryError(
-        error instanceof Error
-          ? error.message
-          : "The exact telemetry preview could not be loaded.",
-      );
-    } finally {
-      setTelemetryPreviewLoading(false);
-    }
-  }, []);
-
   const loadRetrievalStatus = useCallback(async () => {
     const getStatus = window.openAdminOS?.getRetrievalStatus;
     setRetrievalLoading(true);
@@ -3876,47 +3867,8 @@ function PrivacySection({
   }, []);
 
   useEffect(() => {
-    void loadTelemetryPreview();
-  }, [loadTelemetryPreview, usageTelemetryEnabled]);
-
-  useEffect(() => {
     void loadRetrievalStatus();
   }, [loadRetrievalStatus]);
-
-  const toggleUsageTelemetry = async () => {
-    setTelemetrySaving(true);
-    setTelemetryError(null);
-    setTelemetryTestResult(null);
-    try {
-      await onSetUsageTelemetryEnabled(!usageTelemetryEnabled);
-    } catch (error) {
-      setTelemetryError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTelemetrySaving(false);
-    }
-  };
-
-  const sendTelemetryTest = async () => {
-    const sendTest = window.openAdminOS?.sendUsageTelemetryTest;
-    if (!sendTest) {
-      setTelemetryTestResult("Test pings are unavailable in this build.");
-      return;
-    }
-
-    setTelemetryTestSending(true);
-    setTelemetryError(null);
-    setTelemetryTestResult(null);
-    try {
-      const result = await sendTest();
-      setTelemetryTestResult(
-        result.sent ? "Test ping sent." : "Test ping was not sent.",
-      );
-    } catch (error) {
-      setTelemetryError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTelemetryTestSending(false);
-    }
-  };
 
   const refreshRetrievalStatus = async () => {
     const refreshIndex = window.openAdminOS?.refreshRetrievalIndex;
@@ -3958,16 +3910,37 @@ function PrivacySection({
     }
   };
 
-  const toggleRegistryInstallCounts = async () => {
-    setSavingInstallCounts(true);
-    setInstallCountsError(null);
+  useEffect(() => {
+    const getPreference = window.openAdminOS?.getRetrievalAutoInstall;
+    if (!getPreference) return;
+    let active = true;
+    void getPreference().then((enabled) => {
+      if (active) setRetrievalAutoInstall(enabled);
+    }).catch(() => {
+      if (active) setPrivacyError("Could not read the automatic documentation setting. Reopen Privacy to try again.");
+    });
+    return () => { active = false; };
+  }, []);
+
+  const savePrivacySetting = async (label: string, save: () => Promise<void>) => {
+    setPrivacySaving(true);
+    setPrivacyError(null);
     try {
-      await onSetRegistryInstallCountsEnabled(!registryInstallCountsEnabled);
+      await save();
     } catch (error) {
-      setInstallCountsError(error instanceof Error ? error.message : String(error));
+      const reason = error instanceof Error ? error.message : String(error);
+      setPrivacyError(`${label} could not be changed. ${reason}`);
     } finally {
-      setSavingInstallCounts(false);
+      setPrivacySaving(false);
     }
+  };
+
+  const changeRetrievalAutoInstall = async (enabled: boolean) => {
+    const setPreference = window.openAdminOS?.setRetrievalAutoInstall;
+    if (!setPreference) return;
+    const status = await setPreference(enabled);
+    setRetrievalAutoInstall(enabled);
+    setRetrievalStatus(status);
   };
 
   return (
@@ -3975,127 +3948,66 @@ function PrivacySection({
       <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <SettingRow
           id="tenant-telemetry"
-          description="Tenant data, prompts, run results, and error-reporting data are never collected. Optional usage telemetry and aggregate registry install counts are controlled separately below. Crash logs stay on this device."
+          description="Tenant data, prompts, run results, and error-reporting data are never collected. Crash logs stay on this device."
           control={
             <Badge tone="success">
               <StatusDot tone="success" /> Not collected
             </Badge>
           }
         />
-        <div className="border-b border-[var(--color-border-soft)]">
-          <section aria-labelledby="usage-telemetry-title">
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
-              <div className="min-w-0 max-w-[520px]">
-                <h3
-                  id="usage-telemetry-title"
-                  className="text-base font-medium text-[var(--color-text)]"
-                >
-                  Usage telemetry
-                </h3>
-                <p
-                  id="usage-telemetry-description"
-                  className="mt-1 text-sm leading-relaxed text-[var(--color-text-muted)]"
-                >
-                  Tenant, agent, and run counts are converted to bucketed ranges on
-                  this device. Tenant content, prompts, and results are never sent.
-                  Nothing is sent unless this setting is on and this build has a
-                  collector configured.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Switch
-                  className="w-auto gap-3"
-                  checked={usageTelemetryEnabled}
-                  disabled={!telemetryToggleAvailable || telemetrySaving}
-                  label={usageTelemetryEnabled ? "On" : "Off"}
-                  aria-label="Usage telemetry"
-                  aria-describedby="usage-telemetry-description"
-                  onCheckedChange={() => void toggleUsageTelemetry()}
-                />
-              </div>
-            </div>
-            <details className="px-5 py-4">
-              <summary className="cursor-pointer text-sm font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
-                Show exact ping JSON preview
-              </summary>
-              <OutputJsonBlock
-                value={telemetryPreview?.payload ?? null}
-                copyLabel="Copy telemetry payload"
-                className="mt-2"
-              />
-              {telemetryPreviewLoading && (
-                <p
-                  role="status"
-                  className="mt-2 text-xs text-[var(--color-text-muted)]"
-                >
-                  Loading exact payload…
-                </p>
-              )}
-              {telemetryPreview && !telemetryPreview.endpointConfigured && (
-                <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                  This build has no telemetry collector configured, so nothing is
-                  sent even when this is on.
-                </p>
-              )}
-              {telemetryError && (
-                <div
-                  role="alert"
-                  className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
-                >
-                  {telemetryError}
-                </div>
-              )}
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p className="max-w-[420px] text-xs leading-relaxed text-[var(--color-text-muted)]">
-                  A test ping sends the preview once. It does not change this setting.
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={
-                    !usageTelemetryEnabled ||
-                    !telemetryPreview?.endpointConfigured ||
-                    telemetryTestSending
-                  }
-                  onClick={() => void sendTelemetryTest()}
-                >
-                  {telemetryTestSending ? "Sending…" : "Send a test ping"}
-                </Button>
-              </div>
-              {telemetryTestResult && (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className="mt-2 text-right text-xs text-[var(--color-text-soft)]"
-                >
-                  {telemetryTestResult}
-                </p>
-              )}
-            </details>
-          </section>
-        </div>
         <SettingRow
-          id="registry-install-counts"
-          description="When enabled, installing a public registry agent sends only agent slug, app version, platform, and a yearly per-agent hash for aggregate counts. No tenant data, prompts, run results, or Graph data are sent."
+          id="automatic-network-requests"
+          description="Allows automatic app update checks, agent registry refreshes, documentation index and embedding model downloads, and registry install counts. Schedules, tenant cache refreshes, connector deliveries and model checks you set up still run."
           control={
-            <Switch
-              className="w-auto gap-3"
-              checked={registryInstallCountsEnabled}
-              disabled={savingInstallCounts}
-              aria-label="Registry install counts"
-              onCheckedChange={() => void toggleRegistryInstallCounts()}
-              label={savingInstallCounts
-                ? "Saving..."
-                : registryInstallCountsEnabled
-                  ? "Enabled"
-                  : "Disabled"}
+            <PrivacySwitch
+              name="Automatic network requests"
+              enabled={automaticNetworkRequestsEnabled}
+              disabled={privacySaving}
+              locked={networkLocked}
+              onChange={(enabled) => void savePrivacySetting(
+                "Automatic network requests", () => onSetAutomaticNetworkRequestsEnabled(enabled),
+              )}
             />
           }
         />
-        {installCountsError && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            {installCountsError}
+        <SettingRow
+          id="registry-install-counts"
+          description={automaticNetworkRequestsEnabled
+            ? "Sends the agent slug, app version, and platform when you install a public registry agent. This device sends at most one count per agent each calendar year (UTC)."
+            : "Paused while Automatic network requests is off."}
+          control={
+            <PrivacySwitch
+              name="Registry install counts"
+              enabled={automaticNetworkRequestsEnabled && registryInstallCountsEnabled}
+              disabled={privacySaving || !automaticNetworkRequestsEnabled}
+              locked={countsLocked}
+              onChange={(enabled) => void savePrivacySetting(
+                "Registry install counts", () => onSetRegistryInstallCountsEnabled(enabled),
+              )}
+            />
+          }
+        />
+        <SettingRow
+          id="documentation-auto-install"
+          description={automaticNetworkRequestsEnabled
+            ? "Downloads the index and embedding model at launch when Ollama is running. You can also install the index below."
+            : "Paused while Automatic network requests is off. You can still install the index below."}
+          control={
+            <PrivacySwitch
+              name="Automatically install the documentation index"
+              enabled={automaticNetworkRequestsEnabled && retrievalAutoInstall === true}
+              disabled={privacySaving || retrievalAutoInstall === null ||
+                !automaticNetworkRequestsEnabled || !window.openAdminOS?.setRetrievalAutoInstall ||
+                retrievalInstalling}
+              onChange={(enabled) => void savePrivacySetting(
+                "Automatic documentation installation", () => changeRetrievalAutoInstall(enabled),
+              )}
+            />
+          }
+        />
+        {privacyError && (
+          <div role="alert" className="mx-5 my-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {privacyError}
           </div>
         )}
         <SettingRow
@@ -4207,7 +4119,7 @@ function PrivacySection({
                   <Badge tone="success">
                     <StatusDot tone="success" /> Available
                   </Badge>
-                  {retrievalStatus.updateAvailable ? (
+                  {automaticNetworkRequestsEnabled && retrievalAutoInstall && retrievalStatus.updateAvailable ? (
                     <p className="mt-2 text-sm text-[var(--color-text-muted)]">
                       Version {retrievalStatus.updateAvailable} is available and
                       installs automatically in the background.
@@ -4270,7 +4182,9 @@ function PrivacySection({
                   {retrievalStatus.embeddingModelError
                     ?? (retrievalStatus.ollamaReachable === false
                       ? "Ollama not reachable. Start Ollama on this device, then refresh the documentation index status."
-                      : "The embedding model is not installed yet. OpenAdminOS downloads it through Ollama in the background when it starts with Ollama running; answers stay ungrounded until it arrives.")}
+                      : automaticNetworkRequestsEnabled && retrievalAutoInstall
+                        ? "The embedding model is not installed yet. OpenAdminOS downloads it through Ollama at launch."
+                        : "The embedding model is not installed. Run ollama pull nomic-embed-text to install it.")}
                 </p>
               ) : null}
             </div>
@@ -4625,6 +4539,7 @@ function updateStatusText(state: UpdateState, channel: UpdateChannelSettings["ch
 }
 
 function AppUpdateRows() {
+  const { state: { automaticNetworkRequestsEnabled } } = useAppState();
   const { settings, loadError } = useUpdateChannel();
   const sharedUpdates = useUpdateStateOptional();
   const [fallbackState, setFallbackState] = useState<UpdateState>({ status: "idle" });
@@ -4694,7 +4609,9 @@ function AppUpdateRows() {
         description={
           unavailable
             ? UPDATE_UNAVAILABLE_DETAIL[unavailable]
-            : "Nightly builds are built from every merge to main and signed like stable releases, but they are less tested. A newer stable release is still offered. Turning this off moves you back to the current stable release, even if it is older than the installed nightly. Switching discards an update waiting to install."
+            : !automaticNetworkRequestsEnabled
+              ? "Manual update checks use the selected channel. Switching discards an update waiting to install."
+              : "Nightly builds are built from every merge to main and signed like stable releases, but they are less tested. A newer stable release is still offered. Turning this off moves you back to the current stable release, even if it is older than the installed nightly. Switching discards an update waiting to install."
         }
         control={
           <Switch
@@ -4712,9 +4629,11 @@ function AppUpdateRows() {
         description={
           unavailable
             ? "This install does not use the in-app updater."
-            : settings
-              ? updateStatusText(state, settings.channel)
-              : undefined
+            : !automaticNetworkRequestsEnabled && state.status === "idle"
+              ? "Automatic checks are paused in Settings > Privacy. You can still check here."
+              : settings
+                ? updateStatusText(state, settings.channel)
+                : undefined
         }
         control={
           state.status === "ready" && !unavailable ? (
@@ -4925,9 +4844,9 @@ function AboutSection() {
           />
           <ReadinessRow
             label="Registry install counts"
-            value={state.registryInstallCountsEnabled ? "Enabled" : "Disabled"}
-            tone={state.registryInstallCountsEnabled ? "success" : "warning"}
-            detail="Sends agent slug, app version, platform, and a yearly per-agent hash for aggregate public registry stats."
+            value={!state.registryInstallCountsEnabled ? "Disabled" : state.automaticNetworkRequestsEnabled ? "Enabled" : "Paused"}
+            tone={state.registryInstallCountsEnabled && state.automaticNetworkRequestsEnabled ? "success" : "warning"}
+            detail="Sends the agent slug, app version, and platform for aggregate public registry stats."
           />
         </div>
       </details>

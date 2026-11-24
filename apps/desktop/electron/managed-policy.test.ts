@@ -93,6 +93,8 @@ describe("policy parsing", () => {
         allowedPublicReferences: ["microsoft-learn"],
         appRegistration: { clientId: "AAAAAAAA-1111-2222-3333-444444444444", tenantId: "contoso.onmicrosoft.com", label: "Contoso IT" },
         skipFirstRunScan: true,
+        automaticNetworkRequests: "off",
+        registryInstallCounts: "on",
         novaVoiceModes: ["local"],
         novaInstructions: "Answer in short sentences.",
         novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
@@ -108,6 +110,8 @@ describe("policy parsing", () => {
       allowedPublicReferences: ["microsoft-learn"],
       appRegistration: { clientId: "aaaaaaaa-1111-2222-3333-444444444444", tenantId: "contoso.onmicrosoft.com", label: "Contoso IT" },
       skipFirstRunScan: true,
+      automaticNetworkRequests: "off",
+      registryInstallCounts: "on",
       novaVoiceModes: ["local"],
       novaInstructions: "Answer in short sentences.",
       novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
@@ -119,6 +123,16 @@ describe("policy parsing", () => {
       { scope: "machine", path: MACHINE, found: true },
       { scope: "user", path: USER, found: false },
     ]);
+  });
+
+  it("reports invalid privacy values and merges valid locks by file precedence", async () => {
+    const policy = await load({
+      [MACHINE]: '{"automaticNetworkRequests":"off","registryInstallCounts":false}',
+      [USER]: '{"automaticNetworkRequests":"on","registryInstallCounts":"off","lock":[]}',
+    });
+    assert.deepEqual(policy?.values, { automaticNetworkRequests: "off", registryInstallCounts: "off" });
+    assert.deepEqual(policy?.locked, ["automaticNetworkRequests"]);
+    assert.match(policy!.issues[0]!.message, /"registryInstallCounts" must be "on" or "off"/);
   });
 
   it("reports a Nova ability set twice and uses the more restrictive value, so a repeat cannot widen the policy", async () => {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { commitStats, fetchStats } from "~/lib/stats/github";
-import { SEVEN_DAYS_MS, getRedis, keys } from "~/lib/stats/redis";
+import { getRedis, keys, recentInstallDays } from "~/lib/stats/redis";
 import { getKnownSlugs } from "~/lib/stats/slugs";
 
 export const runtime = "nodejs";
@@ -11,16 +11,15 @@ export const maxDuration = 30;
 /**
  * GET /api/flush
  *
- * Cron-only endpoint. Wired by `vercel.json` to fire hourly. Idempotent:
- * if Redis has no pending deltas, this is a no-op and no commit lands.
+ * The hourly cron commits only when pending deltas or rolling totals change.
  *
  * Auth: requires `Authorization: Bearer <CRON_SECRET>` exactly. Vercel
  * sets that header for cron-triggered invocations automatically.
  *
  * Concurrency: Vercel won't run two crons for the same path
  * concurrently, but we still write `stats/agents.json` with the GitHub
- * blob SHA we read at the top of the function — if main moved
- * underneath us, GitHub 409s and the call returns an error. Next cron
+ * blob SHA we read before updating the file. If main moved
+ * underneath us, GitHub returns a conflict. The next cron
  * tick retries.
  */
 export async function GET(req: Request) {
@@ -56,21 +55,28 @@ async function runFlush(): Promise<FlushResult> {
   const slugList = [...slugs];
   const pendingDeltas: Record<string, number> = {};
   const sevenDayCounts: Record<string, number> = {};
-  const cutoff = Date.now() - SEVEN_DAYS_MS;
+  const now = new Date();
+  const days = recentInstallDays(now);
 
   for (const slug of slugList) {
-    const pendingStr = (await redis.get<string | number>(keys.pendingInstalls(slug))) ?? 0;
-    const pending =
-      typeof pendingStr === "number" ? pendingStr : parseInt(String(pendingStr), 10) || 0;
-    pendingDeltas[slug] = pending;
-
-    // Trim expired entries from the 7d ZSET, then read its cardinality.
-    await redis.zremrangebyscore(keys.installs7d(slug), 0, cutoff);
-    const live = await redis.zcard(keys.installs7d(slug));
-    sevenDayCounts[slug] = live;
+    const counters = await redis.mget<(string | number | null)[]>(
+      keys.pendingInstalls(slug),
+      ...days.map((day) => keys.dailyInstalls(slug, day)),
+    );
+    const [pending, ...daily] = counters.map((counter) => Number(counter) || 0);
+    pendingDeltas[slug] = pending ?? 0;
+    sevenDayCounts[slug] = daily.reduce((total, count) => total + count, 0);
   }
 
   const { file, sha } = await fetchStats();
+  const totalDelta = Object.values(pendingDeltas).reduce((sum, n) => sum + n, 0);
+  if (totalDelta === 0 && !hasSevenDayDrift(file, sevenDayCounts)) {
+    return {
+      flushed: false,
+      totals: snapshotTotals(file),
+      pendingApplied: pendingDeltas,
+    };
+  }
 
   for (const slug of slugList) {
     const previous = file.agents[slug] ?? { installs: 0, installs7d: 0 };
@@ -80,17 +86,7 @@ async function runFlush(): Promise<FlushResult> {
       installs7d: sevenDayCounts[slug] ?? 0,
     };
   }
-  file.updatedAt = new Date().toISOString();
-
-  const totalDelta = Object.values(pendingDeltas).reduce((sum, n) => sum + n, 0);
-  const hasChange = totalDelta > 0 || hasSevenDayDrift(file, sevenDayCounts);
-  if (!hasChange) {
-    return {
-      flushed: false,
-      totals: snapshotTotals(file),
-      pendingApplied: pendingDeltas,
-    };
-  }
+  file.updatedAt = now.toISOString();
 
   await commitStats({
     file,
@@ -98,10 +94,15 @@ async function runFlush(): Promise<FlushResult> {
     commitMessage: buildCommitMessage(pendingDeltas),
   });
 
-  for (const slug of slugList) {
-    if ((pendingDeltas[slug] ?? 0) > 0) {
-      await redis.del(keys.pendingInstalls(slug));
+  // Subtract only what was committed. Installs received during the flush
+  // remain pending for the next run.
+  const applied = Object.entries(pendingDeltas).filter(([, count]) => count > 0);
+  if (applied.length > 0) {
+    const transaction = redis.multi();
+    for (const [slug, count] of applied) {
+      transaction.decrby(keys.pendingInstalls(slug), count);
     }
+    await transaction.exec();
   }
 
   return {
