@@ -6,19 +6,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Conditional Access explainer 1.2.0 (needs 0.7.3-nightly.20261123094040 or later) sends one compact record per policy, so a typical set of about 100 policies fits OpenAdmin 8B's 16k context, and the review now leads with concrete recommended changes, maps coverage and explains what each group of policies does.
-- When an on-device model reasons without answering during an agent run, the failed run offers other on-device models and configured hosted providers, including for older failures from script agents. Hosted retries require a run review that names where prompts and data go.
-
 ### Changed
 
 ### Removed
 
 ### Fixed
-
-- Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
-- Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance. If the source is missing or turned off, Chat points to Marketplace.
-- When a local investigation fails, Chat explains what was checked and offers a retry or model choice. If the roadmap could not be checked, Chat says so in the answer.
-- When Chat can recover an answer from a matching cached device query, it uses the same computed result for the count and the device list.
 
 ### Security
 
@@ -29,15 +21,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Manage each company as an organization. Use Connections to connect Intune, Entra, and Defender individually and see what each connection reads or sends.
 - Open Chat without signing in to Microsoft 365. Choose a model, ask documentation questions, and connect a service when a question needs tenant data.
 - Deploy `policy.json` to set the provider and model, allow specific public references, and lock settings for managed installs. Allowing `ollama` includes Ollama Cloud with hosted confirmation. To keep Ollama local, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on this device.
-- When a request outgrows the selected model, model fit checks the context window before offering a larger local model. Chat can also send that one request to a hosted provider you choose after naming where the data goes. Chat withdraws model fit offers when they expire.
+- When a request outgrows the selected model, model fit checks the context window before offering a larger local model. Chat can also send that one request to a hosted provider you choose after naming where the data goes. Chat withdraws model fit offers when they expire. When a run fails because the local model only reasoned, the run page offers another model the same way.
 - On a signed-in Ollama, OpenAdminOS labels Ollama Cloud models as hosted wherever they appear. Each Chat send to one requires hosted confirmation, which Chat can remember for later sends.
 - Use Lemonade Server locally or GitHub Copilot Fusion through the Copilot provider. Marketplace adds references such as Microsoft Learn, KQL Search, and Splashtop Docs.
 
-**Changed.** Runs open on a full page with live progress and data destinations. Chat shows the sources it used, and agent write plans are checked again before changes are applied. Schedules save the model destination and pause for review if it changes.
+**Changed.** Runs open on a full page with live progress and data destinations. Chat shows the sources it used, and agent write plans are checked again before changes are applied. Schedules save the model destination and pause for review if it changes. Conditional Access explainer 1.2.0 uses shorter policy records so larger tenants fit local models.
 
 **Removed.** Pilot mode and its sample data, which were only in 0.7.3 nightlies.
 
-**Fixed.** Local model context and timeout errors give specific recovery steps, and gpt-oss run reports show the answer instead of the model's reasoning. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs. Model server checks for Ollama, LM Studio and Lemonade now say why a check failed and what to do next.
+**Fixed.** Local model context and timeout errors give specific recovery steps, and gpt-oss run reports show the answer instead of the model's reasoning. Chat computes supported device counts directly from the local cache, and large organizations can refresh recent sign-in and audit logs. Model server checks for Ollama, LM Studio and Lemonade now say why a check failed and what to do next. When a local model cannot finish, Chat says what was and was not checked instead of answering from unrelated cached data, and counts in cached answers come from the data itself. Roadmap questions go to Microsoft Release Communications.
 
 Chat answers show cache refresh times and device last-sync dates in local time. Reset stops an in-progress index model download. A model Ollama already downloaded stays in Ollama. To remove it, run `ollama rm nomic-embed-text`.
 
@@ -50,6 +42,9 @@ On first launch, existing schedules that use a hosted model and have no saved de
 With a model running on this device, prompts sent to that model stay on this device. Connections shows which services and public references receive data.
 
 ### Added
+
+- Conditional Access explainer 1.2.0 (needs 0.7.3-nightly.20261123094040 or later) sends one compact record per policy, so a typical set of about 100 policies fits OpenAdmin 8B's 16k context, and the review now leads with concrete recommended changes, maps coverage and explains what each group of policies does.
+- When an on-device model reasons without answering during an agent run, the failed run offers other on-device models and configured hosted providers, including for older failures from script agents. Hosted retries require a run review that names where prompts and data go.
 
 - Model fit: when the local model cannot fit a Chat request (with the token numbers when the provider gives them) or fails the investigation repeatedly, Chat offers the configured hosted providers with their location label and a cost note, a larger local model, splitting the question, or keeping the local model; a hosted provider answers only that one request after a per-request accept that names where data goes, and the answer says which provider answered. A run that fails the same way offers Run with the provider through the run review.
 - Windows uninstall now removes the account's local data folder, including an IT `policy.json` placed there (IT deploys it again after a reinstall); the machine-wide policy stays.
@@ -125,6 +120,11 @@ With a model running on this device, prompts sent to that model stay on this dev
 - Remove the GitBook sync config now that docs.openadminos.com is served by the self-hosted docs site.
 
 ### Fixed
+
+- Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
+- Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance. If the source is missing or turned off, Chat points to Marketplace.
+- When a local investigation fails, Chat explains what was checked and offers a retry or model choice. If the roadmap could not be checked, Chat says so in the answer.
+- When Chat can recover an answer from a matching cached device query, it uses the same computed result for the count and the device list.
 
 - Model checks for Ollama, LM Studio and Lemonade show why the endpoint could not be checked and how to retry after fixing it. Recovery names an environment variable only when it supplied the address.
 - Stable and nightly releases now stop if an installer, Linux package, or update manifest is missing or damaged.
