@@ -161,7 +161,7 @@ interface SettingRow {
 
 export interface HostedProviderConsentAuditRecord {
   id: string;
-  tenantId: string;
+  tenantId: string | null;
   source: string;
   payload: Record<string, unknown>;
   createdAt: string;
@@ -3457,7 +3457,7 @@ export class IntelligenceSqliteStore {
       )
       .all() as Array<{
         id: string;
-        tenant_id: string;
+        tenant_id: string | null;
         source: string;
         payload_json: string;
         created_at: string;

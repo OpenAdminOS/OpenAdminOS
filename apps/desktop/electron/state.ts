@@ -1022,7 +1022,7 @@ function hostedProviderConsentAuditEvent(
     type: "hosted-provider.consent",
     source: "hosted-provider-consent",
     ...(consent.tenantId ? { tenantId: consent.tenantId } : {}),
-    actor: actorForTenant(context.tenantById.get(consent.tenantId)),
+    actor: actorForTenant(consent.tenantId ? context.tenantById.get(consent.tenantId) : undefined),
     details: {
       source: consent.source,
       ...consent.payload,
@@ -7860,10 +7860,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   recordNovaVoiceConsent(input: { tenantId?: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void {
     const consent: HostedProviderConsentAuditRecord = {
       id: `event_${randomUUID()}`,
-      tenantId: input.tenantId ?? "",
+      tenantId: input.tenantId ?? null,
       source: "nova-voice",
       payload: {
         tenantIds: input.tenantId ? [input.tenantId] : [],
+        ...(!input.tenantId ? { organizationScope: "none" } : {}),
         providerId: "openai-voice",
         providerName: "OpenAI",
         model: input.voiceModel,
@@ -7880,7 +7881,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     let keptInChat = false;
     try {
-      if (input.tenantId && this.intelligenceStore) {
+      if (this.intelligenceStore) {
         this.intelligenceStore.recordHostedProviderConsentAuditEvent(consent);
         keptInChat = true;
       }
@@ -7889,7 +7890,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     const kept = this.recordHostedProviderConsent(consent);
     // Audio, instructions and notes go to OpenAI only with the consent on this device.
-    if (!keptInChat && !kept) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
+    if (!kept && (!input.tenantId || !keptInChat)) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
   }
 
   private activeOrganizationIdOf(persisted: PersistedState): string | undefined {
