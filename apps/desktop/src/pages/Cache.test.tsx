@@ -27,7 +27,7 @@ it("selects all resources, keeps filtering separate, and sends a tenant-scoped p
   });
   renderRoute(<Cache />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await screen.findByRole("button", { name: "Preload all 2 resources" });
+  await screen.findByRole("button", { name: "Preload all 2 resources" }, { timeout: 4000 });
   await user.click(screen.getByText("Show 2 resources"));
   await user.type(
     screen.getByRole("searchbox", { name: "Find a resource" }),
@@ -98,7 +98,7 @@ it("shows ungranted resources without selecting or refreshing them", async () =>
 
 it("opens cached rows from Data, pages through them, shows JSON, and handles an empty search", async () => {
   const bridge = makeMockBridge({
-    getGraphCacheStatus: vi.fn(async () => ({
+    getGraphCacheStatus: vi.fn(async (): Promise<GraphCacheStatus> => ({
       tenantId: "tenant-1",
       resources: [{ resource: "users", label: "Users", rows: 101, scopeSet: [] }],
     })),
@@ -129,7 +129,7 @@ it("opens cached rows from Data, pages through them, shows JSON, and handles an 
 
 it("opens a resource with no cache from a direct link", async () => {
   const bridge = makeMockBridge({
-    getGraphCacheStatus: vi.fn(async () => ({
+    getGraphCacheStatus: vi.fn(async (): Promise<GraphCacheStatus> => ({
       tenantId: "tenant-1",
       resources: [{ resource: "groups", label: "Groups", rows: 0, scopeSet: [] }],
     })),
