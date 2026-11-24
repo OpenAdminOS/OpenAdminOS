@@ -338,7 +338,7 @@ it("keeps captured text in a preview until the admin consents and sends", async 
   expect(await screen.findByText("Encryption is off.")).toBeInTheDocument();
 });
 
-it("opens the main-panel preview from its screen question form and preserves it after a provider error", async () => {
+it("opens the main-panel preview from the explicit screen button and preserves it after a provider error", async () => {
   const novaScreen = vi.fn<NonNullable<typeof window.openAdminOS>["novaScreen"]>(async request => {
     if (request.action === "capture") return {
       status: "preview", id: "panel-preview", thumbnail: "data:image/png;base64,", text: "Encryption: Off",
@@ -349,7 +349,9 @@ it("opens the main-panel preview from its screen question form and preserves it 
   renderRoute(<Nova />, { bridge: makeMockBridge({ novaScreen }), route: "/cache", path: "/cache" });
   act(openNovaPanel);
   const user = userEvent.setup();
-  await user.type(await screen.findByRole("textbox", { name: "Question about your screen" }), "Why is BitLocker off?{Enter}");
+  await user.type(await screen.findByRole("textbox", { name: "Type a question" }), "Why is BitLocker off?");
+  expect(novaScreen).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Look at screen" }));
   const question = await screen.findByRole("textbox", { name: /^Question$/ });
   expect(question).toHaveValue("Why is BitLocker off?");
   const ocr = screen.getByRole("textbox", { name: "Screen text" });
@@ -379,4 +381,31 @@ it("offers another selection when OCR finds no text", async () => {
   expect(novaScreen.mock.calls.map(([request]) => request)).toEqual([
     { action: "capture" }, { action: "discard", id: "empty" }, { action: "capture" },
   ]);
+});
+
+it("routes only explicit screen phrasing from the panel question field", async () => {
+  const novaScreen = vi.fn(async () => ({ status: "cancelled" as const }));
+  const bridge = makeMockBridge({
+    novaScreen,
+    nova: vi.fn(async request => {
+      if (request.action === "start") return { sessionId: "typed" };
+      if (request.action === "answer") return { text: "A normal answer." };
+      return {};
+    }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  act(openNovaPanel);
+  const user = userEvent.setup();
+  const question = await screen.findByRole("textbox", { name: "Type a question" });
+  expect(screen.queryByRole("textbox", { name: "Question about your screen" })).not.toBeInTheDocument();
+  await user.type(question, "Why is BitLocker off?{Enter}");
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(
+    expect.objectContaining({ action: "answer", text: "Why is BitLocker off?" }), expect.any(Function),
+  ));
+  expect(novaScreen).not.toHaveBeenCalled();
+  await user.type(question, "Look at my screen{Enter}");
+  expect(await screen.findByText("Select Look at screen to choose an area.")).toBeVisible();
+  expect(novaScreen).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Look at screen" }));
+  expect(novaScreen).toHaveBeenCalledWith({ action: "capture" });
 });

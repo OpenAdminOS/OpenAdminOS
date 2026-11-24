@@ -2480,7 +2480,7 @@ export interface NovaSpeechStatus {
 export type NovaRequest =
   | { action: "speech-status" }
   | { action: "speech-preferences"; preferences: NovaLocalVoicePreferences }
-  | { action: "vad"; sessionId: string; frame: Float32Array }
+  | { action: "vad"; sessionId: string; frames: Float32Array[] }
   | { action: "speech-install" }
   | { action: "speech-cancel" }
   | { action: "speech-configure"; source: NovaSpeechStatus["source"]; model: NovaSpeechStatus["model"] }
@@ -2504,7 +2504,7 @@ export type NovaRequest =
 export interface NovaResponse {
   screenQuestion?: string;
   speech?: NovaSpeechStatus;
-  speechProbability?: number;
+  speechProbabilities?: number[];
   /** Full local result for visual review; never sent to the speech model automatically. */
   displayText?: string;
   pendingAction?: NovaActionPreview;

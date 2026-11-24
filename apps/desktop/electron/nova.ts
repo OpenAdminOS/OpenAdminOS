@@ -260,7 +260,7 @@ export class NovaService {
     if (input.action === "speech-status" || input.action === "speech-install" ||
         input.action === "speech-cancel" || input.action === "speech-configure" || input.action === "speech-preferences") {
       if (!this.speech) return {};
-      if (input.action !== "speech-status" && input.action !== "speech-cancel")
+      if (input.action !== "speech-status")
         requireVoiceModeAllowed(await this.state(), "local");
       if (input.action === "speech-install") await this.speech.install();
       if (input.action === "speech-cancel") this.speech.cancel();
@@ -300,7 +300,7 @@ export class NovaService {
       if (!this.vadModel) throw new Error("Local voice detection is unavailable. Select Hold to talk in Settings.");
       session.vad ??= new NovaVad(this.vadModel, session.controller.signal);
       try {
-        return { speechProbability: await session.vad.score(input.frame) };
+        return { speechProbabilities: await session.vad.score(input.frames) };
       } catch (error) {
         if (session.controller.signal.aborted) return {};
         throw error;

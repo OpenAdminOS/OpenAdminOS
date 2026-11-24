@@ -6718,8 +6718,8 @@ function registerIpcHandlers() {
     novaScreen(event.sender, request)));
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     if (!input || typeof input !== "object") throw new Error("Nova request is missing.");
-    if (event.sender === novaBubble?.webContents && ["configure", "decide-action", "speech-configure", "speech-preferences"].includes(input.action))
-      throw new Error("Open the main OpenAdminOS window to change voice credentials or review a proposed action.");
+    if (event.sender === novaBubble?.webContents && ["configure", "decide-action", "speech-cancel", "speech-configure", "speech-preferences"].includes(input.action))
+      throw new Error("Open the main OpenAdminOS window to manage voice settings, cancel a model download or review a proposed action.");
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
     const id = event.sender.id;
     if (input.action === "stop") {

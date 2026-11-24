@@ -878,7 +878,11 @@ it("plays queued audio before handing just the unsynthesized remainder to the sy
   await waitFor(() => expect(speak).toHaveBeenCalledWith(expect.objectContaining({ text: "Try another check." })));
 });
 
-async function startHandsFreeFixture() {
+async function startHandsFreeFixture(options: {
+  bubble?: boolean;
+  hold?: boolean;
+  transcribe?: () => Promise<{ text: string }>;
+} = {}) {
   const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.stubGlobal("URL", { revokeObjectURL: vi.fn(), createObjectURL: vi.fn(() => "blob:nova-hands-free") });
@@ -886,24 +890,33 @@ async function startHandsFreeFixture() {
   const getUserMedia = vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }));
   Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
   vi.stubGlobal("AudioContext", class {
+    sampleRate = 16000;
+    currentTime = 0;
     resume = async () => {};
     close = async () => {};
     audioWorklet = { addModule: vi.fn(async () => {}) };
     createAnalyser = () => ({ getByteTimeDomainData: (values: Uint8Array) => values.fill(128) });
     createMediaStreamSource = () => ({ connect: vi.fn() });
   });
-  const port: { onmessage?: (event: { data: Float32Array }) => void } = {};
+  const port: { onmessage?: (event: { data: { frame: Float32Array; captured: number }[] }) => void } = {};
+  let captured = 0;
+  const send = async (score: number, count: number) => {
+    for (let offset = 0; offset < count; offset += 4)
+      await act(async () => port.onmessage?.({ data: Array.from({ length: Math.min(4, count - offset) }, () => ({
+        frame: new Float32Array(512).fill(score), captured: captured += 32,
+      })) }));
+  };
   vi.stubGlobal("AudioWorkletNode", class { port = port; });
   const bridge = makeMockBridge({
     nova: vi.fn(async (request, _activity, onAudio) => {
       if (request.action === "speech-status") return { speech: {
         source: "builtin", model: "small", selectedModel: "small", gpuAccelerated: false,
         available: true, ready: true, totalBytes: 0,
-        preferences: { interaction: "hands-free", silenceMs: 800, idleSeconds: 120, showTimings: false },
+        preferences: { interaction: options.hold ? "hold-to-talk" : "hands-free", silenceMs: 800, idleSeconds: 120, showTimings: false },
       } as const };
-      if (request.action === "vad") return { speechProbability: request.frame[0] ?? 0 };
+      if (request.action === "vad") return { speechProbabilities: request.frames.map((frame: Float32Array) => frame[0] ?? 0) };
       if (request.action === "start") return { sessionId: "hands-free" };
-      if (request.action === "transcribe") return { text: "What can you do?" };
+      if (request.action === "transcribe") return options.transcribe ? options.transcribe() : { text: "What can you do?" };
       if (request.action === "answer") return { text: "I can help." };
       if (request.action === "speak") {
         onAudio?.(new Uint8Array([1, 2, 3]));
@@ -912,12 +925,13 @@ async function startHandsFreeFixture() {
       return {};
     }),
   });
-  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
-  const user = userEvent.setup();
-  await openNovaForTest();
-  await user.selectOptions(screen.getByLabelText("Voice provider"), "local");
+  const { effective } = await bridge.novaProfile({ action: "get" });
+  const fixtureState = createMockAppState({ novaProfile: { ...effective, voiceMode: "local" } });
+  vi.mocked(bridge.getAppState).mockResolvedValue(fixtureState);
+  renderRoute(<Nova bubble={options.bubble} />, { bridge, route: "/cache", path: "/cache" });
+  if (!options.bubble) await openNovaForTest();
   await screen.findByText("Models are installed on this device.");
-  return { bridge, track, getUserMedia, port, play, pause };
+  return { bridge, track, getUserMedia, send, play, pause };
 }
 
 it("releases the hands-free microphone after two minutes without speech", async () => {
@@ -935,22 +949,133 @@ it("releases the hands-free microphone after two minutes without speech", async 
 });
 
 it("interrupts streamed playback and keeps the hands-free microphone open", async () => {
-  const { bridge, track, port, play, pause, getUserMedia } = await startHandsFreeFixture();
+  const { bridge, track, send, play, pause, getUserMedia } = await startHandsFreeFixture();
   await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
   expect(getUserMedia).toHaveBeenCalledWith({ audio: {
     echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1,
   }, video: false });
   play.mockClear();
-  const send = (score: number) => port.onmessage?.({ data: new Float32Array(512).fill(score) });
-  await act(async () => {
-    send(0.95);
-    for (let index = 0; index < 25; index++) send(0);
-  });
+  await send(0.95, 8);
+  await send(0, 25);
   await waitFor(() => expect(play).toHaveBeenCalledOnce());
   pause.mockClear();
-  await act(async () => send(0.95));
+  await send(0.95, 1);
+  expect(pause).not.toHaveBeenCalled();
+  await send(0.95, 2);
   await waitFor(() => expect(pause).toHaveBeenCalledOnce());
   expect(bridge.nova).toHaveBeenCalledWith({ action: "interrupt", sessionId: "hands-free" });
   expect(track.stop).not.toHaveBeenCalled();
   expect(screen.getByText("Microphone live")).toBeVisible();
+});
+
+it("replaces a slow transcription with both sides of a late qualifier", async () => {
+  let finishFirst!: (value: { text: string }) => void;
+  const transcription = vi.fn<() => Promise<{ text: string }>>()
+    .mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }))
+    .mockResolvedValue({ text: "Which devices are not encrypted on Windows?" });
+  const { bridge, send } = await startHandsFreeFixture({ transcribe: transcription });
+  await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
+  await send(0.91, 8);
+  await send(0, 100);
+  expect(transcription).toHaveBeenCalledOnce();
+  await send(0.99, 8);
+  await send(0, 25);
+  expect(transcription).toHaveBeenCalledTimes(2);
+  expect(bridge.nova).toHaveBeenCalledWith({ action: "interrupt", sessionId: "hands-free" });
+  const requests = vi.mocked(bridge.nova).mock.calls.map(([request]) => request);
+  const combined = requests.filter(request => request.action === "transcribe").at(-1)!;
+  const pcm = new Int16Array(Uint8Array.from(combined.audio).buffer, 44);
+  expect(pcm).toContain(Math.trunc(Math.fround(0.91) * 32767));
+  expect(pcm).toContain(Math.trunc(Math.fround(0.99) * 32767));
+  await act(async () => finishFirst({ text: "Which devices are not encrypted?" }));
+  expect(requests.filter(request => request.action === "answer")).toEqual([
+    expect.objectContaining({ text: "Which devices are not encrypted on Windows?" }),
+  ]);
+  expect(bridge.nova).not.toHaveBeenCalledWith(expect.objectContaining({ action: "answer", text: "Which devices are not encrypted?" }), expect.anything());
+});
+
+it("releases the microphone and ignores a pending transcript on Stop", async () => {
+  let finish!: (value: { text: string }) => void;
+  const { bridge, send, track } = await startHandsFreeFixture({
+    transcribe: () => new Promise(resolve => { finish = resolve; }),
+  });
+  await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
+  await send(0.95, 8);
+  await send(0, 25);
+  await act(async () => screen.getByRole("button", { name: "Stop Nova" }).click());
+  expect(track.stop).toHaveBeenCalledOnce();
+  await act(async () => finish({ text: "This was stopped" }));
+  expect(vi.mocked(bridge.nova).mock.calls.some(([request]) => request.action === "answer")).toBe(false);
+});
+
+it("starts the idle clock after playback finishes", async () => {
+  const { send, track } = await startHandsFreeFixture();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
+    await send(0.95, 8);
+    await send(0, 25);
+    expect(screen.getByText("Nova is speaking")).toBeVisible();
+    await act(async () => vi.advanceTimersByTimeAsync(120000));
+    expect(track.stop).not.toHaveBeenCalled();
+    await act(async () => document.querySelector("audio")!.dispatchEvent(new Event("ended")));
+    await act(async () => vi.advanceTimersByTimeAsync(120000));
+    expect(track.stop).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the floating microphone open when the bubble loses focus", async () => {
+  const { track } = await startHandsFreeFixture({ bubble: true });
+  await act(async () => screen.getByRole("button", { name: "Talk" }).click());
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  expect(track.stop).not.toHaveBeenCalled();
+  expect(screen.getByText("Microphone live")).toBeVisible();
+});
+
+it("explains an early hold-to-talk release and closes a late microphone grant", async () => {
+  const { getUserMedia, track } = await startHandsFreeFixture({ hold: true });
+  let grant!: () => void;
+  getUserMedia.mockImplementationOnce(() => new Promise(resolve => {
+    grant = () => resolve({ getTracks: () => [track], getAudioTracks: () => [track] });
+  }));
+  const talk = screen.getByRole("button", { name: "Hold to talk" });
+  await act(async () => talk.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })));
+  await act(async () => talk.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true })));
+  expect(screen.getByText(/Released too soon/)).toBeVisible();
+  await act(async () => grant());
+  expect(track.stop).toHaveBeenCalledOnce();
+});
+
+it("submits a held recording when the Talk key is released", async () => {
+  const stopRecording = vi.fn();
+  vi.stubGlobal("MediaRecorder", class {
+    state = "inactive";
+    start() { this.state = "recording"; }
+    stop() { this.state = "inactive"; stopRecording(); }
+  });
+  await startHandsFreeFixture({ hold: true });
+  const talk = screen.getByRole("button", { name: "Hold to talk" });
+  await act(async () => talk.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })));
+  expect(screen.getByRole("button", { name: "Release to send" })).toBeVisible();
+  expect(stopRecording).not.toHaveBeenCalled();
+  await act(async () => talk.dispatchEvent(new KeyboardEvent("keyup", { key: " ", bubbles: true })));
+  expect(stopRecording).toHaveBeenCalledOnce();
+});
+
+it("suspends the hands-free idle clock while muted", async () => {
+  const { track } = await startHandsFreeFixture();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
+    await act(async () => screen.getByRole("button", { name: "Mute mic" }).click());
+    await act(async () => vi.advanceTimersByTimeAsync(120000));
+    expect(track.stop).not.toHaveBeenCalled();
+    await act(async () => screen.getByRole("button", { name: "Unmute mic" }).click());
+    await act(async () => vi.advanceTimersByTimeAsync(120000));
+    expect(track.stop).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
 });

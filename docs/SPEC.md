@@ -910,8 +910,10 @@ playback and backend work. Local voice defaults to hands-free after the admin st
 and floating window show when the microphone is live. A pinned Silero VAD model
 runs on device in an Electron utility process. Speech detected during playback immediately stops audio and synthesis,
 using a higher detection threshold during playback. Escape, close, organization or
-provider changes, backgrounding and inactivity release the microphone. Settings >
-Nova can change the 800 ms end-of-speech silence and 120 second inactivity timeout,
+provider changes, window hiding and navigation away release the microphone.
+Changing focus keeps the session active. The inactivity clock runs only while
+listening with the microphone unmuted. Settings > Nova offers 500, 800 and 1400 ms
+silence presets and one, two and five minute inactivity presets for the next conversation,
 switch to Hold to talk, and reveal per-turn timings. The global shortcut toggles
 recording in Hold to talk because Electron only reports key presses. The warm
 small-talk target is under two seconds from end of speech to first audio on M5.
@@ -999,8 +1001,8 @@ changes playback rate without resetting its position across speech states; muted
 and error states pause the interior. Reduced-motion
 preferences suppress animated movement. Voice settings remain available from the
 idle panel.
-Stop, Escape, panel close, tenant/provider change and app backgrounding release
-microphone access. “Hey Nova” works during an active conversation. Background wake words remain out of scope. Simple navigation is restricted to known
+Stop, Escape, panel close, tenant/provider change, window hiding and page unload
+release microphone access. Focus changes keep the session active. “Hey Nova” works during an active conversation. Background wake words remain out of scope. Simple navigation is restricted to known
 app routes. Tenant questions reuse the existing Chat tools and approval boundary;
 voice cannot approve writes. Results remain reviewable in Chat. The voice model
 receives the selected tenant identity and explicit delegation rules at session
@@ -1110,8 +1112,11 @@ is synthesized, beginning with a short clause. Stop or asking another question
 cancels synthesis and playback. English speech uses a Microsoft administration
 lexicon and a rule-based fallback for unfamiliar words.
 A local utterance is at most one minute. In hands-free mode Nova submits it
-automatically, merging speech that resumes within 1.2 seconds of submission until
-an answer appears. Hold to talk submits when the button is released or the global
+automatically. While the answer is pending, Nova keeps the original speech and
+merges a confirmed continuation even after a long pause, trimming the intervening
+silence. At the one-minute boundary Nova sends the segment and asks the admin to
+wait for the answer before continuing. Show timings reveals and logs the three
+latencies, with the silence wait included in end of speech to transcript. Hold to talk submits when the button is released or the global
 shortcut is pressed again. Nova trims
 quiet edges before transcription and preserves pauses within the recording.
 On CPU-only builds, Small uses a padded, shorter encoder window for recordings
