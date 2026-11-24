@@ -6,8 +6,12 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Document the desktop app's automatic network requests, what each sends, and where to turn them off.
+
 ### Changed
 
+- Clarify what stays on the device with a local model and show app traffic in Connections.
+- Explain what OpenAdminOS and its service providers process in the website privacy notice.
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
 
 ### Removed

@@ -19,7 +19,7 @@ An organization is a company you manage. It holds one Microsoft 365 tenant today
 
 **Connections** is in the sidebar after **Marketplace**, and **Manage connections** in the organization menu opens it. It replaces Settings, Tenants and Settings, Connectors. Old links to those pages open Connections.
 
-The map at the top shows what the active organization reads into this device and everything that leaves it:
+The map at the top shows what the active organization reads into this device, what Chat and runs can send, and where the app contacts other services.
 
 | Part of the map | What it lists |
 |---|---|
@@ -27,9 +27,10 @@ The map at the top shows what the active organization reads into this device and
 | This device | The model, chat history and cache, and the encrypted sign-in tokens |
 | Words from your questions | The hosts of the public references Chat can query. Nothing, when none is on |
 | Run reports, by delivery rule | The result connectors that at least one agent sends reports to under a saved delivery rule |
-| Prompts and tenant data | The hosted provider when the model is hosted, or nowhere when the model is local |
+| Prompts and tenant data | The destination for model processing. For a local model, processing happens on this device. |
+| App traffic | Update checks, registry refresh, docs index, and install counts. See [Network calls](../trust/network-calls.md) for destinations and controls. |
 
-The map uses the same lists as the status strip in the top bar, and a screen reader reads the same facts as one paragraph.
+The map uses the same lists as the status strip in the top bar. A screen reader can read the map summary and open the network calls link. App traffic also appears when you have no active organization.
 
 Below the map:
 

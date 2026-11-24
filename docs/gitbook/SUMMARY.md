@@ -36,6 +36,7 @@
 ## Trust model
 
 - [Local-first guarantee](trust/local-first.md)
+- [Network calls](trust/network-calls.md)
 - [Authentication and permissions](trust/authentication.md)
 - [Hosted providers](trust/hosted-providers.md)
 - [Write confirmation](trust/write-confirmation.md)

@@ -4,7 +4,7 @@
 
 <p><strong>Sovereign AI agents for IT administration.</strong></p>
 
-<p>Runs on the admin's own computer. Company data never leaves the device.</p>
+<p>Runs on the admin's own computer. With a local model, tenant data and prompts are processed on that device.</p>
 
 <p>OpenAdminOS is a free, MIT-licensed desktop app for running auditable AI agents for IT administration. Microsoft 365 is the starting point, beginning with Intune, Entra and Defender, and not the only target. Agents are plain YAML you can read before you run, risky changes need typed confirmation, and no third-party app registration is required.</p>
 
@@ -27,7 +27,7 @@
 
 ## Why OpenAdminOS
 
-- **Local-first by default.** Pick a local model (Ollama, LM Studio, or Apple Foundation Models) and tenant data plus prompts never leave the device. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. Switching to a hosted provider changes the trust banner honestly.
+- **Local-first by default.** Pick a local model (Ollama, LM Studio, or Apple Foundation Models) to process tenant data and prompts on your computer. The trust banner names where a hosted model processes prompts. Public agent install counts are on by default and can be turned off in Settings > Privacy.
 - **Every agent is auditable YAML.** No opaque code paths, no hidden Graph calls. Read the full pipeline (every Graph endpoint, every transform, every prompt) before you install.
 - **Write agents always pause for typed diff confirmation.** No "trust this agent" toggle. Destructive changes require typing the phrase shown against the live diff (`type RETIRE 47 DEVICES to proceed`), every time.
 - **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
@@ -129,10 +129,23 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 
 ### Trust model (non-negotiable)
 
-- **Tenant data never leaves the device** when a local LLM is selected. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry.
+- **Local models process tenant data and prompts on your device.** The app sends no tenant-content, prompt, run-result, or crash-report telemetry. Public references you enable can receive words from your question. Delivery rules and agent steps you configure can send run reports.
 - **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
 - **No tenant, no run.** The desktop shell remains available for browsing and drafting, but tenant-backed Chat, Graph refreshes, Changes, and agents pause for contextual connection. Agents never run against fallback demo data.
 - **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle. The typed-phrase confirmation per run is the only gate.
+
+### Network calls the app makes on its own
+
+Remote hosts see your IP address and standard request headers. Turn off **Automatic network requests** in **Settings > Privacy** to stop the automatic requests below.
+
+| Activity | Host | When | What is sent | Individual control |
+|---|---|---|---|---|
+| Update checks | GitHub Releases | 15 seconds after launch, then every 4 hours on packaged Windows and macOS builds. Downloads require your action. | Release metadata request and a random UUID saved on the device (`x-user-staging-id`). | Automatic network requests |
+| Agent registry refresh | `raw.githubusercontent.com` or your configured registry | At startup, every 6 hours, and on focus at least 1 hour after the last refresh. | Catalog request for `agents/index.json`. | Automatic network requests |
+| Docs index auto-install | GitHub Releases and `registry.ollama.ai` (through local Ollama) | At launch when local Ollama is reachable. If the index is missing, downloads about 264 MB and pulls the embedding model if needed. Retries at most daily. | Index pointer and asset requests, plus an Ollama model request. | Docs index auto-install in Settings > Privacy |
+| Registry install counts | `openadminos.com/api/install` | On public agent install in packaged production builds. On by default and deduplicated on your device. | Agent slug, app version, and platform. The server uses IP briefly for rate limiting and stores daily aggregate counts without a per-install identifier. | Registry install counts in Settings > Privacy |
+
+See [Network calls](docs/gitbook/trust/network-calls.md) for requests that depend on your setup, and [Managed configuration](docs/gitbook/getting-started/managed-configuration.md) for rollout controls.
 
 ### What's shipped vs what's coming
 
@@ -143,8 +156,7 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 | Drift, baselines, and rollback | The Changes view captures a versioned drift timeline across Intune and Entra configuration, pins named baselines, compares two points in time or two tenants, exports a baseline as a portable bundle, and rolls drift back to baseline through the typed write-confirmation gate. | Scheduled baseline evaluation routed through connector delivery, and per-object rollback selection. |
 | Fleet | For two or more tenants, a Fleet view aggregates per-tenant baseline drift, filterable by tenant group. | Fleet-wide actions with per-tenant confirmation. |
 | Governed MCP gateway | A local, loopback-only, token-authenticated MCP server (off by default) lets external AI clients read one tenant and propose writes that still require your typed confirmation in the app. | Entra Agent ID interop. |
-| Documentation grounding | A local retrieval engine ranks an installed documentation index against questions, on-device, with source provenance and an honest state when no index is present. | First-run index download and on-device embedding serving. |
-| Usage telemetry | Opt-in, off by default, counts and versions only, with the exact payload shown before it can ever be sent. | A hosted collector and public install counter. |
+| Documentation grounding | The app can download the documentation index at launch when local Ollama is reachable. It embeds questions and ranks the index on the device, showing sources or explaining when the index is missing. | More documentation sources. |
 | Workspaces | Single-tenant investigation workspaces with pinned evidence, notes, linked chats, linked runs, local instructions, and local dossier export are implemented. | More workspace import/export polish. |
 | Agent registry | Agent Hub fetches `agents/index.json`, caches locally, version-pins installs, reviews scope-diff updates, and supports custom registry sources. | More maintainer workflow automation. |
 | Build your own Agent | Guided manifest drafting, validation, repair, editable YAML review, local preflight, install, edit, export, and public "Share with community" issue intake are implemented. | More examples and better Graph QA messages. |

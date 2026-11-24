@@ -12,9 +12,16 @@ An IT team rolling OpenAdminOS out to many admins can set those choices once, in
 - allow only some public references, or none,
 - pre-seed your own Entra app registration for Microsoft 365 sign-in,
 - skip the first-run model scan when the policy's provider is ready,
+- control automatic network requests and registry install counts,
 - lock any of these settings so they cannot be changed in the app.
 
 Reading a policy file on one device is part of the free app. OpenAdminOS reads the file at launch and enforces it in the app's main process, not only in what the window shows: a provider or public reference the policy does not allow is refused for Chat, agents, schedules and provider tests even if something asks for it directly.
+
+## Automatic network requests
+
+A policy key can turn off automatic update checks, agent registry refreshes, docs index auto-installs, and registry install counts. A separate key controls registry install counts on their own. See [Network calls](../trust/network-calls.md) for timing, destinations, and the controls in Settings > Privacy.
+
+<!-- TODO(ugur): Add the two policy keys and their accepted values once the automatic network requests change lands. -->
 
 ## Where the File Goes
 
