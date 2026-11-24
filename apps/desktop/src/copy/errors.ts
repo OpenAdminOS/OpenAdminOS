@@ -53,6 +53,9 @@ export function cacheBrowserErrorCopy(error: unknown): AppErrorCopy {
   if (reason?.includes("organization is disconnecting or is not ready")) {
     return { what: "The organization is disconnecting or is not ready. Select a connected organization.", action: connections };
   }
+  if (reason?.includes("Invalid cache ")) {
+    return { what: "This cache request is invalid. Return to Data to browse again.", action: { label: "Return to Data", kind: "navigate" } };
+  }
   if (reason?.includes("Unknown cache resource")) {
     return { what: "This cache resource is unavailable. Return to Data to choose another resource.", action: { label: "Return to Data", kind: "navigate" } };
   }

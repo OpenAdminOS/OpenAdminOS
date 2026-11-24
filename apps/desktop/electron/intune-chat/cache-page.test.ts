@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStateStore } from "../state.js";
 import { it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { validateCachePage } from "./cache-page.js";
+import { validateCacheDetail, validateCachePage } from "./cache-page.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 
 it("validates and pages local cache rows in stable order within one tenant", async () => {
@@ -22,6 +22,7 @@ it("validates and pages local cache rows in stable order within one tenant", asy
     const rows = Array.from({ length: 201 }, (_, index) => ({
       id: String(index).padStart(3, "0"),
       displayName: "Sample user",
+      description: index === 200 ? "x".repeat(65_536) : undefined,
       mail: index === 200 ? "unique@example.invalid" : undefined,
     }));
     store.replaceGraphResources({ ...base, rows });
@@ -40,7 +41,13 @@ it("validates and pages local cache rows in stable order within one tenant", asy
       assert.equal(store.browseGraphCache({ ...request, search }).total, 0);
     }
     const detail = { tenantId: base.tenantId, resource: base.resource, id: "200" };
-    assert.equal(store.readGraphCacheRow(detail).status, "ready");
+    for (const id of ["", 42, "x".repeat(2049)]) {
+      assert.throws(() => validateCacheDetail({ ...detail, id }), /Invalid cache row ID/);
+    }
+    const preview = store.readGraphCacheRow(validateCacheDetail(detail));
+    assert.equal(preview.status, "ready");
+    assert.equal(preview.json.length, 65_536);
+    assert.equal(preview.truncated, true);
     assert.equal(store.readGraphCacheRow({ ...detail, tenantId: "tenant-2" }).status, "missing");
     const db = new DatabaseSync(join(dir, "cache.db"));
     db.prepare("UPDATE graph_resources SET raw_json = ? WHERE tenant_id = ? AND graph_id = ?").run("{", base.tenantId, detail.id);
@@ -80,6 +87,7 @@ it("rejects cache browsing for another connected organization", async () => {
         store.browseGraphCache({ ...request, tenantId: "tenant-2" }),
         /Select the connected organization/,
       );
+      await assert.rejects(store.readGraphCacheRow({ tenantId: "tenant-2", resource: "users", id: "a" }), /Select the connected organization/);
       store["tenantLifecycle"].close("tenant-1");
       await assert.rejects(store.browseGraphCache({ ...request, tenantId: "tenant-1" }), /organization is disconnecting/);
       await assert.rejects(store.readGraphCacheRow({ tenantId: "tenant-1", resource: "users", id: "a" }), /organization is disconnecting/);

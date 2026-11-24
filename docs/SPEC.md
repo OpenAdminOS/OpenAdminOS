@@ -834,7 +834,8 @@ Data lives in **Settings > Data**, with all 45 supported read-resource types
 selected by default. Browse opens a read-only view of the active organization's
 local rows with search, pagination, refresh time, and partial coverage. List pages
 return identifying fields. Selecting a row loads its JSON on demand, capped at
-65,536 characters for display. Rows stay browsable after service access is
+65,536 characters for display. An open preview reloads after a cache refresh.
+If the row disappears, the preview closes and focus returns to search. Rows stay browsable after service access is
 removed, with a link to clear the local cache. Switching organizations closes
 the browser. Chat links to the view for non-empty cached sources in an answer
 from the active organization.

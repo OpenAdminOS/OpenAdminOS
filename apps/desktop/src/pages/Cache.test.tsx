@@ -120,6 +120,7 @@ it("opens cached rows from Data, pages through them, shows JSON, and handles an 
   await user.click(screen.getByRole("link", { name: "Browse Users" }));
   expect(await screen.findByText("Rows 1 to 100 of 101")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByRole("region", { name: "Cache browser results" })).toHaveFocus();
   expect(await screen.findByText("Rows 101 to 101 of 101")).toBeInTheDocument();
   expect(screen.getByText("101 of 150 cached")).toBeInTheDocument();
   const detailsButton = screen.getByRole("button", { name: "View JSON for Sample 101" });
@@ -128,6 +129,9 @@ it("opens cached rows from Data, pages through them, shows JSON, and handles an 
   expect(await screen.findByText('{"displayName": "Sample 101"}')).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Close details" }));
   expect(detailsButton).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: "Previous" }));
+  expect(screen.getByRole("region", { name: "Cache browser results" })).toHaveFocus();
+  expect(await screen.findByText("Rows 1 to 100 of 101")).toBeInTheDocument();
   await user.type(screen.getByRole("searchbox", { name: "Search cached rows" }), "missing");
   expect(await screen.findByText("No matching rows")).toBeInTheDocument();
   expect(bridge.browseGraphCache).toHaveBeenLastCalledWith({
@@ -186,4 +190,17 @@ it("closes the browser and removes its query parameter when the organization cha
   expect(await screen.findByText("/cache")).toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(bridge.browseGraphCache).not.toHaveBeenCalledWith(expect.objectContaining({ tenantId: "tenant-2" }));
+});
+
+it.each([
+  [null, "No organization is active", "Open connections"],
+  ["tenant-1", "Cache resource unavailable", "Return to Data"],
+])("shows recovery for an unavailable cache link with organization %s", async (activeTenantId, heading, action) => {
+  const bridge = makeMockBridge({
+    getGraphCacheStatus: vi.fn(async (tenantId): Promise<GraphCacheStatus> => ({ tenantId, resources: [] })),
+  }, { ...createMockAppState(), activeTenantId });
+  renderRoute(<Cache />, { bridge, route: "/cache?resource=unknown", path: "/cache" });
+  expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: action }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
