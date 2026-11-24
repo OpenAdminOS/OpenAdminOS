@@ -203,7 +203,7 @@ for six years and records in the ten-year category for ten years (§ 257 HGB
 and § 147 AO).
 
 The privacy notice was last updated on 2026-11-25. Vercel hosts the website and
-APIs on its Pro plan, with server functions in Washington, D.C. (`iad1`).
+APIs on its Pro plan, with server functions in Frankfurt, Germany (`fra1`).
 Runtime logs include request details such as the user agent. Vercel keeps them
 for one day on Pro and up to 30 days with Observability Plus. The notice states
 the 30-day maximum. No log drains are configured. Build logs contain no visitor
@@ -212,6 +212,8 @@ data.
 Plausible stores aggregate statistics only, stores no personal data, and uses
 no cookies. Plausible is hosted in the EU with no third-country transfer.
 The privacy notice lists safeguards for international transfers by provider.
+Vercel's global edge network and support can still involve processing in the
+United States.
 Vercel Inc., GitHub, and Microsoft Corporation participate in the EU-U.S. Data
 Privacy Framework, its UK Extension, and the Swiss-U.S. Data Privacy Framework.
 Cal.com, Inc. participates in the EU-U.S. framework and its UK Extension.
@@ -231,11 +233,11 @@ list at dataprivacyframework.gov (searched by participant name; Supabase not
 listed); Supabase entity from supabase.com/privacy and SCCs from
 supabase.com/legal/dpa; Vercel runtime log retention from
 vercel.com/docs/logs/runtime (1 day on Pro, 30 days with Observability Plus);
-the Pro plan, absence of log drains and the function region (`iad1`, set in the
-Vercel project settings, not in `web/vercel.json`) from the Vercel API; the
+the Pro plan and absence of log drains from the Vercel API; the
 EU tenant region from the openadminos.com Entra ID OpenID configuration
 (`tenant_region_scope: EU`); booking fields from the two public Cal.com booking
-forms. Re-check these when the privacy notice changes.
+forms. The Vercel function region (`fra1`) is pinned in `web/vercel.json`.
+Re-check these sources when the privacy notice changes.
 
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
