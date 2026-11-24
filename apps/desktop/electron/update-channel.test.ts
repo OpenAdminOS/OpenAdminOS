@@ -191,7 +191,7 @@ describe("update channel", () => {
     assert.equal(updater.checks, 1);
   });
 
-  it("skips startup, periodic, channel and manual checks while networking is off", async (t) => {
+  it("skips startup, periodic and channel checks while automatic checks are off", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
     const { updater, controller } = harness(t);
     controller.setChecksEnabled(false);
@@ -213,6 +213,42 @@ describe("update channel", () => {
     t.mock.timers.tick(POLL_INTERVAL_MS);
     await controller.check();
     assert.equal(updater.checks, 2);
+  });
+
+  it("checks and downloads on request while automatic checks are off", async (t) => {
+    const { updater, controller, confirm } = harness(t);
+    controller.setChecksEnabled(false);
+    controller.configure("stable");
+    updater.checkQueue.push(async () => updater.emit("update-not-available"));
+    assert.deepEqual(await controller.check("manual"), { status: "not-available" });
+
+    updater.checkQueue.push(async () => updater.emit("update-available", { version: "0.8.0" }));
+    updater.downloadQueue.push(async () => {
+      updater.emit("download-progress", { percent: 50 });
+      assert.deepEqual(controller.current(), { status: "downloading", version: "0.8.0", progress: 50 });
+      updater.emit("update-downloaded", { version: "0.8.0" });
+    });
+    await controller.check("manual");
+    assert.equal(updater.checks, 2);
+    assert.equal(updater.downloads.length, 1);
+    assert.deepEqual(controller.current(), { status: "ready", version: "0.8.0" });
+    assert.deepEqual(confirm.asked, ["0.8.0"]);
+  });
+
+  it("keeps a manual download in progress when automatic checks are turned off", async (t) => {
+    const { updater, controller } = harness(t);
+    controller.configure("stable");
+    updater.checkQueue.push(async () => updater.emit("update-available", { version: "0.8.0" }));
+    let finish = () => {};
+    updater.downloadQueue.push(() => new Promise<void>((resolve) => { finish = resolve; }));
+    await controller.check("manual");
+    assert.equal(updater.downloads.length, 1);
+
+    controller.setChecksEnabled(false);
+    assert.equal(updater.downloads[0]?.cancelled, false);
+    updater.emit("update-downloaded", { version: "0.8.0" });
+    finish();
+    assert.deepEqual(controller.current(), { status: "ready", version: "0.8.0" });
   });
 
   it("ignores an update found by a check that was in flight when networking was turned off", async (t) => {

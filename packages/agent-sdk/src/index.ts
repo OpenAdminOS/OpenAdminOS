@@ -1414,7 +1414,7 @@ export interface AppState {
   registrySource: string;
   /** Whether optional automatic app network requests are enabled. */
   automaticNetworkRequestsEnabled: boolean;
-  /** Whether packaged builds report aggregate public registry install counts. */
+  /** Registry install count preference. Reporting also requires automatic network requests. */
   registryInstallCountsEnabled: boolean;
   schedulerStatus?: SchedulerStatus;
   office?: OfficeState;

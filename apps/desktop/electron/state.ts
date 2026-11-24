@@ -1979,6 +1979,7 @@ export class AppStateStore {
   private registryCacheEntries: RegistryAgentSummary[] | null = null;
   private lastRegistryRefresh: string | null = null;
   private registryRefreshError: string | null = null;
+  private readonly automaticRegistryRefreshes = new Set<AbortController>();
 
   constructor(options: AppStateStoreOptions | string, legacyTokenStore?: TokenCacheStorage) {
     if (typeof options === "string") {
@@ -3561,18 +3562,27 @@ export class AppStateStore {
    * Safe to call multiple times (e.g., on manual refresh).
    */
   async initRegistry(trigger: "manual" | "automatic" = "manual"): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
-    return this.localResetGatedWork(() => this.initRegistryNow(trigger));
+    return this.localResetGatedWork(async () => {
+      if (trigger === "manual") return this.initRegistryNow();
+      const controller = new AbortController();
+      this.automaticRegistryRefreshes.add(controller);
+      try {
+        return await this.initRegistryNow(controller.signal);
+      } finally {
+        this.automaticRegistryRefreshes.delete(controller);
+      }
+    });
   }
 
-  private async initRegistryNow(trigger: "manual" | "automatic"): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+  private async initRegistryNow(signal?: AbortSignal): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     if (!this.userDataPath) {
       // No userData path, fall back to filesystem only (tests / legacy ctor).
       return { error: null, fromCache: false, cachedAt: null };
     }
     const persisted = await this.read();
     const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
-    if (trigger === "automatic" &&
-        !this.privacySettingEnabled("automaticNetworkRequests", persisted.automaticNetworkRequestsEnabled)) {
+    if (signal && (signal.aborted ||
+        !this.privacySettingEnabled("automaticNetworkRequests", persisted.automaticNetworkRequestsEnabled))) {
       if (!this.registryCacheEntries) {
         const cached = readCachedRegistry(this.userDataPath, registrySource);
         if (cached.fromCache) {
@@ -3583,8 +3593,10 @@ export class AppStateStore {
     }
     const result = await refreshRegistry(this.userDataPath, registrySource, {
       allowDevSource: this.allowDevRegistrySource,
+      ...(signal ? { signal } : {}),
       ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}),
     });
+    if (signal?.aborted) return { error: null, fromCache: true, cachedAt: null };
 
     const bothSourcesFailed = result.error !== null && !result.fromCache;
     if (bothSourcesFailed) {
@@ -3648,7 +3660,10 @@ export class AppStateStore {
       this.assertPrivacySettingUnlocked("automaticNetworkRequests", "Automatic network requests");
       const current = await this.read();
       await this.write({ ...current, automaticNetworkRequestsEnabled: enabled });
-      if (!enabled) this.cancelAutomaticRetrievalDownloads();
+      if (!enabled) {
+        this.cancelAutomaticRetrievalDownloads();
+        for (const controller of this.automaticRegistryRefreshes) controller.abort();
+      }
     });
     if (enabled) {
       void this.autoInstallRetrievalIndex();
@@ -4206,8 +4221,7 @@ export class AppStateStore {
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
       automaticNetworkRequestsEnabled,
-      registryInstallCountsEnabled: automaticNetworkRequestsEnabled &&
-        this.privacySettingEnabled("registryInstallCounts", persisted.registryInstallCountsEnabled),
+      registryInstallCountsEnabled: this.privacySettingEnabled("registryInstallCounts", persisted.registryInstallCountsEnabled),
       schedulerStatus: this.deriveSchedulerStatus(persisted),
       office: this.officeService.state(),
       mcpServers: this.mcpServerSummaries(persisted),

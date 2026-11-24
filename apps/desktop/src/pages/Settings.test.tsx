@@ -820,6 +820,7 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(docs).toHaveAttribute("aria-checked", "true"));
     expect(network).toHaveAttribute("aria-checked", "true");
     expect(counts).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/Schedules, tenant cache refreshes, connector deliveries and model checks you set up still run/)).toBeVisible();
 
     await user.click(docs);
     expect(bridge.setRetrievalAutoInstall).toHaveBeenCalledWith(false);
@@ -894,6 +895,36 @@ describe("Settings provider section", () => {
     await user.click(screen.getByRole("button", { name: "Check for updates" }));
     expect(await screen.findByText("Up to date on the nightly channel.")).toBeInTheDocument();
     expect(bridge.checkForUpdatesNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks for updates from About while automatic checks are paused", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({
+      checkForUpdatesNow: vi.fn(async () => ({ status: "not-available" as const })),
+    }, createMockAppState({ automaticNetworkRequestsEnabled: false }));
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge });
+    const check = await screen.findByRole("button", { name: "Check for updates" });
+    await waitFor(() => expect(check).toBeEnabled());
+    expect(screen.getByText("Automatic checks are paused in Settings > Privacy. You can still check here.")).toBeVisible();
+    await user.click(check);
+    expect(await screen.findByText("Up to date on the stable channel.")).toBeVisible();
+    expect(bridge.checkForUpdatesNow).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [true, "Paused"],
+    [false, "Disabled"],
+  ])("shows registry counts with preference %s as %s when automatic requests are off", async (countsEnabled, status) => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, createMockAppState({
+      automaticNetworkRequestsEnabled: false,
+      registryInstallCountsEnabled: countsEnabled,
+    }));
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge });
+    await user.click(await screen.findByText("Readiness diagnostics"));
+    const detail = screen.getByText("Sends the agent slug, app version, and platform for aggregate public registry stats.");
+    expect(detail).toBeVisible();
+    expect(within(detail.parentElement as HTMLElement).getByText(status)).toBeVisible();
   });
 
   it("shows the update channel in Privacy only once it is known", async () => {

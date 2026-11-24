@@ -100,8 +100,8 @@ export function updateUnavailableReason(input: {
  * Checks GitHub releases on the selected channel, downloads in the
  * background, and installs only after the admin restarts or quits.
  *
- * Downloads are never automatic: one starts only for an update-available
- * from a check of the current channel. A generation counter is bumped on
+ * Downloads start after an update-available event from a check of the
+ * current channel. A generation counter is bumped on
  * every channel switch so check results, download events and installs that
  * belong to the previous channel are dropped, and a ready update from the
  * previous channel is discarded. `autoInstallOnAppQuit` stays off so
@@ -119,9 +119,10 @@ export class UpdateController {
   private startupTimer: NodeJS.Timeout | null = null;
   // Bumped when the channel changes, so work for the previous channel is recognised.
   private generation = 0;
-  private checking: { generation: number; done: Promise<void> } | null = null;
+  private checking: { generation: number; manual: boolean; done: Promise<void> } | null = null;
   private downloading: {
     generation: number;
+    manual: boolean;
     token: CancellationToken;
     done: Promise<void>;
   } | null = null;
@@ -143,6 +144,7 @@ export class UpdateController {
       this.set({ status: "downloading", version: info.version });
       const download = {
         generation: this.generation,
+        manual: this.checking.manual,
         token: new CancellationToken(),
         done: Promise.resolve(),
       };
@@ -150,7 +152,7 @@ export class UpdateController {
       // Failures also arrive as error events.
       download.done = Promise.resolve()
         .then(() => {
-          if (this.checksEnabled && download.generation === this.generation) {
+          if (download.generation === this.generation) {
             return updater.downloadUpdate(download.token);
           }
         })
@@ -240,7 +242,7 @@ export class UpdateController {
       this.scheduleChecks();
     } else {
       this.clearCheckTimers();
-      if (this.state.status !== "ready") {
+      if (this.state.status !== "ready" && !this.manualUpdateInProgress()) {
         this.generation++;
         this.downloading?.token.cancel();
         this.set({ status: "idle" });
@@ -267,8 +269,9 @@ export class UpdateController {
     this.stopped = true;
   }
 
-  async check(): Promise<UpdateState> {
-    if (!this.checksEnabled) return this.state;
+  async check(trigger: "automatic" | "manual" = "automatic"): Promise<UpdateState> {
+    const manual = trigger === "manual";
+    if (!manual && !this.checksEnabled) return this.state;
     // electron-updater hands out a running check again, even one for the
     // previous channel, so that one has to settle before this channel is checked.
     while (
@@ -277,11 +280,12 @@ export class UpdateController {
     ) {
       await Promise.all([this.checking?.done, this.downloading?.done]);
     }
-    if (!this.started || !this.checksEnabled || this.state.status === "ready" || this.downloading) return this.state;
+    if (!this.started || (!manual && !this.checksEnabled) || this.state.status === "ready" || this.downloading) return this.state;
     if (!this.checking) {
       const generation = this.generation;
       const checking = {
         generation,
+        manual,
         done: Promise.resolve().then(() => this.run(generation)),
       };
       this.checking = checking;
@@ -294,7 +298,7 @@ export class UpdateController {
   }
 
   private async run(generation: number): Promise<void> {
-    if (!this.started || !this.checksEnabled || generation !== this.generation) return;
+    if (!this.started || generation !== this.generation) return;
     this.set({ status: "checking" });
     try {
       await this.host.updater.checkForUpdates();
@@ -355,10 +359,17 @@ export class UpdateController {
     if (switching) this.set({ status: "idle" });
   }
 
+  private manualUpdateInProgress(): boolean {
+    return (
+      (this.checking?.generation === this.generation && this.checking.manual) ||
+      (this.downloading?.generation === this.generation && this.downloading.manual)
+    );
+  }
+
   private currentActivity(): boolean {
     return (
       this.started &&
-      (this.checksEnabled || this.installing) &&
+      (this.checksEnabled || this.installing || this.manualUpdateInProgress()) &&
       (!this.checking || this.checking.generation === this.generation) &&
       (!this.downloading || this.downloading.generation === this.generation)
     );

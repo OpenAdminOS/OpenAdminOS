@@ -71,7 +71,7 @@ export async function applyUpdateNow(): Promise<void> {
 }
 
 export async function checkForUpdatesNow(): Promise<UpdateState> {
-  if (!checksEnabled || !app.isPackaged) return getUpdateState();
+  if (!app.isPackaged) return getUpdateState();
   if (unavailableReason() === "linux") {
     idleState = {
       status: "error",
@@ -82,7 +82,7 @@ export async function checkForUpdatesNow(): Promise<UpdateState> {
     return idleState;
   }
   if (!controller) return getUpdateState();
-  return controller.check();
+  return controller.check("manual");
 }
 
 /**

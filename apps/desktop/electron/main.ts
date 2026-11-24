@@ -2992,7 +2992,7 @@ async function createSupportBundle(input: SupportBundleInput) {
         lastRefresh: state.lastRegistryRefresh,
         refreshErrorCategory: classifyDiagnosticText(state.registryRefreshError),
         refreshErrorHash: diagnosticHash(state.registryRefreshError),
-        installCountsEnabled: state.registryInstallCountsEnabled,
+        installCountsEnabled: state.automaticNetworkRequestsEnabled && state.registryInstallCountsEnabled,
       },
       scheduler: {
         supported: state.schedulerStatus?.supported ?? releaseDiagnostics.scheduler.supported,

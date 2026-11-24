@@ -3957,7 +3957,7 @@ function PrivacySection({
         />
         <SettingRow
           id="automatic-network-requests"
-          description="Allows app update checks, automatic agent registry refreshes, automatic documentation index and embedding model downloads, and registry install counts."
+          description="Allows automatic app update checks, agent registry refreshes, documentation index and embedding model downloads, and registry install counts. Schedules, tenant cache refreshes, connector deliveries and model checks you set up still run."
           control={
             <PrivacySwitch
               name="Automatic network requests"
@@ -4610,7 +4610,7 @@ function AppUpdateRows() {
           unavailable
             ? UPDATE_UNAVAILABLE_DETAIL[unavailable]
             : !automaticNetworkRequestsEnabled
-              ? "The selected channel applies when update checks are enabled in Settings > Privacy."
+              ? "Manual update checks use the selected channel. Switching discards an update waiting to install."
               : "Nightly builds are built from every merge to main and signed like stable releases, but they are less tested. A newer stable release is still offered. Turning this off moves you back to the current stable release, even if it is older than the installed nightly. Switching discards an update waiting to install."
         }
         control={
@@ -4629,8 +4629,8 @@ function AppUpdateRows() {
         description={
           unavailable
             ? "This install does not use the in-app updater."
-            : !automaticNetworkRequestsEnabled && state.status !== "ready"
-              ? "Update checks are off in Settings > Privacy."
+            : !automaticNetworkRequestsEnabled && state.status === "idle"
+              ? "Automatic checks are paused in Settings > Privacy. You can still check here."
               : settings
                 ? updateStatusText(state, settings.channel)
                 : undefined
@@ -4653,7 +4653,7 @@ function AppUpdateRows() {
             <Button
               variant="secondary"
               size="sm"
-              disabled={!settings || Boolean(unavailable) || busy || !automaticNetworkRequestsEnabled}
+              disabled={!settings || Boolean(unavailable) || busy}
               onClick={() => void checkNow()}
             >
               <IconRefresh size={13} />
@@ -4844,9 +4844,9 @@ function AboutSection() {
           />
           <ReadinessRow
             label="Registry install counts"
-            value={state.registryInstallCountsEnabled ? "Enabled" : "Disabled"}
-            tone={state.registryInstallCountsEnabled ? "success" : "warning"}
-            detail="Sends agent slug, app version, platform, and a yearly per-agent hash for aggregate public registry stats."
+            value={!state.registryInstallCountsEnabled ? "Disabled" : state.automaticNetworkRequestsEnabled ? "Enabled" : "Paused"}
+            tone={state.registryInstallCountsEnabled && state.automaticNetworkRequestsEnabled ? "success" : "warning"}
+            detail="Sends the agent slug, app version, and platform for aggregate public registry stats."
           />
         </div>
       </details>

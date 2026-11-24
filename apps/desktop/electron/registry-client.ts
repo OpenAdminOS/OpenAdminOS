@@ -224,7 +224,7 @@ export function validateRegistrySource(
 export async function refreshRegistry(
   userDataPath: string,
   registrySource: string,
-  options: RegistrySourceValidationOptions & { resolveProxy?: ProxyResolver } = {},
+  options: RegistrySourceValidationOptions & { resolveProxy?: ProxyResolver; signal?: AbortSignal } = {},
 ): Promise<RefreshResult> {
   let sourceUrl: string;
   try {
@@ -243,10 +243,13 @@ export async function refreshRegistry(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
   try {
-    const response = await fetch(indexUrl, { signal: controller.signal });
+    signal.throwIfAborted();
+    const response = await fetch(indexUrl, { signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const indexText = await response.text();
+    signal.throwIfAborted();
     const body = JSON.parse(indexText) as unknown;
     if (
       body &&
@@ -279,10 +282,12 @@ export async function refreshRegistry(
       throw new Error("Invalid index shape");
     }
   } catch (err) {
-    // An unreachable Marketplace names its host, the proxy and the fix.
-    fetchError =
-      (await describeNetworkFailure({ what: "The Marketplace", url: indexUrl, error: timeoutWhenAborted(err), ...(options.resolveProxy ? { resolveProxy: options.resolveProxy } : {}) })) ??
-      (err instanceof Error ? err.message : String(err));
+    if (!options.signal?.aborted) {
+      // An unreachable Marketplace names its host, the proxy and the fix.
+      fetchError =
+        (await describeNetworkFailure({ what: "The Marketplace", url: indexUrl, error: timeoutWhenAborted(err), ...(options.resolveProxy ? { resolveProxy: options.resolveProxy } : {}) })) ??
+        (err instanceof Error ? err.message : String(err));
+    }
   } finally {
     clearTimeout(timer);
   }
