@@ -311,6 +311,16 @@ or Microsoft Graph payloads through website analytics. Privacy copy must keep
 the website analytics boundary separate from the desktop app's no tenant telemetry
 guarantee.
 
+The website sends a Content Security Policy, a referrer policy, MIME sniffing
+protection, a permissions policy, and HSTS on all routes. Next renders HTML
+per request so its scripts, the theme initializer, and the homepage image
+preload can use a fresh nonce. The policy allows self-hosted assets and limits
+Plausible to its configured script and event URLs on marketing pages. Docs
+HTML allows same-origin connections for search. Inline style attributes are
+needed for chart sizes and SVG graphics. The built-in Next error stylesheet
+is allowed by hash. API responses and static files use a policy with no
+resource loading. Release data keeps its fetch revalidation intervals.
+
 ### LLM provider abstraction
 
 A `LLMProvider` interface in `packages/llm/` with these methods at minimum:

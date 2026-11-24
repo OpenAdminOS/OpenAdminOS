@@ -19,6 +19,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+- The website uses a nonce-based Content Security Policy, blocks framing and unused browser permissions, and enforces HTTPS with HSTS.
+
 ## [0.8.0] - 2026-11-24
 
 ### Highlights
