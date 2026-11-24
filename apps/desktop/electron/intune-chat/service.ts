@@ -1,7 +1,7 @@
 import type { ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import { hostedOllamaDestination, providerForModel } from "@openadminos/agent-sdk";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
-import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, announcesLookup, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
@@ -42,6 +42,7 @@ import {
   type IntuneChatDocumentationSource,
   type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
+  type IntuneChatToolTraceEntry,
   type ModelFitIssue,
   type IntuneChatProgressStep,
   type IntuneChatStreamEvent,
@@ -132,7 +133,7 @@ import {
   updateJobTenantProgress,
 } from "../state-helpers.js";
 import { IntelligenceSqliteStore, type HostedProviderConsentAuditRecord } from "./sqlite-store.js";
-import { extractLastJsonObject, runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } from "./agentic-loop.js";
+import { failedRoadmapCheck, LOCAL_FALLBACK_NOTICES, ROADMAP_NOT_CONSULTED, runAgenticChat, type AgenticFailureReason, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   chatResultContextFor,
   computedAnswerText,
@@ -147,6 +148,7 @@ import {
 } from "./structured-question.js";
 import {
   GRAPH_CACHE_RESOURCES,
+  asksAboutMicrosoftRoadmap,
   buildAnswerPack,
   chatTitleForPrompt,
   classifyChatQuestion,
@@ -173,6 +175,7 @@ import {
   namedServers,
   planChatSources,
   QuestionKindTracker,
+  RELEASE_COMMUNICATIONS_SERVER_ID,
   relabelUnverifiedLearn,
   modelStepHooks,
   startAnswerStep,
@@ -2259,11 +2262,12 @@ export class IntuneChatService {
     // before any model call, so those questions keep the refresh before the answer.
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
+    const roadmapQuestion = asksAboutMicrosoftRoadmap(content);
     // A local model never writes the answer to a question code has computed: code renders it, with no model
     // call, so no prose can contradict or pad the counts. The cache refreshes first, as for direct answers.
     // Always investigative keeps the loop the admin chose.
-    const localCodeAnswer = provider?.isLocal === true && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
+    const localCodeAnswer = provider?.isLocal === true && !roadmapQuestion && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
+    const lazyRefresh = toolsOffered && (!directResources || roadmapQuestion) && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
@@ -2309,18 +2313,18 @@ export class IntuneChatService {
         }
       }
     });
-    if (!lazyRefresh) await refreshPlanned();
+    if (!lazyRefresh && !roadmapQuestion) await refreshPlanned();
 
     const answerGeneratedAt = new Date().toISOString();
     const readPack = () => ({
       cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
       // Only for a tenant or mixed question whose resource this tenant grants: a docs answer never carries cached device facts.
-      computed: this.computeStructured(store, tenant.id, structured && planned.resources.includes(structured.resource) && answerPlan?.sources.kind !== "docs" ? structured : undefined, answerGeneratedAt),
+      computed: this.computeStructured(store, tenant.id, !roadmapQuestion && structured && planned.resources.includes(structured.resource) && answerPlan?.sources.kind !== "docs" ? structured : undefined, answerGeneratedAt),
       rows: readPlannedChatRows(store, {
         tenantId: tenant.id,
         question: content,
         generatedAt: answerGeneratedAt,
-        resources: planned.resources,
+        resources: roadmapQuestion ? [] : planned.resources,
         searchTerms: planned.searchTerms,
         limitPerResource: chatBudget.limitPerResource,
       }),
@@ -2331,7 +2335,7 @@ export class IntuneChatService {
       packCacheStatus: store.getGraphCacheStatus(tenant.id, [
         ...GRAPH_CACHE_RESOURCES,
       ]),
-      packAggregates: this.graphAggregatesFor(
+      packAggregates: roadmapQuestion ? {} : this.graphAggregatesFor(
         store,
         tenant.id,
         planned.resources,
@@ -2377,7 +2381,7 @@ export class IntuneChatService {
     };
     // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
     // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
-    const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext && !modelAnsweredBefore(history)
+    const directDeviceAnswer = !roadmapQuestion && !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext && !modelAnsweredBefore(history)
       ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), answerGeneratedAt, () => {}, entry => { (toolTrace ??= []).push(entry); }, this.host.timestampLocale) ??
         voiceAppPlatformCountAnswer(
           content, cacheStatus,
@@ -2410,10 +2414,7 @@ export class IntuneChatService {
         : withMemory;
       provenance.add("memory", Boolean(conversationMemory));
       provenance.add("workspace", Boolean(workspaceContext));
-      const buildDeterministicAnswer = async (
-        notice?: string,
-        afterCompactLoop = false,
-      ): Promise<{ content: string; model?: string }> => {
+      const buildDeterministicAnswer = async (notice?: string): Promise<{ content: string; model?: string }> => {
         await prepareDeterministic();
         usedDeterministic = true;
         provenance.add("answer-pack");
@@ -2439,8 +2440,7 @@ export class IntuneChatService {
         const system = buildIntuneChatSystemPrompt(provider?.isLocal === true);
         let model: string | undefined;
         // An answer that only promises work is asked again, at most twice; the last answer is kept.
-        // After a compact loop the fallback is one model call, so the turn stays bounded.
-        const reply = await completeWithPromiseNudge(async (attempt) => {
+        const content = await completeWithPromiseNudge(async (attempt) => {
           const completion = await llm.complete({
             system,
             prompt: attempt,
@@ -2450,19 +2450,7 @@ export class IntuneChatService {
           });
           model = completion.model;
           return completion.text.trim();
-        }, buildAnswerPrompt(answerPack, documentation), afterCompactLoop ? 0 : undefined);
-        // After a compact loop a small model may still reply in the loop's JSON: its answer text is the answer,
-        // and a tool request is no answer.
-        const protocol = afterCompactLoop ? protocolReply(reply) : undefined;
-        const content = protocol && "answer" in protocol ? protocol.answer : reply;
-        if (afterCompactLoop && (!content || looksLikeUnkeptPromise(content) || (protocol !== undefined && !("answer" in protocol)))) {
-          finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
-          assistantStatus = "failed";
-          assistantError = LOCAL_FALLBACK_UNFINISHED;
-          documentationSources = [];
-          return { content: LOCAL_FALLBACK_UNFINISHED, ...(model ? { model } : {}) };
-        }
-        // The notice ("Answered from cached data instead") is said only once that answer exists.
+        }, buildAnswerPrompt(answerPack, documentation));
         engineNotice = notice;
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         // The answer was written from the computed result, so a follow-up may narrow it.
@@ -2520,7 +2508,10 @@ export class IntuneChatService {
               maxTokens: chatBudget.maxTokens,
               onToolStart: (event) => toolSteps.start(event.tool, event.params),
               onToolSending: (event) => toolSteps.sending(event.tool, event.params),
-              onToolFinish: (event) => toolSteps.finish(event.traceEntry),
+              onToolFinish: (event) => {
+                toolSteps.finish(event.traceEntry);
+                if (roadmapQuestion) (toolTrace ??= []).push(event.traceEntry);
+              },
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
@@ -2532,18 +2523,26 @@ export class IntuneChatService {
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
+            } else if (provider.isLocal || roadmapQuestion) {
+              assistantStatus = "failed";
+              assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
+              assistantContent = assistantError;
             } else {
-              const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice, localChat);
+              const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
               assistantContent = deterministic.content;
               responseModel = deterministic.model ?? responseModel;
             }
           } else {
-            // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
-            // A too-small model also reports capability-fallback; it never failed the loop, so it keeps the normal fallback.
-            const failureRouted = provider?.isLocal === true && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
-            const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false), failureRouted);
-            assistantContent = deterministic.content;
-            responseModel = deterministic.model ?? responseModel;
+            const failureRouted = provider.isLocal && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
+            if (failureRouted || roadmapQuestion) {
+              assistantStatus = "failed";
+              assistantError = incompleteChatAnswer({ steps, roadmapQuestion, skippedNotice: failureRouted ? capability.notice : undefined, local: provider.isLocal });
+              assistantContent = assistantError;
+            } else {
+              const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan.mcpInstalled));
+              assistantContent = deterministic.content;
+              responseModel = deterministic.model ?? responseModel;
+            }
           }
         } catch (caught) {
           if (caught instanceof TenantAccessBlockedError) {
@@ -2553,7 +2552,8 @@ export class IntuneChatService {
           } else {
             assistantStatus = "failed";
             assistantError = caught instanceof Error ? caught.message : String(caught);
-            assistantContent = `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+            const roadmapFailure = roadmapQuestion ? failedRoadmapCheck(toolTrace ?? []) : undefined;
+            assistantContent = [roadmapFailure, `The selected LLM provider failed while answering this chat message. ${assistantError}`].filter(Boolean).join(" ");
           }
         }
       }
@@ -2866,11 +2866,12 @@ export class IntuneChatService {
     // before any model call, so those questions keep the refresh before the answer.
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
+    const roadmapQuestion = !options.voice && asksAboutMicrosoftRoadmap(content);
     // A local model never writes the answer to a question code has computed: code renders it, with no model
     // call, so no prose can contradict or pad the counts. The cache refreshes first, as for direct answers.
     // Always investigative keeps the loop the admin chose.
-    const localCodeAnswer = !options.voice && provider?.isLocal === true && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
+    const localCodeAnswer = !options.voice && provider?.isLocal === true && !roadmapQuestion && structured !== undefined && store.getChatInvestigationSettings().mode !== "always-agentic";
+    const lazyRefresh = toolsOffered && (!directResources || roadmapQuestion) && !planned.hasWriteIntent && !docsWithoutTenant && !localCodeAnswer;
     const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
@@ -3059,7 +3060,7 @@ export class IntuneChatService {
         }
       }
     });
-    if (!lazyRefresh) {
+    if (!lazyRefresh && !roadmapQuestion) {
       // Stop during the refresh ends in the designed cancelled answer below, as on the lazy path,
       // never as an abort error out of the send.
       try {
@@ -3085,12 +3086,12 @@ export class IntuneChatService {
     const readPack = () => ({
       cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
       // Only for a tenant or mixed question whose resource this tenant grants: a docs answer never carries cached device facts.
-      computed: this.computeStructured(store, tenant.id, structured && planned.resources.includes(structured.resource) && answerPlan?.sources.kind !== "docs" ? structured : undefined, answerGeneratedAt),
+      computed: this.computeStructured(store, tenant.id, !roadmapQuestion && structured && planned.resources.includes(structured.resource) && answerPlan?.sources.kind !== "docs" ? structured : undefined, answerGeneratedAt),
       rows: readPlannedChatRows(store, {
         tenantId: tenant.id,
         question: voiceContext?.planningQuestion ?? content,
         generatedAt: answerGeneratedAt,
-        resources: planned.resources,
+        resources: roadmapQuestion ? [] : planned.resources,
         searchTerms: planned.searchTerms,
         limitPerResource: chatBudget.limitPerResource,
       }),
@@ -3101,7 +3102,7 @@ export class IntuneChatService {
       packCacheStatus: store.getGraphCacheStatus(tenant.id, [
         ...GRAPH_CACHE_RESOURCES,
       ]),
-      packAggregates: this.graphAggregatesFor(
+      packAggregates: roadmapQuestion ? {} : this.graphAggregatesFor(
         store,
         tenant.id,
         planned.resources,
@@ -3178,7 +3179,7 @@ export class IntuneChatService {
     };
     // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
     // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
-    const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext) || modelAnsweredBefore(history)
+    const directVoiceAnswer = roadmapQuestion || noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext) || modelAnsweredBefore(history)
       ? undefined
       : codeAnswer() ?? await voiceDeviceEvidenceAnswer(
           content, cacheStatus, this.buildChatToolContext(tenant, options.signal), answerGeneratedAt,
@@ -3254,7 +3255,7 @@ export class IntuneChatService {
         : contextualQuestion;
       provenance.add("memory", Boolean(voiceContext?.history ?? conversationMemory));
       provenance.add("workspace", Boolean(workspaceContext));
-      const streamDeterministicAnswer = async (notice?: string, afterCompactLoop = false) => {
+      const streamDeterministicAnswer = async (notice?: string) => {
         await prepareDeterministic();
         usedDeterministic = true;
         provenance.add("answer-pack");
@@ -3302,37 +3303,20 @@ export class IntuneChatService {
             assistantContent = chunk.accumulated;
             if (assistantContent.trim()) finishAnswerStep.writing();
             // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-            // The one fallback call after a compact loop is not shown live: only the complete reply tells a tool
-            // request from an answer, whatever the stream's chunks are, and it is shown in full below.
-            if (!afterCompactLoop) emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+            emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
           }
-          // After a compact loop the fallback is one model call, so the turn stays bounded.
-          if (isCancelled() || nudge >= (afterCompactLoop ? 0 : MAX_PROMISE_NUDGES) || !looksLikeUnkeptPromise(assistantContent)) break;
+          if (isCancelled() || nudge >= MAX_PROMISE_NUDGES || !looksLikeUnkeptPromise(assistantContent)) break;
           const repaired = `${prompt}\n\nYour previous reply:\n${assistantContent.trim()}\n\n${PROMISE_REPAIR_PROMPT}`;
           // A voice prompt keeps its byte budget; without room for the repair, the answer stands.
           if (options.voice && Buffer.byteLength(system) + Buffer.byteLength(repaired) > voiceByteLimit) break;
           attemptPrompt = repaired;
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
-        // After a compact loop a small model may still reply in the loop's JSON: its answer text is the answer,
-        // and a tool request is no answer.
-        const protocol = afterCompactLoop ? protocolReply(assistantContent) : undefined;
-        if (protocol && "answer" in protocol) assistantContent = protocol.answer;
-        if (afterCompactLoop && !isCancelled() && (!assistantContent || looksLikeUnkeptPromise(assistantContent) || (protocol !== undefined && !("answer" in protocol)))) {
-          assistantStatus = "failed";
-          assistantError = LOCAL_FALLBACK_UNFINISHED;
-          assistantContent = LOCAL_FALLBACK_UNFINISHED;
-          documentationSources = [];
-          emitDelta(assistantContent, "");
-          finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: true });
-          return;
-        }
         // The notice ("Answered from cached data instead") is said only once that answer exists.
         if (!isCancelled()) engineNotice = notice;
         // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
         if (computed && assistantContent.trim()) computedShown = true;
-        // A stopped fallback shows nothing of the text held back: the stopped answer replaces it.
-        if (!(afterCompactLoop && isCancelled())) emitDelta(assistantContent, "");
+        emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
 
@@ -3427,6 +3411,7 @@ export class IntuneChatService {
               },
               onToolFinish: (event) => {
                 toolSteps.finish(event.traceEntry);
+                if (roadmapQuestion) (toolTrace ??= []).push(event.traceEntry);
                 progressToolSteps = progressToolSteps.map((step, index) =>
                   index === progressToolSteps.length - 1
                     ? {
@@ -3474,13 +3459,14 @@ export class IntuneChatService {
               assistantContent = relabelUnverifiedLearn(agentic.answer.trim(), learnAnswered(agentic.toolTrace));
               emitDelta(assistantContent);
             } else {
-              sendProgress({
-                // Said as pending: the cached-data answer does not exist yet and can still fail.
-                message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice.replace(/Answered from cached data instead\.$/, "Answering from cached data instead."),
-                stage: "building-context",
-                contextStatus: "active",
-                modelStatus: "pending",
-              });
+              if (options.webSearch || options.voice || (!provider.isLocal && !roadmapQuestion)) {
+                sendProgress({
+                  message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice.replace(/Answered from cached data instead\.$/, "Answering from cached data instead."),
+                  stage: "building-context",
+                  contextStatus: "active",
+                  modelStatus: "pending",
+                });
+              }
               if (options.webSearch) {
                 // A tenant-only fallback would discard web evidence and could invent current facts.
                 assistantStatus = "failed";
@@ -3502,28 +3488,31 @@ export class IntuneChatService {
               } else {
                 // The local model could not do this request (a prompt too large for its context, a
                 // reasoning-only reply), or failed the investigation often enough that Chat stops trying
-                // it: the cached-data answer carries the model fit offer. Nothing goes elsewhere unless
+                // it: the answer carries the model fit offer. Nothing goes elsewhere unless
                 // the admin chooses it.
                 if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, fitModel) ?? (agentic.reason !== "context-limit" && agentic.reason !== "provider-unavailable" && agenticModelHasFailedRepeatedly(providerId, fitModel) ? repeatedFailureIssue(provider, fitModel) : undefined);
-                await streamDeterministicAnswer(agentic.fallbackNotice, localChat);
+                if ((!options.voice && provider.isLocal) || roadmapQuestion) {
+                  assistantStatus = "failed";
+                  assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
+                  assistantContent = assistantError;
+                  emitDelta(assistantContent);
+                } else {
+                  await streamDeterministicAnswer(agentic.fallbackNotice);
+                }
               }
             }
           } else {
             const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
             if (capability.reason === "capability-fallback" && !capability.tooSmall && !options.voice && !options.scope) modelFit = repeatedFailureIssue(provider, fitModel);
-            // A local model the failure memory took off the tool loop gets the same one-call, checked fallback.
-            // A too-small model also reports capability-fallback; it never failed the loop, so it keeps the normal fallback.
-            const failureRouted = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
-            if (capability.reason === "capability-fallback" && notice) {
-              sendProgress({
-                // Said as pending: the cached-data answer does not exist yet and can still fail.
-                message: notice.replace(/^Answered from cached data/, "Answering from cached data"),
-                stage: "building-context",
-                contextStatus: "active",
-                modelStatus: "pending",
-              });
+            const failureRouted = provider.isLocal && !options.voice && investigationSettings.mode === "auto" && capability.reason === "capability-fallback" && !capability.tooSmall;
+            if (failureRouted || roadmapQuestion) {
+              assistantStatus = "failed";
+              assistantError = incompleteChatAnswer({ steps, roadmapQuestion, skippedNotice: failureRouted ? capability.notice : undefined, local: provider.isLocal });
+              assistantContent = assistantError;
+              emitDelta(assistantContent);
+            } else {
+              await streamDeterministicAnswer(notice);
             }
-            await streamDeterministicAnswer(notice, failureRouted);
           }
         } catch (caught) {
           if (isCancelled()) {
@@ -3556,6 +3545,8 @@ export class IntuneChatService {
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+            const roadmapFailure = roadmapQuestion ? failedRoadmapCheck(toolTrace ?? []) : undefined;
+            if (roadmapFailure) assistantContent = `${roadmapFailure} ${assistantContent}`;
           }
         }
       }
@@ -4290,108 +4281,32 @@ export class IntuneChatService {
 }
 
 
-/** Tool names the Chat loop offers; protocolReply says when a "tool" naming one makes a reply a request. */
-const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
-
-/** Prose this long around a quoted tool call is an answer that shows the call, not a lead-in to a request. */
-const PROSE_AROUND_REQUEST_LIMIT = 160;
-
-/** Whether a reply leaves a brace open, counting braces outside JSON strings only (a "WIN-{01" value is not one). */
-function leavesBraceOpen(text: string): boolean {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (const char of text) {
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (inString) {
-      if (char === "\\") escaped = true;
-      else if (char === '"') inString = false;
-      continue;
-    }
-    if (char === '"') inString = true;
-    else if (char === "{") depth += 1;
-    else if (char === "}" && depth > 0) depth -= 1;
-  }
-  return depth > 0;
-}
-
-/**
- * The prose of a reply outside its JSON: closed and unclosed code fences and balanced brace spans are cut out,
- * and an unclosed brace or fence runs to the end, so the body of a cut-short request is never counted as prose.
- */
-function proseOutsideJson(text: string): string {
-  let rest = text.replace(/```[\s\S]*?```/g, " ").replace(/```[\s\S]*$/, " ");
-  for (let previous = ""; previous !== rest; ) {
-    previous = rest;
-    rest = rest.replace(/\{[^{}]*\}/g, " ");
-  }
-  return rest.replace(/\{[\s\S]*$/, " ").replace(/\s+/g, " ").trim();
-}
-
-/**
- * A reply in the tool loop's JSON protocol: `{ answer }` when it carries an answer text, `{ request }` when it
- * is a tool request or a protocol object with no answer, undefined for prose. Read in this order:
- * - A whole-reply object (bare or in one fence) is read as the loop reads it: final with an answer or content
- *   text is the answer, also when it names a tool too; otherwise a tool, final or kind key makes it a request.
- * - Otherwise the object the loop reads (the last fenced block or balanced object) is the answer when it is a
- *   final answer, with prose before or after it.
- * - A "tool" naming a Chat tool makes the reply a request when the request was cut short, when the prose
- *   outside the JSON announces a lookup ("I will check the cached data now"), or when that prose is a short
- *   lead-in ("I need to check:"). A longer prose answer that quotes a tool call as an example stays an answer.
- * - A reply that opens as a protocol object and does not parse was cut short: a request.
- * - Any other JSON, such as an FAQ example inside a prose answer, stays prose.
- */
-function protocolReply(text: string): { answer: string } | { request: true } | undefined {
-  const answerOf = (record: Record<string, unknown>): string | undefined => {
-    const value = typeof record.answer === "string" ? record.answer : typeof record.content === "string" ? record.content : undefined;
-    return value?.trim() ? value.trim() : undefined;
-  };
-  const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
-  const namesChatTool = [...text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)].some((match) => CHAT_TOOL_NAME.test(match[1]!.trim()));
-  if (bare.startsWith("{")) {
-    let whole: unknown;
-    let parses = true;
-    try {
-      whole = JSON.parse(bare);
-    } catch {
-      parses = false;
-    }
-    if (parses && whole && typeof whole === "object" && !Array.isArray(whole)) {
-      const record = whole as Record<string, unknown>;
-      const tool = typeof record.tool === "string" ? record.tool.trim() : "";
-      const answer = answerOf(record);
-      if (record.final === true && answer) return { answer };
-      if (tool && tool.toLowerCase() !== "none") return { request: true };
-      if (answer) return { answer };
-      return "final" in record || "kind" in record || "tool" in record ? { request: true } : undefined;
-    }
-  }
-  const extracted = extractLastJsonObject(text);
-  const extractedRecord = extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)
-    ? extracted.value as Record<string, unknown>
+/** Explains what happened when the investigation has no completed answer. */
+function incompleteChatAnswer(input: {
+  steps: ChatStepRecorder;
+  toolTrace?: readonly IntuneChatToolTraceEntry[];
+  roadmapQuestion: boolean;
+  failure?: AgenticFailureReason;
+  skippedNotice?: string;
+  local: boolean;
+}): string {
+  const reason = input.failure
+    ? input.local ? LOCAL_FALLBACK_NOTICES[input.failure].replace(" Answered from cached data instead.", "") : "The model could not finish the investigation."
+    : input.skippedNotice?.replace("Answered from cached data without the tool loop: ", "").replace("Chat skips the tool loop", "Chat skipped the tool loop");
+  const roadmap = input.roadmapQuestion
+    ? failedRoadmapCheck(input.toolTrace ?? []) ?? ((input.toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === RELEASE_COMMUNICATIONS_SERVER_ID && !entry.error)
+      ? "Microsoft Release Communications responded. The model did not finish reviewing the results."
+      : ROADMAP_NOT_CONSULTED)
     : undefined;
-  if (extractedRecord?.final === true) {
-    const answer = answerOf(extractedRecord);
-    if (answer) return { answer };
-  }
-  if (namesChatTool) {
-    const unclosedFence = ((text.match(/```/g) ?? []).length % 2) === 1;
-    // Braces are counted from the first one, so a stray quote in the prose before it cannot hide an open brace.
-    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || leavesBraceOpen(text.slice(Math.max(0, text.indexOf("{"))));
-    const outside = proseOutsideJson(text);
-    if (cutShort || outside.length < PROSE_AROUND_REQUEST_LIMIT || announcesLookup(outside)) return { request: true };
-  }
-  // Opens as a protocol object and does not parse: cut short, never an answer.
-  if (/^(?:```(?:json)?\s*)?\{\s*"(?:tool|kind|final|answer|sources)"\s*:/.test(text.trim()) && !(extracted.found && extracted.valid)) return { request: true };
-  return undefined;
+  const tenantRead = input.toolTrace?.some((entry) => isTenantTool(entry.tool) && entry.tool !== "list_cached_resources" && entry.tool !== "find_graph_endpoint" && !entry.error);
+  const tenantRefreshed = input.steps.steps.some((step) => step.kind === "graph-refresh" && step.status === "completed");
+  const tenant = tenantRead || tenantRefreshed
+    ? "Tenant data was checked during the investigation."
+    : "Tenant data was not checked.";
+  const step = input.steps.start({ kind: "answer", title: "Could not complete the answer", detail: "No verified cached answer for this question.", origin: "device", originLabel: ON_DEVICE });
+  input.steps.finish(step, { status: "failed" });
+  return [reason, roadmap, tenant, "Try again, or choose another model."].filter(Boolean).join(" ");
 }
-
-/** A local model whose tool loop and one cached-data answer both came back without an answer. */
-const LOCAL_FALLBACK_UNFINISHED =
-  "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.

@@ -15,6 +15,7 @@ import { partIdsFor, providerCatalog, qualifyScope, requestedScopes, type Intune
 import { AppStateStore } from "../state.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { recordAgenticOutcome } from "./service.js";
 import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
 import { FIRST_RUN_CHAT_COPY } from "../../src/copy/chat.js";
 
@@ -26,9 +27,28 @@ import { FIRST_RUN_CHAT_COPY } from "../../src/copy/chat.js";
 /** microsoft_docs_search for Defender onboarding on macOS, recorded from https://learn.microsoft.com/api/mcp on 2026-11-04. */
 const RECORDED_LEARN_SEARCH = readFileSync(new URL("./fixtures/learn-docs-search.json", import.meta.url), "utf8");
 
-function buildServer(kind: "learn" | "kql"): McpServer {
+const roadmapRequests: Array<Record<string, unknown>> = [];
+const ROADMAP_QUESTION = "are there any relevant roadmap items for my m365 tenant?";
+const ROADMAP_ERROR = "Roadmap data is temporarily unavailable.";
+
+function buildServer(kind: "learn" | "kql" | "roadmap"): McpServer {
   const server = new McpServer({ name: kind, version: "1.0.0" });
-  if (kind === "learn") {
+  if (kind === "roadmap") {
+    server.registerTool("get_recent_m365_roadmaps", {
+      description: "List public Microsoft 365 roadmap items.",
+      inputSchema: { search: z.string().optional(), filter: z.string().optional(), skip: z.number().int().optional() },
+    }, async (args) => {
+      roadmapRequests.push(args);
+      if (args.search === "Intune") {
+        return { content: [{ type: "text", text: JSON.stringify({ items: [], totalCount: 0 }) }] };
+      }
+      return {
+        isError: true,
+        content: [{ type: "text", text: "An error occurred invoking 'get_recent_m365_roadmaps'." }],
+        structuredContent: { detail: ROADMAP_ERROR },
+      };
+    });
+  } else if (kind === "learn") {
     server.registerTool("microsoft_docs_search", { description: "Search Microsoft documentation.", inputSchema: { query: z.string() } },
       async ({ query }) => ({ content: [{ type: "text", text: query.includes("recorded") ? JSON.stringify(JSON.parse(RECORDED_LEARN_SEARCH)) : JSON.stringify({ results: query.includes("nothing") ? [] : [
         { title: "Microsoft Defender for Endpoint on Mac", content: `Results for ${query}: needs full disk access.`, contentUrl: "https://learn.microsoft.com/defender-endpoint/microsoft-defender-endpoint-mac" },
@@ -56,7 +76,7 @@ before(async () => {
   process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
   httpServer = createServer((request, response) => {
     void (async () => {
-      const server = buildServer(request.url === "/kql" ? "kql" : "learn");
+      const server = buildServer(request.url === "/roadmap" ? "roadmap" : request.url === "/kql" ? "kql" : "learn");
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       response.on("close", () => { void transport.close(); void server.close(); });
       await server.connect(transport);
@@ -91,7 +111,7 @@ interface Harness {
 }
 
 async function withHarness(run: (harness: Harness) => Promise<void>, options: {
-  emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number;
+  emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number; roadmap?: boolean;
   searchIndex?: () => Promise<[]>;
   /** Answers the query writer from its prompt instead of the script's last MCP params. */
   writer?: (prompt: string) => string | undefined;
@@ -137,10 +157,14 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   };
   const learn = MCP_CATALOG.find((entry) => entry.id === "microsoft-learn")!;
   const kql = MCP_CATALOG.find((entry) => entry.id === "kql-search")!;
+  const release = MCP_CATALOG.find((entry) => entry.id === "release-communications")!;
   const store = new AppStateStore({
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
-    mcpCatalog: [{ ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` }],
+    mcpCatalog: [
+      { ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` },
+      ...(options.roadmap ? [{ ...release, url: `${baseUrl}/roadmap`, tools: ["get_recent_m365_roadmaps"] }] : []),
+    ],
     // A hosted provider reports its model, so the window and the host resolve the same one; no CLI on this device is probed.
     ...(options.provider
       ? {
@@ -199,6 +223,10 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   try {
     await store.installMcpServer("microsoft-learn");
     await store.installMcpServer("kql-search");
+    if (options.roadmap) {
+      recordAgenticOutcome("ollama", "llama3.1:8b", true);
+      await store.installMcpServer("release-communications");
+    }
     const cache = (store as unknown as { requireIntelligenceStore(): IntelligenceSqliteStore }).requireIntelligenceStore();
     // A fresh device cache: 5 Macs, 2 of them noncompliant, and 4 Windows PCs.
     if (!options.emptyCache) cache.replaceGraphResources({
@@ -212,15 +240,109 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
       docsSearches, store, cache, graphPaths, graphBuilds, prompts, writerPrompts,
       script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; writerPrompts.length = 0; graphPaths.length = 0; graphBuilds.length = 0; },
     });
-  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    if (options.roadmap) recordAgenticOutcome("ollama", "llama3.1:8b", true);
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
+const roadmapTool = "mcp__release-communications__get_recent_m365_roadmaps";
 const learnTool = "mcp__microsoft-learn__microsoft_docs_search";
 const kqlTool = "mcp__kql-search__search_kql_queries";
 const kinds = (steps: readonly IntuneChatStep[] | undefined) => (steps ?? []).map((step) => step.kind);
 /** The model's classification, shown on the model step that decided the kind. */
 const classifiedAs = (steps: readonly IntuneChatStep[] | undefined) =>
   (steps ?? []).flatMap((step) => (step.kind === "answer" ? (step.detail ?? "").split(" · ") : [])).find((part) => /^(?:Classified as|Treated as|The model gave no)/.test(part));
+
+describe("Microsoft 365 roadmap routing", () => {
+  it("replays the failed local lookup without refreshing unrelated tenant data or publishing the stale-device answer", async () => {
+    await withHarness(async ({ store, cache, graphPaths, prompts, writerPrompts, script }) => {
+      const staleRows = Array.from({ length: 6 }, (_, i) => ({
+        id: `lab-${i + 1}`, deviceName: `LAB-${i + 1}`, lastSyncDateTime: "2023-01-01T00:00:00.000Z",
+      }));
+      cache.replaceGraphResources({
+        tenantId: tenant.id, resource: "managedDevices", label: "Intune managed devices", scopeSet: [],
+        refreshedAt: "2024-01-01T00:00:00.000Z", rows: staleRows,
+      });
+      const unrelated = "4 devices have not synced in over a year: LAB-1, LAB-2, LAB-3, LAB-4, LAB-5, LAB-6. They should be reviewed before any cleanup action.";
+      for (const send of ["send", "stream"] as const) {
+        recordAgenticOutcome("ollama", "llama3.1:8b", true);
+        roadmapRequests.length = 0;
+        script([
+          { tool: roadmapTool, params: { search: "m365" } },
+          { final: true, answer: "Roadmap check is complete." },
+          { tool: roadmapTool, params: { search: "m365" } },
+          unrelated,
+        ]);
+        const events: IntuneChatStreamEvent[] = [];
+        const input = { content: ROADMAP_QUESTION };
+        const result = send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, (event) => events.push(event));
+        const message = result.assistantMessage;
+        assert.deepEqual(roadmapRequests, [{}]);
+        assert.equal(writerPrompts.length, 1);
+        assert.match(writerPrompts[0]!, /For a general Microsoft 365 roadmap question, omit search/);
+        assert.doesNotMatch(writerPrompts[0]!, /LAB-1|Contoso/);
+        assert.deepEqual(graphPaths, []);
+        assert.equal(prompts.length, 3, "the writer uses the fourth call in the compact budget");
+        assert.equal(message.questionKind, "mixed");
+        assert.match(classifiedAs(message.steps)!, /keyword rules decided: a docs and tenant question\. Sources: Microsoft Release Communications, cached tenant data and Microsoft Graph\./);
+        assert.equal(message.engineNotice, undefined);
+        assert.equal(message.status, "failed");
+        assert.equal(message.content, "The local model did not finish its plan. The roadmap items were not checked because Microsoft Release Communications returned an error. Tenant data was not checked. Try again, or choose another model.");
+        assert.equal(message.sources?.length ?? 0, 0);
+        assert.ok(!events.some((event) => event.type === "delta" && /LAB-|Roadmap check is complete/.test(event.content)));
+        assert.deepEqual(message.steps?.map((step) => step.title), [
+          "Read the question", "Chose to ask Microsoft Release Communications",
+          "Microsoft Release Communications returned an error", "Answered without checking tenant data",
+          "Tool skipped: no model call left", "Could not complete the answer",
+        ]);
+        assert.match(message.steps![2]!.detail!, /Roadmap data is temporarily unavailable\.$/);
+        assert.equal(message.steps![2]!.sent, "");
+      }
+    }, {
+      roadmap: true,
+      incremental: true,
+      graphResponses: {
+        "/deviceManagement/managedDevices": { value: Array.from({ length: 5 }, (_, i) => ({ id: `managed-${i}`, deviceName: `LAB-${i + 1}` })) },
+        "/devices": { value: Array.from({ length: 80 }, (_, i) => ({ id: `device-${i}`, displayName: `LAB-${i + 1}` })) },
+        "/users": { value: Array.from({ length: 28 }, (_, i) => ({ id: `user-${i}`, displayName: `Lab User ${i + 1}` })) },
+      },
+    });
+  });
+
+  it("asks the roadmap source before a tenant tool even when the model labels what's coming as a tenant question", async () => {
+    await withHarness(async ({ store, graphPaths, prompts, script }) => {
+      roadmapRequests.length = 0;
+      script([
+        { kind: "tenant", tool: "query_cache", params: { resource: "managedDevices" } },
+        { tool: roadmapTool, params: { search: "Intune" } },
+        { final: true, answer: "Microsoft Release Communications returned no results for Intune." },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: "What's coming for my Intune tenant?" })).assistantMessage;
+      assert.equal(message.questionKind, "mixed");
+      assert.match(classifiedAs(message.steps)!, /the question asks about the roadmap/);
+      assert.match(prompts[1]!.prompt, /Call a tool from Microsoft Release Communications before checking tenant data/);
+      assert.deepEqual(roadmapRequests, [{ search: "Intune" }]);
+      assert.deepEqual(graphPaths, []);
+      assert.ok(message.toolTrace?.every((entry) => entry.tool === roadmapTool));
+    }, { roadmap: true });
+  });
+
+  it("says the roadmap could not be checked even if the loop would accept the model's final answer", async () => {
+    await withHarness(async ({ store, script }) => {
+      script([
+        { kind: "docs", tool: roadmapTool, params: { search: "Microsoft 365", skip: 50, filter: "status eq 'Rolling out'" } },
+        { final: true, answer: "All of the roadmap items have rolled out." },
+      ]);
+      roadmapRequests.length = 0;
+      const message = (await store.sendIntuneChatMessage({ content: "What's on the Microsoft 365 roadmap?" })).assistantMessage;
+      assert.deepEqual(roadmapRequests, [{ skip: 50, filter: "status eq 'Rolling out'" }]);
+      assert.match(message.content, /roadmap items were not checked/);
+      assert.doesNotMatch(message.content, /have rolled out/);
+    }, { roadmap: true });
+  });
+});
 
 describe("Chat steps, sources and follow-ups end to end", () => {
   it("answers the Defender for macOS docs question from Microsoft Learn without touching the tenant", async () => {

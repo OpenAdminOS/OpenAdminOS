@@ -10,7 +10,6 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 
 import { AppStateStore } from "../state.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
-import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
 import { recordAgenticOutcome } from "./service.js";
 import { chatResultContextFor, computedTraceEntry, computeStructuredResult, deviceComplianceReasonQuery, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
 import { buildAnswerPack, GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
@@ -271,7 +270,7 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
-  it("leaves a device name two records share to the planner, and stores no context from a blank answer", async () => {
+  it("leaves a device name two records share to the planner, and stores no context when a failed answer has no cache match", async () => {
     await withHarness(async ({ store, cache, reply }) => {
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
         rows: [...managedDevices, { id: "md-m2-old", deviceName: "MAC-02", operatingSystem: "macOS", complianceState: "compliant", lastSyncDateTime: recent }] });
@@ -298,10 +297,11 @@ describe("local model accuracy on the tester's tenant", () => {
       assert.equal(renamed, undefined);
       cache.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(), rows: managedDevices });
 
-      // Always investigative, the loop fails, and the model writes a blank deterministic answer: nothing was shown.
+      // A failed answer to an unmatched question supplies no result for a follow-up to narrow.
       await store.setChatInvestigationMode("always-agentic");
       reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "   "));
-      const blank = await store.streamIntuneChatMessage({ content: Q1, refreshIfStale: false }, () => {});
+      const blank = await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {});
+      assert.equal(blank.assistantMessage.status, "failed");
       await store.setChatInvestigationMode("auto");
       reply(({ loop }) => (loop ? final("Windows answer.") : "Windows answer."));
       const followUp = (await store.streamIntuneChatMessage({ content: "only Windows", conversationId: blank.conversation.id, refreshIfStale: false }, () => {})).assistantMessage;
@@ -605,166 +605,47 @@ describe("local model accuracy on the tester's tenant", () => {
     });
   });
 
-  it("falls back to cached data within four model calls when a local model fails, with a plain notice", async () => {
+  it("ends within four model calls and says why successive local investigations failed", async () => {
     await withHarness(async ({ store, calls, reply }) => {
-      // Never valid tool JSON.
-      reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "Deterministic answer."));
-      const malformed = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
-      const loopCalls = calls.filter((call) => call.loop).length;
-      assert.ok(loopCalls <= 4, `${loopCalls} loop calls`);
-      assert.equal(malformed.engineNotice, LOCAL_FALLBACK_NOTICES.malformed);
-      assert.equal(malformed.content, "Deterministic answer.");
+      const input = { content: "Which of our devices need attention?", refreshIfStale: false };
+      reply(() => '```json\n{"tool": "query_ca\n```');
+      const malformed = (await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+      assert.ok(calls.length <= 4);
+      assert.match(malformed.content, /^The local model did not return a valid tool request\./);
+      assert.equal(malformed.status, "failed");
+      assert.equal(malformed.engineNotice, undefined);
 
-      // Valid tool calls that never finish: the compact budget ends the plan at four calls.
-      reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : "Deterministic answer."));
-      const endless = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-      assert.equal(calls.filter((call) => call.loop).length, 4);
-      assert.equal(endless.engineNotice, LOCAL_FALLBACK_NOTICES["iteration-cap"]);
+      reply(() => JSON.stringify({ tool: "list_cached_resources", params: {} }));
+      const endless = (await store.sendIntuneChatMessage(input)).assistantMessage;
+      assert.equal(calls.length, 4);
+      assert.match(endless.content, /^The local model did not finish its plan\./);
+      assert.equal(endless.toolTrace?.length, 3, "there is no model call left to use the last tool's result");
+      assert.equal(endless.status, "failed");
 
-      // Two failed answers: the model skips the tool loop, and the notice says why.
-      reply(() => "Deterministic answer.");
-      const skipped = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-      assert.equal(calls.filter((call) => call.loop).length, 0);
-      assert.match(skipped.engineNotice ?? "", /openadminos\/openadmin-8b did not complete its last 2 tool-loop answers: it did not return a valid tool request once; it did not finish its plan once\./);
+      reply(() => { throw new Error("a sidelined model must not receive an unverified cache pack"); });
+      for (const send of ["send", "stream"] as const) {
+        const skipped = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+        assert.equal(calls.length, 0);
+        assert.equal(skipped.engineNotice, undefined);
+        assert.equal(skipped.status, "failed");
+        assert.match(skipped.content, /openadminos\/openadmin-8b did not complete its last 2 tool-loop answers: it did not return a valid tool request once; it did not finish its plan once\./);
+      }
     });
   });
 });
 
-describe("The fallback after a failed compact loop", () => {
-  it("makes one cached-data call and fails plainly when that reply only promises work, in both send paths", async () => {
+describe("The cache after a failed local investigation", () => {
+  it("rejects an unrelated model fallback in both send paths even when fictional device rows are cached", async () => {
     await withHarness(async ({ store, calls, reply }) => {
+      const wrongAnswer = `4 devices need attention: ${NONCOMPLIANT.join(", ")}.`;
+      const input = { content: "Which of our devices need attention?", refreshIfStale: false };
       for (const send of ["send", "stream"] as const) {
         recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : "I'll check that now."));
-        const request = { content: "Which of our devices need attention?", refreshIfStale: false };
-        const message = (send === "send" ? await store.sendIntuneChatMessage(request) : await store.streamIntuneChatMessage(request, () => {})).assistantMessage;
-        assert.equal(calls.filter((call) => call.loop).length, 4, `${send}: four tool-loop calls`);
-        assert.equal(calls.filter((call) => !call.loop).length, 1, `${send}: one fallback call, no promise retries`);
-        assert.equal(message.status, "failed", send);
-        assert.match(message.content, /^The local model did not finish an answer\./, send);
-        assert.doesNotMatch(message.content, /check that now/, send);
-        assert.equal(message.engineNotice, undefined, send);
-        // The fourth call's tool request is not run: no call is left to use its result.
-        assert.equal(message.toolTrace?.length, 3, send);
-      }
-    });
-  });
-
-  it("fails plainly when the one cached-data call replies with a tool request, in any key order, in both send paths", async () => {
-    await withHarness(async ({ store, calls, reply }) => {
-      for (const [send, request] of [
-        ["send", JSON.stringify({ tool: "list_cached_resources", params: {} })],
-        ["stream", JSON.stringify({ tool: "list_cached_resources", params: {} })],
-        ["send", '```json\n{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}\n```'],
-        ["stream", '{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices"}}'],
-        ["send", 'I will check the cache.\n```json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n```'],
-        ["stream", 'I will check the cache.\n```json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n```'],
-        // Cut short: the closing brace is missing.
-        ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}'],
-        ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}'],
-        // Prose, then a request cut short.
-        ["send", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
-        ["stream", 'I need to check:\n{"tool":"count_cached","params":{"resource":"managedDevices"}'],
-        // A long promise before a fenced request: the prose announces the lookup.
-        ["send", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so that the answer rests on the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
-        // The same with a purpose clause after the promise, and a negation before it.
-        ["stream", `I understand the question about the devices that need attention in this organization, and I will check the cached Intune device data now so I can answer from the current snapshot rather than on assumptions. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
-        ["send", `I can't answer that from memory, so I will check the cached Intune device data now and come back with the exact numbers for the devices that need attention in this organization today. ${"Thank you for waiting. ".repeat(2)}\n\`\`\`json\n{"tool":"count_cached","params":{"resource":"managedDevices"}}\n\`\`\``],
-        // Long prose with a stray quote, then a request cut short: the brace count starts at the first brace.
-        ["send", `I won't say "maybe here: the answer depends on the cached Intune device data, and the snapshot has to be read before any number can be stated for the devices in this organization today.\n{"tool":"count_cached","params":{"resource":"managedDevices"}`],
-        // A lead-in, then an unclosed fence with a long request cut short.
-        ["stream", `I need to check:\n\`\`\`json\n{"tool":"query_cache","params":{"resource":"managedDevices","select":[${Array.from({ length: 20 }, (_, i) => `"field${i}"`).join(",")}],"where":{"complianceState":"noncompliant"`],
-        // A complete request, then an unrelated JSON example.
-        ["send", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
-        ["stream", '{"tool":"count_cached","params":{"resource":"managedDevices"}}\nFor example:\n```json\n{"displayName":"WIN-01"}\n```'],
-      ] as const) {
-        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-        reply(() => request);
-        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
+        reply(({ loop }) => loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : wrongAnswer);
         const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
-        assert.equal(calls.filter((call) => !call.loop).length, 1, `${send}: one fallback call`);
-        assert.equal(message.status, "failed", send);
-        assert.match(message.content, /^The local model did not finish an answer\./, send);
-        assert.equal(message.engineNotice, undefined, send);
-      }
-    });
-  });
-
-  it("keeps a prose answer that ends with a JSON example, and fails a failure-routed fallback that only promises work", async () => {
-    await withHarness(async ({ store, calls, reply }) => {
-      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-      const prose = 'WIN-01 to WIN-04 need attention.\n\nAn FAQ entry looks like this:\n```json\n{"question":"What is a grace period?","answer":"Time before noncompliance.","kind":"faq"}\n```';
-      reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : prose));
-      const kept = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-      assert.equal(kept.status, "completed");
-      assert.equal(kept.content, prose, "the example is part of the prose answer");
-
-      // After two failed loop answers the model is taken off the tool loop; its one fallback call is checked the same way.
-      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", false, "iteration-cap");
-      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", false, "iteration-cap");
-      for (const send of ["send", "stream"] as const) {
-        reply(() => "I'll check that now.");
-        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
-        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
-        assert.equal(calls.length, 1, `${send}: one model call, no promise retries`);
-        assert.equal(message.status, "failed", send);
-        assert.equal(message.engineNotice, undefined, send);
-      }
-    });
-  });
-
-  it("reads a whole final answer that also names a tool as the answer, and keeps a prose answer that quotes a tool call", async () => {
-    await withHarness(async ({ store, reply }) => {
-      const howTo = "To count noncompliant devices yourself, ask Chat to run the cached count with a filter on the compliance state. "
-        + "The request the model sends looks like the example below, and the host answers it from the Intune device cache without calling Graph:\n"
-        + '```json\n{"tool":"count_cached","params":{"resource":"managedDevices","where":{"complianceState":"noncompliant"}}}\n```';
-      for (const [fallbackReply, expected] of [
-        ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
-        ['{"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"} Done.', "Six managed devices are not compliant."],
-        ['Here is the answer: {"final":true,"answer":"Six managed devices are not compliant.","tool":"query_cache"}', "Six managed devices are not compliant."],
-        [howTo, howTo],
-        // A result, then an offer that depends on the admin, and a quoted call: still an answer.
-        [`${howTo}\n\nIf you want, I will check the compliance policy next.`, `${howTo}\n\nIf you want, I will check the compliance policy next.`],
-        [`${howTo}\n\nI will check the compliance policy next, if you want.`, `${howTo}\n\nI will check the compliance policy next, if you want.`],
-        // A brace inside a JSON string value does not make the quoted call cut short.
-        [howTo.replace('"noncompliant"', '"WIN-{01"'), howTo.replace('"noncompliant"', '"WIN-{01"')],
-      ] as const) {
-        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : fallbackReply));
-        const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-        assert.equal(message.status, "completed", fallbackReply.slice(0, 40));
-        assert.equal(message.content, expected, fallbackReply.slice(0, 40));
-      }
-    });
-  });
-
-  it("does not show a tool request live while the streamed fallback is still arriving, and says plainly why it failed", async () => {
-    await withHarness(async ({ store, reply }) => {
-      recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-      reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : '{"tool":"count_cached","params":{"resource":"managedDevices"}}'));
-      const live: string[] = [];
-      const message = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, (event) => {
-        if (event.type === "delta") live.push(event.content);
-      })).assistantMessage;
-      assert.ok(!live.some((text) => text.includes('"tool"')), "the raw request never reached the screen");
-      assert.equal(message.status, "failed");
-      assert.equal(message.content, "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.");
-    });
-  });
-
-  it("reads a final answer object followed by prose, and a content field, as the answer", async () => {
-    await withHarness(async ({ store, reply }) => {
-      for (const [send, fallbackReply, expected] of [
-        ["send", '```json\n{"final":true,"answer":"Six managed devices are not compliant."}\n```\nHope this helps.', "Six managed devices are not compliant."],
-        ["stream", '{"final":true,"answer":"Six managed devices are not compliant."} Done.', "Six managed devices are not compliant."],
-        ["send", '{"final":true,"content":"Six managed devices are not compliant."}', "Six managed devices are not compliant."],
-      ] as const) {
-        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : fallbackReply));
-        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
-        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
-        assert.equal(message.status, "completed", fallbackReply);
-        assert.equal(message.content, expected, fallbackReply);
+        assert.ok(calls.every((call) => call.loop));
+        assert.equal(message.status, "failed");
+        assert.doesNotMatch(message.content, /4 devices|WIN-01/);
       }
     });
   });
@@ -780,19 +661,7 @@ describe("The fallback after a failed compact loop", () => {
     }, { model: "llama3.2:3b" });
   });
 
-  it("shows the answer text when the one cached-data call replies with the loop's final JSON, in both send paths", async () => {
-    await withHarness(async ({ store, reply }) => {
-      for (const send of ["send", "stream"] as const) {
-        recordAgenticOutcome("ollama", "openadminos/openadmin-8b", true);
-        reply(({ loop }) => (loop ? JSON.stringify({ tool: "list_cached_resources", params: {} }) : '{"final":true,"answer":"Six managed devices are not compliant."}'));
-        const input = { content: "Which of our devices need attention?", refreshIfStale: false };
-        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
-        assert.equal(message.status, "completed", send);
-        assert.equal(message.content, "Six managed devices are not compliant.", send);
-        assert.equal(message.engineNotice, LOCAL_FALLBACK_NOTICES["iteration-cap"], send);
-      }
-    });
-  });
+
 });
 
 describe("A provider that refuses every call", () => {
@@ -876,8 +745,8 @@ describe("Local context overflows in the failure memory", () => {
       });
       for (let turn = 0; turn < 3; turn += 1) {
         const overflow = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-        assert.equal(overflow.status, "completed");
-        assert.equal(overflow.engineNotice, LOCAL_FALLBACK_NOTICES["context-too-small"]);
+        assert.equal(overflow.status, "failed");
+        assert.match(overflow.content, /did not fit the local model.s context window/);
       }
       assert.equal(calls.filter((call) => call.loop).length, 3, "each question tries the tool loop");
     });
@@ -894,7 +763,7 @@ describe("A local model that cannot be reached", () => {
       for (let turn = 0; turn < 3; turn += 1) {
         const before = calls.filter((call) => call.loop).length;
         const message = (await store.sendIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false })).assistantMessage;
-        assert.equal(message.engineNotice, LOCAL_FALLBACK_NOTICES["provider-unavailable"], `turn ${turn}`);
+        assert.match(message.content, /^The local model is not available\./, `turn ${turn}`);
         assert.equal(calls.filter((call) => call.loop).length, before + 1, `turn ${turn}: the tool loop is still tried`);
       }
     });
@@ -1215,17 +1084,17 @@ async function withMockOllamaTags(run: () => Promise<void>): Promise<string[]> {
 }
 
 describe("Model fit after a local model failure (PR #213 with #215)", () => {
-  it("offers a provider on the cached-data answer when the 8B model's context is too small, with the numbers", async () => {
+  it("offers a provider when the 8B model's context is too small, with the numbers", async () => {
     await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
-      // Every loop call overflows the 16k context, as the Ollama adapter reports it; the cached-data answer then works.
+      // The loop overflows the 16k context, as the Ollama adapter reports it.
       reply(({ loop }) => {
         if (loop) throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give openadminos/openadmin-8b 16,384, usually because free memory ran out.");
         return "Deterministic answer.";
       });
       const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
-      assert.equal(answered.status, "completed");
-      assert.equal(answered.engineNotice, LOCAL_FALLBACK_NOTICES["context-too-small"]);
-      assert.equal(answered.content, "Deterministic answer.");
+      assert.equal(answered.status, "failed");
+      assert.equal(answered.engineNotice, undefined);
+      assert.match(answered.content, /did not fit the local model.s context window/);
       // The answer carries the offer, with the numbers from the provider error; nothing went elsewhere.
       assert.equal(answered.modelFit?.reason, "context-too-small");
       assert.equal(answered.modelFit?.model, "openadminos/openadmin-8b");
@@ -1255,14 +1124,15 @@ describe("Model fit after a local model failure (PR #213 with #215)", () => {
     }));
   });
 
-  it("keeps the overflow's offer when the cached-data answer then fails too", async () => {
-    await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
+  it("keeps the overflow's offer without asking the model for another answer", async () => {
+    await withMockOllamaTags(() => withHarness(async ({ store, calls, reply }) => {
       reply(({ loop }) => {
         if (loop) throw new Error("Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give openadminos/openadmin-8b 16,384, usually because free memory ran out.");
         throw new Error("Ollama stopped while answering.");
       });
       const answered = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
       assert.equal(answered.status, "failed");
+      assert.equal(calls.length, 1);
       assert.equal(answered.modelFit?.reason, "context-too-small");
       assert.equal(answered.modelFit?.neededTokens, 40652);
       assert.ok(answered.modelFit?.offerId);
@@ -1285,12 +1155,12 @@ describe("Model fit after a local model failure (PR #213 with #215)", () => {
     await withMockOllamaTags(() => withHarness(async ({ store, reply }) => {
       reply(({ loop }) => (loop ? '```json\n{"tool": "query_ca\n```' : "Deterministic answer."));
       const first = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
-      assert.equal(first.engineNotice, LOCAL_FALLBACK_NOTICES.malformed);
+      assert.match(first.content, /^The local model did not return a valid tool request\./);
       assert.equal(first.modelFit, undefined);
       await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {});
       // Two failed answers: Chat stops trying the tool loop on this model and offers the alternatives with its answer.
       const third = (await store.streamIntuneChatMessage({ content: "Which of our devices need attention?", refreshIfStale: false }, () => {})).assistantMessage;
-      assert.equal(third.status, "completed");
+      assert.equal(third.status, "failed");
       assert.equal(third.modelFit?.reason, "repeated-failure");
       assert.ok(third.modelFit?.offerId);
     }));
