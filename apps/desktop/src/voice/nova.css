@@ -324,7 +324,7 @@
 .nova-panel-expanded[data-quiet="true"]
   > .nova-session-controls:not(:focus-within),
 .nova-panel-expanded[data-quiet="true"] > .nova-tools:not(:focus-within),
-.nova-panel-expanded[data-quiet="true"] > .nova-tenant,
+.nova-panel-expanded[data-quiet="true"] > .nova-tenant:not([data-no-organization="true"]),
 .nova-panel-expanded[data-quiet="true"] > .nova-trust,
 .nova-panel-expanded[data-quiet="true"] > .nova-status {
   opacity: 0;
@@ -409,6 +409,12 @@
 .nova-panel-expanded[data-conversation="true"]:not([data-active="true"]) { padding-right: calc(var(--nova-conversation-width) + 60px); align-items: flex-start; }
 .nova-panel-expanded[data-conversation="true"]:not([data-active="true"]) > .nova-header { width: calc(100vw - 48px); }
 @keyframes nova-activity-spin { to { transform: rotate(360deg); } }
+@media (min-width: 761px) {
+  .nova-panel-expanded[data-active="true"][data-conversation="true"] > .nova-links {
+    align-self: flex-start;
+    max-width: calc(100% - var(--nova-conversation-width) - 80px);
+  }
+}
 @media (max-width: 760px) {
   .nova-panel-expanded > .nova-conversation { top: 43%; left: 12px; right: 12px; bottom: 144px; width: auto; }
   .nova-panel-expanded[data-conversation="true"][data-active="true"] > .nova-orb { left: 50%; top: 26%; width: 130px; height: 130px; }

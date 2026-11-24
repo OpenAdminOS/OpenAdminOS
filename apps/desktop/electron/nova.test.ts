@@ -968,3 +968,79 @@ it("refuses to start when the settings cannot be read", async () => {
   });
   await assert.rejects(nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false }), /could not read its settings/);
 });
+
+it("keeps hosted voice consent and instructions free of organization context without an active tenant", async () => {
+  const { nova, state, consents, requests } = fixture();
+  delete state.activeTenantId;
+  await nova.handle({ action: "configure", apiKey: "test-key" });
+  await assert.rejects(nova.handle({ action: "start", mode: "openai", consent: false, sdp: "v=0" }), /question, audio/);
+  await nova.handle({ action: "start", mode: "openai", consent: true, sdp: "v=0" });
+  assert.equal(consents.length, 1);
+  assert.equal(consents[0]?.tenantId, undefined);
+  assert.equal(consents[0]?.includesMemory, false);
+  const body = JSON.parse(String(requests[0]?.init?.body));
+  assert.match(body.session.instructions, /No organization is connected/);
+  assert.doesNotMatch(body.session.instructions, /Northwind|tenant-a|Verified app connection/);
+});
+
+it("keeps a no-organization session on the public docs path and invalidates it on a switch", async () => {
+  const { state, secrets } = fixture();
+  const tenantId = state.activeTenantId!;
+  delete state.activeTenantId;
+  let tenantCalls = 0;
+  const tenantTool = async (): Promise<never> => {
+    tenantCalls++;
+    throw new Error("Tenant path called");
+  };
+  let available = true;
+  const retrieved: string[] = [];
+  const nova = new NovaService(secrets, async () => state, tenantTool, fetch, {
+    activeTenantId: async () => state.activeTenantId,
+    profile: async () => defaultNovaSettings({ memoryPaused: false }),
+    connectors: tenantTool,
+    send: tenantTool,
+    startRun: tenantTool,
+    classifyCommand: tenantTool,
+  }, undefined, {
+    available: () => available,
+    retrieve: async question => {
+      retrieved.push(question);
+      return [{ text: "Autopatch automates update deployment." }];
+    },
+    model: async () => ({
+      available: true,
+      async complete({ system, prompt }) {
+        if (system?.startsWith("Classify")) {
+          return { text: prompt.includes("rollout looking") ? "ORGANIZATION" : "PUBLIC", model: "test" };
+        }
+        assert.equal(prompt.includes("Autopatch automates update deployment."), available);
+        return { text: "It automates update deployment.", model: "test" };
+      },
+      async *stream() {},
+    }),
+  });
+  const { sessionId } = await nova.handle({ action: "start", mode: "local", consent: false });
+  assert.ok(sessionId);
+  const answer = (text: string) => nova.handle({ action: "answer", sessionId, text });
+  for (const question of ["How many devices are in my tenant?", "Send this via Slack", "Run my inventory agent", "What needs my attention?", "Remember that we use Autopatch"]) {
+    const result = await answer(question);
+    assert.match(result.text ?? "", /connected organization/);
+    assert.equal(result.links?.[0]?.route, "/connections");
+  }
+  assert.equal((await answer("How is the rollout looking?")).links?.[0]?.route, "/connections");
+  assert.deepEqual(retrieved, []);
+  const docsQuestion = "What does Windows Autopatch do?";
+  assert.equal((await answer(docsQuestion)).text, "It automates update deployment.");
+  assert.deepEqual(retrieved, [docsQuestion]);
+  available = false;
+  const fallback = await answer(docsQuestion);
+  assert.match(fallback.text ?? "", /No documentation was consulted/);
+  assert.equal(fallback.links?.[0]?.route, "/settings/privacy");
+  state.activeTenantId = tenantId;
+  assert.equal(await nova.activeOrganizationChanged(), true);
+  await assert.rejects(answer(docsQuestion), /changed|stopped/);
+  await nova.handle({ action: "start", mode: "local", consent: false, tenantId });
+  delete state.activeTenantId;
+  assert.equal(await nova.activeOrganizationChanged(), true);
+  assert.equal(tenantCalls, 0);
+});

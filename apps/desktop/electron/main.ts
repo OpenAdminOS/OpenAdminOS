@@ -6515,6 +6515,11 @@ function registerIpcHandlers() {
     fetch,
     { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), providerEndpoint: (providerId) => store.novaProviderEndpoint(providerId), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: (tenantId) => store.novaProfile(tenantId), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
     chatDateTimeLocale,
+    {
+      available: () => Boolean(store.documentationIndexVersion()),
+      retrieve: (question) => store.retrieveDocumentation(question),
+      model: (...args) => store.novaPublicModel(...args),
+    },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);

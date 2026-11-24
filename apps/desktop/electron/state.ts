@@ -1021,7 +1021,7 @@ function hostedProviderConsentAuditEvent(
     timestamp: consent.createdAt,
     type: "hosted-provider.consent",
     source: "hosted-provider-consent",
-    tenantId: consent.tenantId,
+    ...(consent.tenantId ? { tenantId: consent.tenantId } : {}),
     actor: actorForTenant(context.tenantById.get(consent.tenantId)),
     details: {
       source: consent.source,
@@ -6070,6 +6070,22 @@ export class AppStateStore {
     }
   }
 
+  /** Public voice reasoning uses only the session's model and endpoint. */
+  async novaPublicModel(providerId: ProviderId, model: string | undefined, endpoint: string | undefined, isLocal: boolean): Promise<RunLlmApi> {
+    const llm = await this.buildLlm(providerId, model, { endpoint });
+    if (!isLocal || providerId !== "ollama" || this.llmFactory) return llm;
+    return {
+      ...llm,
+      complete: async (input) => {
+        if (!model || !(await ollamaModelIsOnDevice(model, endpoint))) {
+          throw new Error("Nova could not confirm the Ollama model runs on this device.");
+        }
+        input.signal?.throwIfAborted();
+        return llm.complete(input);
+      },
+    };
+  }
+
   /** Interpret a request with the session-pinned provider, without tools or tenant records. */
   async classifyNovaCommand(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string> {
     const check = async () => {
@@ -7825,9 +7841,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * organization, or with `tenantId` for that tenant's organization (a
    * voice session reads its own organization's instructions).
    */
-  async novaProfile(tenantId?: string): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }> {
+  async novaProfile(tenantId?: string | null): Promise<{ profile: NovaProfile | undefined; effective: EffectiveNovaProfile; policy: ManagedPolicyStatus | undefined }> {
     const persisted = await this.read();
-    const organizationId = tenantId === undefined ? this.activeOrganizationIdOf(persisted) : organizationForTenant(persisted.organizations ?? [], tenantId)?.id;
+    const organizationId = tenantId === null ? undefined : tenantId === undefined ? this.activeOrganizationIdOf(persisted) : organizationForTenant(persisted.organizations ?? [], tenantId)?.id;
     return {
       profile: persisted.novaProfile,
       effective: effectiveNovaProfile(persisted.novaProfile, this.managedPolicy, organizationId),
@@ -7841,13 +7857,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * every hosted-provider consent: in the Chat database and the audit log,
    * and with the pending audit events when the audit log cannot take it.
    */
-  recordNovaVoiceConsent(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void {
+  recordNovaVoiceConsent(input: { tenantId?: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void {
     const consent: HostedProviderConsentAuditRecord = {
       id: `event_${randomUUID()}`,
-      tenantId: input.tenantId,
+      tenantId: input.tenantId ?? "",
       source: "nova-voice",
       payload: {
-        tenantIds: [input.tenantId],
+        tenantIds: input.tenantId ? [input.tenantId] : [],
         providerId: "openai-voice",
         providerName: "OpenAI",
         model: input.voiceModel,
@@ -7864,7 +7880,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     let keptInChat = false;
     try {
-      if (this.intelligenceStore) {
+      if (input.tenantId && this.intelligenceStore) {
         this.intelligenceStore.recordHostedProviderConsentAuditEvent(consent);
         keptInChat = true;
       }

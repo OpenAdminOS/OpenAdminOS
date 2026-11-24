@@ -37,7 +37,7 @@ export interface NovaActionHost {
    * the organization instructions are those of that tenant's organization,
    * not of whichever organization is active: a voice session reads its own.
    */
-  profile(tenantId?: string): Promise<NovaSettings>;
+  profile(tenantId?: string | null): Promise<NovaSettings>;
   /**
    * Saves a settings change the admin confirmed on a Nova card. The IT
    * policy is applied again. `assertUnchanged` runs inside the same
@@ -71,7 +71,7 @@ export interface NovaActionHost {
    * Records the consent to send audio and shared context to OpenAI for one
    * voice session. Throws when no store kept it: the session does not start.
    */
-  recordVoiceConsent?(input: { tenantId: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void;
+  recordVoiceConsent?(input: { tenantId?: string; sessionId: string; acknowledgedAt: string; voiceModel: string; reasoningProviderId: ProviderId; reasoningModel?: string; includesProfile: boolean; includesMemory: boolean }): void;
 }
 
 /** Said when the consent for a hosted voice session could not be kept on this device. */
@@ -87,7 +87,7 @@ export const NOVA_SETTINGS_UNREADABLE =
   'Nova could not read its settings, so nothing was sent, started or opened. Open Settings, Nova, check it loads, then ask again.';
 
 /** Nova's settings for one action. Throws the designed refusal when they cannot be read. */
-export async function readNovaSettings(host: Pick<NovaActionHost, 'profile'>, tenantId?: string): Promise<NovaSettings> {
+export async function readNovaSettings(host: Pick<NovaActionHost, 'profile'>, tenantId?: string | null): Promise<NovaSettings> {
   try {
     const settings = await (tenantId === undefined ? host.profile() : host.profile(tenantId));
     if (!settings?.effective) throw new Error('No settings returned.');

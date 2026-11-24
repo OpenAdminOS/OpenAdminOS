@@ -2740,7 +2740,7 @@ export class IntuneChatService {
     // A closing tenant ends the send here. Stop pressed while providers were still being read goes on to the
     // designed cancelled answer below, never out of the send as an abort error.
     if (!userSignal?.aborted) options.signal?.throwIfAborted();
-    // Nova keeps requiring a tenant.
+    // Nova routes public voice answers outside the tenant investigation pipeline.
     if (noTenant && (options.voice || options.scope)) {
       throw new Error("Nova voice needs an organization. Connect Microsoft 365, or ask in Chat, which answers without one.");
     }
@@ -3392,7 +3392,9 @@ export class IntuneChatService {
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
             const indexLater = answerPlan ? indexWaits(answerPlan.sources, lazyRefresh) : false;
             const documentation = options.voice
-              ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
+              ? !options.webSearch || (!hasStrongTenantReference(content) && classifyChatQuestion(content, { plannedResources: [], namesSource: false }) === "docs")
+                ? await this.retrieveDocumentationSafely(modelQuestion)
+                : []
               : indexLater || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             // In auto mode a local model in Chat gets the compact budget. Always investigative keeps the full loop.
             const localChat = provider?.isLocal === true && !options.voice && investigationSettings.mode === "auto";

@@ -2,7 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { Nova } from "./Nova";
-import { makeMockBridge, renderRoute } from "../test/test-utils";
+import { createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
 import { openNovaPanel } from "../shared/nova-panel";
 
 async function openNovaForTest() {
@@ -564,4 +564,18 @@ it("does not let a delayed key-status result undo a successful key save", async 
     "",
   );
   expect(screen.getByRole("button", { name: "Remove key" })).toBeVisible();
+});
+
+it("allows hosted voice without an organization and never reads tenant cache status", async () => {
+  const getGraphCacheStatus = vi.fn();
+  const bridge = makeMockBridge({
+    nova: vi.fn(async () => ({ hasKey: true })),
+    getGraphCacheStatus,
+  }, createMockAppState({ tenants: [], organizations: [], activeTenantId: undefined }));
+  renderRoute(<Nova />, { bridge, route: "/chat", path: "/chat" });
+  act(openNovaPanel);
+  expect(await screen.findByText(/No organization ·/)).toBeVisible();
+  await userEvent.click(await screen.findByRole("checkbox", { name: /No organization data is shared/ }));
+  expect(screen.getByRole("button", { name: "Start Nova" })).toBeEnabled();
+  expect(getGraphCacheStatus).not.toHaveBeenCalled();
 });
