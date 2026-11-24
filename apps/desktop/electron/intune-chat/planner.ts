@@ -1203,7 +1203,7 @@ export function pathForResource(resource: GraphCacheResourceKind): {
     case "mobileApps":
       return {
         path: "/deviceAppManagement/mobileApps",
-        query: { "$expand": "assignments($select=intent,target)" },
+        query: { "$expand": "assignments($select=intent)" },
         select: [
           "id",
           "displayName",

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatDataTable, GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
 import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
-import { CHAT_TABLE_ROW_CAP, chatCacheTable, chatTableNote, describeCacheFilters } from "./cache-table.js";
+import { CHAT_TABLE_ROW_CAP, chatCacheTable, cacheListLimitNotice, describeCacheFilters } from "./cache-table.js";
 import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite-store.js";
 
 /**
@@ -669,10 +669,10 @@ export function computeStructuredResult(input: {
     const parts = [...(showOs ? [os] : []), ...focusBreakdown];
     facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length && !dataTable ? ":" : "."}`);
     if (!dataTable) facts.push(...focusRows.map(formatRow));
-    if (focusCount.total > focusRows.length) facts.push(chatTableNote(focusCount.total, Boolean(dataTable)));
+    if (!dataTable && focusCount.total > focusRows.length) facts.push(cacheListLimitNotice(focusCount.total));
   } else if (listSet) {
     if (!dataTable) facts.push(...rows.map(formatRow));
-    if (counted.total > rows.length) facts.push(chatTableNote(counted.total, Boolean(dataTable)));
+    if (!dataTable && counted.total > rows.length) facts.push(cacheListLimitNotice(counted.total));
   }
   // A sync window counts devices with a reported sync time; those without one are said, not silently left out.
   // The set the window applied to is what was counted: the previous rows by id for a follow-up, the filters otherwise.

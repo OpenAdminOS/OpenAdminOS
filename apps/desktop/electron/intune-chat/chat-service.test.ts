@@ -1857,9 +1857,9 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
     requests.push(path);
     if (path === '/deviceManagement/managedDevices') return {value:[{id:'a',deviceName:'Device A',complianceState:'noncompliant'},{id:'b',deviceName:'Device B',complianceState:'noncompliant'},{id:'c',deviceName:'Compliant device',complianceState:'compliant'}]};
     if (path === '/deviceAppManagement/mobileApps') return {value:[
-      {id:'app-mac-pkg',displayName:'Mac PKG','@odata.type':'#microsoft.graph.macOSPkgApp'},
-      {id:'app-mac-dmg',displayName:'Mac DMG','@odata.type':'#microsoft.graph.macOSDmgApp'},
-      {id:'app-win',displayName:'Win32 app','@odata.type':'#microsoft.graph.win32LobApp'},
+      {id:'app-mac-pkg',displayName:'Mac PKG','@odata.type':'#microsoft.graph.macOSPkgApp',assignments:[]},
+      {id:'app-mac-dmg',displayName:'Mac DMG','@odata.type':'#microsoft.graph.macOSDmgApp',assignments:[]},
+      {id:'app-win',displayName:'Win32 app','@odata.type':'#microsoft.graph.win32LobApp',assignments:[]},
     ]};
     if (path === '/deviceManagement/detectedApps') return {value:[{id:'detected-a',displayName:'Detected app A'},{id:'detected-b',displayName:'Detected app B'}]};
     return {value:[]};
@@ -2189,6 +2189,7 @@ it("saves a complete structured list on the chat answer", async () => {
     const table = result.assistantMessage.dataTables?.[0];
     assert.equal(table?.totalCount, 216, result.assistantMessage.content);
     assert.equal(new Set(table?.rows.map(row => row[table.columns.indexOf("id")])).size, 216);
+    assert.doesNotMatch(result.assistantMessage.content, /Report the count|host|query_cache/i);
     assert.match(result.assistantMessage.content, /Open the cached results below or export them as CSV/);
     store.close();
     closed = true;

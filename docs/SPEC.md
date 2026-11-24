@@ -809,7 +809,10 @@ and CSV includes every attached row. Partial snapshots are marked on the table.
 Cache queries support 50-row pages. Company Portal app lists use cached assignment
 intents: available, available without enrollment, and required. This is a catalog
 filter. A user-specific view depends on assignment targeting. Refresh older app
-snapshots before filtering on Company Portal availability.
+snapshots before filtering on Company Portal availability. Refresh completes missing
+or paged assignment collections. If assignment data is still incomplete, Chat reports
+how many cached apps have assignment data and identifies affected apps. Derived
+assignment fields are excluded from drift snapshots and hashes.
 Missing encryption is unknown. Fleet “why non-compliant” questions read live per-device
 compliance policy setting states with DeviceManagementConfiguration.Read.All consent; they investigate
 at most ten matching devices and explicitly disclose the remaining coverage. Each

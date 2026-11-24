@@ -1,4 +1,4 @@
-import { CHAT_TABLE_ROW_CAP, COUNT_CACHED_LIST_CAP, chatCacheTable, chatTableNote, describeCacheFilters, compactValue, listedCacheRow } from "./cache-table.js";
+import { CHAT_TABLE_ROW_CAP, COUNT_CACHED_LIST_CAP, chatCacheTable, cacheListLimitNotice, chatTableNote, describeCacheFilters, compactValue, listedCacheRow } from "./cache-table.js";
 import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import type { WebSearch, WebSearchResult } from "./web-search.js";
 import { randomUUID } from "node:crypto";
@@ -681,6 +681,7 @@ export const SPLASHTOP_TOOL_RULES = [
 const TOOL_TIMESTAMP_NOTE = "Never show an ISO timestamp to the user. Use the date or time wording in the facts when available. Use refreshedAtText for cache freshness when provided.";
 
 export interface IntuneChatToolContext {
+  noteCacheList?: () => void;
   noteTableOmission?: (note: string) => void;
   attachTable?: (table: import("@openadminos/agent-sdk").ChatDataTable) => boolean | void;
   timestampLocale?: ChatDateTimeLocale;
@@ -1074,8 +1075,10 @@ function executeToolUnchecked(
     case "list_cached_resources":
       return Promise.resolve(listCachedResources(ctx, params));
     case "query_cache":
+      ctx.noteCacheList?.();
       return Promise.resolve(queryCache(ctx, params));
     case "count_cached":
+      if ((params as { list?: unknown } | null)?.list === true) ctx.noteCacheList?.();
       return Promise.resolve(countCached(ctx, params));
     case "find_graph_endpoint":
       return Promise.resolve(findGraphEndpoint(ctx, params));
@@ -1441,9 +1444,21 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
 
 function requireCompanyPortalCoverage(ctx: IntuneChatToolContext, resource: GraphCacheResourceKind, fields: string[], refreshedAt?: string): void {
   if (resource !== "mobileApps" || !fields.some(field => field === "availableInCompanyPortal" || field === "assignmentIntents")) return;
-  if (!refreshedAt || ctx.store.hasMissingGraphCacheField(ctx.tenantId, resource, "availableInCompanyPortal")) {
-    throw new InvalidCacheQueryError("Refresh the app cache before answering. This snapshot does not have complete Company Portal assignment information.");
+  const scope = { tenantId: ctx.tenantId, resource };
+  const missing = ctx.store.countGraphCache({
+    ...scope,
+    filters: [{ field: "availableInCompanyPortal", op: "eq", value: null }],
+    listLimit: 5,
+  });
+  if (refreshedAt && missing.total === 0) return;
+  const counted = ctx.store.countGraphCache(scope).total - missing.total;
+  if (!refreshedAt || (counted === 0 && !ctx.store.graphCacheFields(ctx.tenantId, resource).includes("assignmentIntents"))) {
+    throw new InvalidCacheQueryError("Refresh the app cache to load Company Portal assignments. This cache predates assignment data. 0 apps had assignment data to count.");
   }
+  const names = (missing.rows as Array<{ displayName?: string; id?: string }> ?? [])
+    .map(row => row.displayName || row.id || "Unnamed app");
+  const examples = names.length ? ` (${names.join(", ")}${missing.total > names.length ? ", and others" : ""})` : "";
+  throw new InvalidCacheQueryError(`Assignment data is incomplete for ${missing.total} ${missing.total === 1 ? "app" : "apps"}${examples}. Apps with assignment data counted: ${counted}. Refresh the app cache again or check these apps in Intune.`);
 }
 
 function assertCacheFields(resource: GraphCacheResourceKind, fields: readonly string[], availableFields: readonly string[]): void {
@@ -1521,7 +1536,7 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
     attached = Boolean(table && attachTable(table) !== false);
   }
   const note = needsTable ? chatTableNote(counted.total, attached, Boolean(attachTable)) : undefined;
-  if (note && !attached) ctx.noteTableOmission?.(note);
+  if (note && !attached) ctx.noteTableOmission?.(cacheListLimitNotice(counted.total));
   return {
     resource,
     ...(snapshot ? logWindowCoverage(snapshot) : {}),

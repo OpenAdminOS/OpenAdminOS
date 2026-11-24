@@ -1,4 +1,5 @@
-import type { ChatDataTable, GraphCacheResourceKind } from "@openadminos/agent-sdk";
+import type { ChatDataTable, GraphCacheResourceKind, RunGraphApi } from "@openadminos/agent-sdk";
+import { fetchGraphCachePages } from "../state-helpers.js";
 import type { GraphCacheQueryPredicate } from "./sqlite-store.js";
 
 const LIST_FIELDS: Partial<Record<GraphCacheResourceKind, readonly string[]>> = {
@@ -22,17 +23,44 @@ const CHAT_TABLE_BYTE_CAP = 4 * 1024 * 1024;
 
 export function cacheMobileAppAssignments(row: unknown): unknown {
   if (!row || typeof row !== "object") return row;
-  const { assignments, ...app } = row as Record<string, unknown>;
-  if (!Array.isArray(assignments) || app["assignments@odata.nextLink"]) return app;
+  const {
+    assignments,
+    "assignments@odata.nextLink": nextLink,
+    "assignments@odata.context": _context,
+    "assignments@odata.count": count,
+    ...app
+  } = row as Record<string, unknown>;
+  const incomplete = { ...app, assignmentIntents: null };
+  if (!Array.isArray(assignments) || nextLink ||
+    (typeof count === "number" && assignments.length < count) ||
+    (app.isAssigned === true && assignments.length === 0)) return incomplete;
   const intents = assignments.map(assignment => assignment?.intent);
-  if (intents.some(intent => typeof intent !== "string")) return app;
+  if (intents.some(intent => typeof intent !== "string" || !intent)) return incomplete;
   const assignmentIntents = [...new Set<string>(intents)].sort();
-  // Required apps can appear in Company Portal, so include them in catalog-level availability.
-  // TODO(ugur): Confirm whether Company Portal availability should exclude required installs.
+  // TODO(ugur): confirm required assignments count as available in Company Portal (current rule: yes)
   const availableInCompanyPortal = assignmentIntents.some(intent =>
     ["available", "availableWithoutEnrollment", "required"].includes(intent),
   );
   return { ...app, assignmentIntents, availableInCompanyPortal };
+}
+
+export async function resolveCachedAppAssignments(graph: RunGraphApi, row: unknown, signal?: AbortSignal): Promise<unknown> {
+  const cached = cacheMobileAppAssignments(row);
+  if (!cached || typeof cached !== "object") return cached;
+  const app = cached as Record<string, unknown>;
+  if (app.assignmentIntents !== null || typeof app.id !== "string" || !app.id) return cached;
+  try {
+    const assignments = await fetchGraphCachePages(graph, {
+      path: `/deviceAppManagement/mobileApps/${encodeURIComponent(app.id)}/assignments`,
+      query: { $select: "intent" },
+    }, signal, true);
+    if (assignments.pageLimitReached ||
+      (assignments.totalCount !== undefined && assignments.rows.length < assignments.totalCount)) return cached;
+    return cacheMobileAppAssignments({ ...app, assignments: assignments.rows });
+  } catch {
+    signal?.throwIfAborted();
+    return cached;
+  }
 }
 
 export function describeCacheFilters(filters: readonly GraphCacheQueryPredicate[] = []): string {
@@ -45,20 +73,28 @@ export function describeCacheFilters(filters: readonly GraphCacheQueryPredicate[
 
 export function addCacheTable(tables: ChatDataTable[], table: ChatDataTable): boolean {
   if (tables.some(existing => existing.resource === table.resource &&
-    existing.filters === table.filters && existing.totalCount === table.totalCount)) return true;
+    existing.filters === table.filters && existing.totalCount === table.totalCount &&
+    existing.refreshedAt === table.refreshedAt && existing.partial === table.partial)) return true;
   if (tables.length >= 3) return false;
   tables.push(table);
   return true;
 }
 
-export function cacheTableAnswer(content: string, tableCount: number, notices: Set<string>): string {
-  const attachmentClaim = /[^.!?\n]*\b(?:table|CSV|list|results|rows|export|file)\b[^.!?\n]*(?:\battached\b|\bbelow\b)[^.!?\n]*[.!?]?|[^.!?\n]*\battached\s+(?:the |a |as )?(?:full |complete )?(?:table|CSV|list|results|rows|export|file)\b[^.!?\n]*[.!?]?/gi;
-  const cleaned = content.replace(attachmentClaim, "").trim();
+export function cacheTableAnswer(content: string, tableCount: number, notices: Set<string>, usedCacheList: boolean): string {
+  const attachmentClaim = /(?:^|(?<=[.!?\n]))[ \t]*(?:(?:I(?: have|'ve)? |we(?: have|'ve)? )(?:attached|exported)\b|attached (?:is|are)\b|(?:the )?attachment (?:follows|contains|includes)\b|(?:the |a )?(?:complete |full )?(?:cached )?(?:data|list|table|results|CSV|file)(?: of [^.!?\n]+?)? (?:is|are|has been|have been) attached\b|(?:you can )?download (?:the |a )?(?:complete |full )?(?:data|list|table|results|CSV|file)\b|(?:the )?CSV export (?:is ready|is available)\b)[^.!?\n]*(?:[.!?]|$)/gi;
+  const stripped = usedCacheList && !tableCount ? content.replace(attachmentClaim, "").trim() : content;
   return [
-    cleaned,
+    stripped || content,
     ...notices,
     tableCount ? "Open the cached results below or export them as CSV." : "",
-  ].filter(Boolean).join("\n\n") || (content ? "No complete cached table was attached." : content);
+  ].filter(Boolean).join("\n\n");
+}
+
+export function cacheListLimitNotice(total: number): string {
+  const limit = total > CHAT_TABLE_ROW_CAP
+    ? "Chat can list up to 10,000 rows in a table."
+    : "The full list exceeds the table limits for this answer.";
+  return `${total.toLocaleString("en-US")} cached rows match. ${limit} Narrow the question to see the full list.`;
 }
 
 export function chatCacheTable(

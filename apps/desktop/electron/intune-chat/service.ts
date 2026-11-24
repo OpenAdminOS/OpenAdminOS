@@ -1,4 +1,4 @@
-import { addCacheTable, cacheMobileAppAssignments, cacheTableAnswer, chatTableNote } from "./cache-table.js";
+import { addCacheTable, resolveCachedAppAssignments, cacheTableAnswer, cacheListLimitNotice } from "./cache-table.js";
 import type { ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import { hostedOllamaDestination, providerForModel } from "@openadminos/agent-sdk";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
@@ -2013,12 +2013,20 @@ export class IntuneChatService {
         if (pageResult.pageLimitReached && !request.windowField && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
+        const rows = pageResult.rows;
+        if (resource === "mobileApps") {
+          for (const [index, row] of rows.entries()) {
+            signal?.throwIfAborted();
+            rows[index] = await resolveCachedAppAssignments(graph, row, signal);
+          }
+        }
+        signal?.throwIfAborted();
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,
           label: definition.label,
           scopeSet: definition.scopes,
-          rows: resource === "mobileApps" ? pageResult.rows.map(cacheMobileAppAssignments) : pageResult.rows,
+          rows,
           pageCount: pageResult.pages,
           pageLimitReached: pageResult.pageLimitReached,
           ...(!pageResult.pageLimitReached
@@ -2372,6 +2380,7 @@ export class IntuneChatService {
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
     const tableNotices = new Set<string>();
+    let usedCacheList = false;
     const dataTables: NonNullable<IntuneChatMessage["dataTables"]> = [];
     const attachTable = (table: (typeof dataTables)[number]) => addCacheTable(dataTables, table);
     let documentationSources: IntuneChatDocumentationSource[] = [];
@@ -2510,7 +2519,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant), ...mcp, tenantObservations, attachTable, noteTableOmission: (note) => tableNotices.add(note) },
+              tools: { ...this.buildChatToolContext(tenant), ...mcp, tenantObservations, attachTable, noteCacheList: () => { usedCacheList = true; }, noteTableOmission: (note) => tableNotices.add(note) },
               plannedResources: planned.resources,
               smallTalk: isSmallTalk(content),
               agentSuggestions,
@@ -2595,13 +2604,13 @@ export class IntuneChatService {
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
     if (computed?.dataTable && !attachTable(computed.dataTable)) {
-      tableNotices.add(chatTableNote(computed.dataTable.totalCount, false));
+      tableNotices.add(cacheListLimitNotice(computed.dataTable.totalCount));
     }
     const assistantMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
       role: "assistant",
-      content: cacheTableAnswer(assistantContent, dataTables.length, tableNotices),
+      content: cacheTableAnswer(assistantContent, dataTables.length, tableNotices, usedCacheList),
       status: assistantStatus,
       createdAt: new Date().toISOString(),
       providerId,
@@ -3166,6 +3175,7 @@ export class IntuneChatService {
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
     const tableNotices = new Set<string>();
+    let usedCacheList = false;
     const dataTables: NonNullable<IntuneChatMessage["dataTables"]> = [];
     const attachTable = (table: (typeof dataTables)[number]) => addCacheTable(dataTables, table);
     let documentationSources: IntuneChatDocumentationSource[] = [];
@@ -3401,7 +3411,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations, attachTable, noteTableOmission: (note) => tableNotices.add(note) },
+              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations, attachTable, noteCacheList: () => { usedCacheList = true; }, noteTableOmission: (note) => tableNotices.add(note) },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000, ...(voiceProfile ? { voiceProfile } : {}) } : {}),
               plannedResources: planned.resources,
               smallTalk: isSmallTalk(content),
@@ -3642,13 +3652,13 @@ export class IntuneChatService {
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
     if (computed?.dataTable && !attachTable(computed.dataTable)) {
-      tableNotices.add(chatTableNote(computed.dataTable.totalCount, false));
+      tableNotices.add(cacheListLimitNotice(computed.dataTable.totalCount));
     }
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
       conversationId: conversation.id,
       role: "assistant",
-      content: cacheTableAnswer(assistantContent, dataTables.length, tableNotices),
+      content: cacheTableAnswer(assistantContent, dataTables.length, tableNotices, usedCacheList),
       status: assistantStatus,
       createdAt: new Date().toISOString(),
       providerId,

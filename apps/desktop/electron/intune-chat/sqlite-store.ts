@@ -2348,12 +2348,6 @@ export class IntelligenceSqliteStore {
     `).all(tenantId, resource) as unknown as Array<{ field: string }>).map(row => row.field);
   }
 
-  hasMissingGraphCacheField(tenantId: string, resource: GraphCacheResourceKind, field: string): boolean {
-    return Boolean(this.db.prepare(
-      `SELECT 1 FROM graph_resources WHERE tenant_id = ? AND resource = ? AND json_extract(raw_json, ?) IS NULL LIMIT 1`,
-    ).get(tenantId, resource, `$.${field}`));
-  }
-
   graphCacheFieldTypes(tenantId: string, resource: GraphCacheResourceKind, field: string): string[] {
     const path = field === "@odata.type"
       ? '$."@odata.type"'
