@@ -280,6 +280,16 @@ describe("Microsoft 365 roadmap routing", () => {
     });
   }
 
+  it("points to Chat investigation mode when a ready source cannot be offered", async () => {
+    await withHarness(async ({ store, prompts, script }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      script([{ final: true, answer: "Roadmap check finished." }]);
+      const message = (await store.sendIntuneChatMessage({ content: ROADMAP_QUESTION })).assistantMessage;
+      assert.equal(message.content, "Roadmap items were not checked because Chat is in Deterministic mode and does not use Microsoft Release Communications. Set Chat investigation mode to Investigative in Settings, then ask again.");
+      assert.deepEqual(prompts, []);
+    }, { roadmap: true });
+  });
+
   it("replays the failed local lookup without refreshing unrelated tenant data or publishing the stale-device answer", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, writerPrompts, script }) => {
       const staleRows = Array.from({ length: 6 }, (_, i) => ({

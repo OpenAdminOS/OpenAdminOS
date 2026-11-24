@@ -3840,19 +3840,25 @@ export class IntuneChatService {
     const mcp = input.toolsOffered ? installed : {};
     const servers = mcp.mcp?.servers ?? [];
     let roadmapUnavailable: string | undefined;
-    if (input.roadmapQuestion && !input.planned.hasWriteIntent && !installed.mcp?.servers?.some((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID)) {
+    if (input.roadmapQuestion && !input.planned.hasWriteIntent && !servers.some((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID)) {
       const catalog = await this.host.listMcpServers?.();
       const release = catalog?.find((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID);
-      const recovery = release?.installed
-        ? release.enabled
-          ? "Microsoft Release Communications has no tools available to Chat. Check its connection in Marketplace, then ask again."
-          : "Microsoft Release Communications is turned off. Turn it on in Marketplace, then ask again."
-        : catalog && !release
-          ? "Microsoft Release Communications is unavailable in Marketplace. Check with your IT department."
-          : "Microsoft Release Communications is not installed. Add it in Marketplace, then ask again.";
+      let recovery: string;
+      if (catalog && !release) {
+        recovery = "Microsoft Release Communications is unavailable in Marketplace. Check with your IT department.";
+      } else if (!release?.installed) {
+        recovery = "Microsoft Release Communications is not installed. Add it in Marketplace, then ask again.";
+      } else if (!release.enabled) {
+        recovery = "Microsoft Release Communications is turned off. Turn it on in Marketplace, then ask again.";
+      } else if (!installed.mcp?.servers?.some((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID)) {
+        recovery = "Microsoft Release Communications has no tools available to Chat. Check its connection in Marketplace, then ask again.";
+      } else if (this.host.requireIntelligenceStore().getChatInvestigationSettings().mode === "always-deterministic") {
+        recovery = "Chat is in Deterministic mode and does not use Microsoft Release Communications. Set Chat investigation mode to Investigative in Settings, then ask again.";
+      } else {
+        recovery = "the selected model cannot use Microsoft Release Communications here. Choose a model with tool support, then ask again.";
+      }
       roadmapUnavailable = `Roadmap items were not checked because ${recovery}`;
     }
-
     const keywordKind = input.forceDocs
       ? "docs"
       : input.planned.hasWriteIntent
