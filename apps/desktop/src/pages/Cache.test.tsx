@@ -198,7 +198,7 @@ it.each([
 ])("shows recovery for an unavailable cache link with organization %s", async (activeTenantId, heading, action) => {
   const bridge = makeMockBridge({
     getGraphCacheStatus: vi.fn(async (tenantId): Promise<GraphCacheStatus> => ({ tenantId, resources: [] })),
-  }, { ...createMockAppState(), activeTenantId });
+  }, { ...createMockAppState(), activeTenantId: activeTenantId ?? undefined });
   renderRoute(<Cache />, { bridge, route: "/cache?resource=unknown", path: "/cache" });
   expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: action }));

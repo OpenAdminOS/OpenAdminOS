@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -2777,16 +2776,18 @@ it.each([
     }]),
   });
   function PendingChat() {
-    const { setPendingConversation, shellLoaded } = useConversations();
-    useEffect(() => {
-      if (shellLoaded) setPendingConversation(conversation);
-    }, [setPendingConversation, shellLoaded]);
-    return <IntuneChat />;
+    const { setPendingConversation } = useConversations();
+    return <>
+      <button onClick={() => setPendingConversation(conversation)}>Set pending conversation</button>
+      <IntuneChat />
+    </>;
   }
   renderRoute(scenario === "pending"
     ? <ConversationWorkspaceProvider><PendingChat /></ConversationWorkspaceProvider>
     : <IntuneChat />, { path: "/chat/:conversationId", route: "/chat/cache-footer", bridge });
   if (scenario === "pending") {
+    await screen.findByRole("heading", { name: "Conversation not found" });
+    fireEvent.click(screen.getByRole("button", { name: "Set pending conversation" }));
     const answer = await screen.findByText("Device inventory is ready.");
     expect(within(answer.closest("[data-message-id]") as HTMLElement).getByText("Multiple tenants")).toBeInTheDocument();
   } else if (scenario === "other" || scenario === "unknown") {
