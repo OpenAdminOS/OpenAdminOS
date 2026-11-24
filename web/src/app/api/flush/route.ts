@@ -10,11 +10,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 export async function GET(req: Request) {
-  const store = getStatsStore();
-  if (!store) return statsUnavailable(false);
-
   const authError = cronAuthError(req);
   if (authError) return authError;
+
+  const store = getStatsStore();
+  if (!store) return statsUnavailable(false);
 
   try {
     const { file, sha, lastFlush } = await fetchStats();

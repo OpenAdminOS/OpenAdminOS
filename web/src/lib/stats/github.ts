@@ -4,6 +4,7 @@ import type { InstallSnapshot } from "./store";
 
 const STATS_PATH = "stats/agents.json";
 const FLUSH_TRAILER = "OpenAdminOS-Install-Counts: ";
+const FLUSH_HISTORY_LIMIT = 100;
 
 let cachedOctokit: Octokit | null = null;
 
@@ -48,24 +49,23 @@ export async function fetchStats(): Promise<StatsFetchResult> {
   const octokit = getOctokit();
   const { owner, repo, branch } = repoConfig();
 
-  // Pin the file read to the same history used to find the last flush receipt.
-  let ref: string | undefined;
-  let lastFlush: InstallSnapshot[] = [];
-  history: for await (const { data } of octokit.paginate.iterator(octokit.repos.listCommits, {
-    owner, repo, sha: branch, path: STATS_PATH,
-  })) {
-    for (const { sha, commit: { message } } of data) {
-      ref ??= sha;
-      const trailer = message.split("\n").find((line) => line.startsWith(FLUSH_TRAILER));
-      if (trailer) {
-        lastFlush = JSON.parse(trailer.slice(FLUSH_TRAILER.length)) as InstallSnapshot[];
-        break history;
-      }
-      if (/^stats: (refresh 7d window|\+\d+ installs?)(\n|$)/.test(message)) break history;
-    }
-  }
+  // Check one page of stats-file commits. Legacy and rolling-window-only commits can sit above a receipt.
+  const { data: commits } = await octokit.repos.listCommits({
+    owner, repo, sha: branch, path: STATS_PATH, per_page: FLUSH_HISTORY_LIMIT,
+  });
+  const ref = commits[0]?.sha;
   if (!ref) throw new Error(`No commit found for ${STATS_PATH}.`);
 
+  let lastFlush: InstallSnapshot[] = [];
+  for (const { commit: { message } } of commits) {
+    const trailer = message.split("\n").find((line) => line.startsWith(FLUSH_TRAILER));
+    if (trailer) {
+      lastFlush = JSON.parse(trailer.slice(FLUSH_TRAILER.length)) as InstallSnapshot[];
+      break;
+    }
+  }
+
+  // Pin the file read to the latest commit in that same history.
   const response = await octokit.repos.getContent({
     owner,
     repo,

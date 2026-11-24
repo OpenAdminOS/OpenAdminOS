@@ -25,21 +25,24 @@ function installRequest(body: string) {
   });
 }
 
-test("all stats routes return the same 503 when either storage variable is absent", async (t) => {
-  for (const name of ["SUPABASE_URL", "SUPABASE_SECRET_KEY"]) {
+test("all stats routes return 503 for missing storage variables or a malformed Supabase URL", async (t) => {
+  for (const name of ["CRON_SECRET", "SUPABASE_URL", "SUPABASE_SECRET_KEY"]) {
     const before = process.env[name];
     t.after(() => {
       if (before === undefined) delete process.env[name];
       else process.env[name] = before;
     });
   }
+  process.env.CRON_SECRET = "cron-test";
   t.mock.method(globalThis, "fetch", () => assert.fail("Unconfigured routes must not fetch"));
-  for (const [url, key] of [[undefined, secret], ["https://db.example", undefined]]) {
+  const log = t.mock.method(console, "error", () => {});
+  for (const [url, key] of [[undefined, secret], ["https://db.example", undefined], ["malformed-private-url", secret]]) {
     if (url === undefined) delete process.env.SUPABASE_URL;
     else process.env.SUPABASE_URL = url;
     if (key === undefined) delete process.env.SUPABASE_SECRET_KEY;
     else process.env.SUPABASE_SECRET_KEY = key;
 
+    assert.equal((await flush(new Request("https://example.test/api/flush"))).status, 401);
     for (const response of await Promise.all([
       install(installRequest("{")), submitAgent(installRequest("{")),
       support(installRequest("{")), flush(cronRequest()), health(),
@@ -50,6 +53,9 @@ test("all stats routes return the same 503 when either storage variable is absen
       });
     }
   }
+  assert.equal(log.mock.callCount(), 1);
+  const logged = JSON.stringify(log.mock.calls[0]?.arguments);
+  assert.doesNotMatch(logged, /malformed-private-url|fake-supabase-key/);
 });
 
 test("install and flush preserve aggregate counts over failures and retries", async (t) => {
@@ -77,7 +83,7 @@ test("install and flush preserve aggregate counts over failures and retries", as
   let rateAllowed = true;
   let failCommit = true;
   let failMark = true;
-  let commit = { sha: "commit-0", commit: { message: "stats: +1 install" } };
+  const commits = [{ sha: "commit-0", commit: { message: "stats: +1 install" } }];
   let githubFile = {
     updatedAt: "2027-01-02T00:00:00Z",
     agents: { [slug]: { installs: 10, installs7d: 9, comments: 2 } },
@@ -99,7 +105,7 @@ test("install and flush preserve aggregate counts over failures and retries", as
           const hashKey = createHmac("sha256", secret).update("openadminos:stats:ip-hash:v1").digest();
           assert.deepEqual(body, {
             p_scope: "install",
-            p_key_hash: createHmac("sha256", hashKey).update(ip).digest("hex"),
+            p_key_hash: createHmac("sha256", hashKey).update(`install\n${ip}`).digest("hex"),
             p_window_seconds: 60,
             p_max: 30,
           });
@@ -137,21 +143,23 @@ test("install and flush preserve aggregate counts over failures and retries", as
         return Response.json([{ name: slug, type: "dir" }]);
       case "/repos/example/project/commits":
         assert.equal(url.searchParams.get("path"), "stats/agents.json");
-        return Response.json([commit]);
+        assert.equal(url.searchParams.get("per_page"), "100");
+        return Response.json(commits);
       case statsPath: {
+        const latest = commits[0]!;
         if (options?.method === "PUT") {
           events.push("commit");
           if (failCommit) return Response.json({ message: "test conflict" }, { status: 409 });
           const { content, sha, message } = JSON.parse(String(options.body));
-          assert.equal(sha, `blob-${commit.sha}`);
+          assert.equal(sha, `blob-${latest.sha}`);
           githubFile = JSON.parse(Buffer.from(content, "base64").toString("utf8"));
-          commit = { sha: `commit-${events.length}`, commit: { message } };
+          commits.unshift({ sha: `commit-${commits.length}`, commit: { message } });
           return Response.json({});
         }
-        assert.equal(url.searchParams.get("ref"), commit.sha);
+        assert.equal(url.searchParams.get("ref"), latest.sha);
         return Response.json({
           type: "file",
-          sha: `blob-${commit.sha}`,
+          sha: `blob-${latest.sha}`,
           content: Buffer.from(JSON.stringify(githubFile)).toString("base64"),
         });
       }
@@ -188,19 +196,22 @@ test("install and flush preserve aggregate counts over failures and retries", as
   assert.deepEqual(githubFile.agents[slug], { installs: 17, installs7d: 10, comments: 2 });
   assert.equal(newDailyCounts.flushed, 0);
 
+  // A legacy flush can publish counts on top of the unacknowledged receipt.
+  commits.unshift({ sha: "legacy-install", commit: { message: "stats: +1 install\n\n  sample-agent: +1" } });
+  githubFile.agents[slug]!.installs++;
   rateAllowed = true;
   assert.equal((await send(payload)).status, 200);
   failMark = false;
   assert.equal((await flush(cronRequest())).status, 200);
   assert.deepEqual(events.splice(0), ["mark", "commit", "mark", "purge"]);
-  assert.deepEqual(githubFile.agents[slug], { installs: 18, installs7d: 11, comments: 2 });
+  assert.deepEqual(githubFile.agents[slug], { installs: 19, installs7d: 11, comments: 2 });
   assert.equal(newDailyCounts.flushed, 8);
 
   priorDaysInWindow = 0;
   assert.equal((await flush(cronRequest())).status, 200);
   assert.deepEqual(events.splice(0), ["mark", "commit", "purge"]);
-  assert.deepEqual(githubFile.agents[slug], { installs: 18, installs7d: 8, comments: 2 });
+  assert.deepEqual(githubFile.agents[slug], { installs: 19, installs7d: 8, comments: 2 });
 
   assert.equal((await (await flush(cronRequest())).json()).flushed, false);
-  assert.deepEqual(events, ["purge"]);
+  assert.deepEqual(events, ["mark", "purge"]);
 });

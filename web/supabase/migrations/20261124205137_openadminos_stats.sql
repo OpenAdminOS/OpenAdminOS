@@ -2,6 +2,12 @@ begin;
 
 create schema if not exists openadminos;
 
+-- Run as postgres. Schema defaults cannot subtract the built-in PUBLIC EXECUTE default.
+alter default privileges for role postgres revoke execute on functions from public;
+alter default privileges for role postgres in schema openadminos revoke execute on functions from public, anon, authenticated;
+alter default privileges for role postgres in schema openadminos revoke all on tables from public, anon, authenticated;
+alter default privileges for role postgres in schema openadminos revoke all on sequences from public, anon, authenticated;
+
 create table if not exists openadminos.install_counts_daily (
   slug text,
   day date,
@@ -115,13 +121,6 @@ as $$
   order by daily.slug;
 $$;
 
-create or replace function openadminos.pending_installs()
-returns table (slug text, delta bigint)
-language sql stable security invoker set search_path = ''
-as $$
-  select snapshot.slug, snapshot.delta from openadminos.pending_install_snapshot() as snapshot;
-$$;
-
 -- Absolute daily totals make the acknowledgement retryable and preserve newer installs.
 create or replace function openadminos.mark_installs_flushed(p_snapshot jsonb)
 returns void
@@ -162,9 +161,9 @@ $$;
 
 create or replace function openadminos.health()
 returns boolean
-language sql stable security invoker set search_path = ''
+language sql stable security definer set search_path = ''
 as $$
-  select true;
+  select pg_catalog.count(*) >= 0 from openadminos.install_counts_daily where false;
 $$;
 
 revoke all on schema openadminos from public, anon, authenticated, service_role;
@@ -178,7 +177,6 @@ grant execute on function
   openadminos.claim_support_dedup(text, integer),
   openadminos.release_support_dedup(text),
   openadminos.pending_install_snapshot(),
-  openadminos.pending_installs(),
   openadminos.mark_installs_flushed(jsonb),
   openadminos.installs_7d(),
   openadminos.purge_expired(),

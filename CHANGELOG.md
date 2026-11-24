@@ -22,6 +22,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Website install counts recover after an interrupted flush, even when a legacy flush ran in between.
+
 - Manual update checks still work while automatic checks are paused. Turning off automatic network requests cancels in-flight automatic registry refreshes.
 
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
