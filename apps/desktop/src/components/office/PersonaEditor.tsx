@@ -1,3 +1,4 @@
+import { activeModelProvider, providerForModel } from "@openadminos/agent-sdk";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type {
   AppState,
@@ -100,7 +101,8 @@ export function PersonaEditor({
     heading.current?.focus();
     if (content.current) content.current.scrollTop = 0;
   }, [step]);
-  const provider = state.providers.find((p) => p.id === form.providerId);
+  const endpoint = state.providers.find((p) => p.id === form.providerId);
+  const provider = providerForModel(endpoint, form.model ?? endpoint?.defaultModel ?? endpoint?.models[0]);
   const missingWorkflows = form.agentSlugs.filter(
     (slug) => !state.installedAgents.some((a) => a.slug === slug),
   );
@@ -445,11 +447,14 @@ export function PersonaEditor({
                           }))
                         }
                       >
-                        {state.providers.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} · {p.isLocal ? "Local" : "Hosted"}
-                          </option>
-                        ))}
+                        {state.providers.map((entry) => {
+                          const option = entry.id === form.providerId ? provider ?? entry : activeModelProvider(entry);
+                          return (
+                            <option key={entry.id} value={entry.id}>
+                              {option.name} · {option.isLocal ? "Local" : "Hosted"}
+                            </option>
+                          );
+                        })}
                       </select>
                     </label>
                   </div>

@@ -65,8 +65,10 @@ export const MODEL_FIT_COPY = {
   /** The offer was withdrawn because the organization, conversation or model changed. */
   offerWithdrawn: "The organization or model changed, so this choice was withdrawn and nothing was sent. Send the question again.",
   /** `sizeKnown`: the failed model's size could be read, so this one is larger than it. */
-  localNote: (surface: Surface, sizeKnown = true) =>
-    `${sizeKnown ? "A larger model" : "Another model"} on this device. Its context size is not checked before the ${noun(surface)}.`,
+  localNote: (surface: Surface, sizeKnown = true, contextWindow?: number) =>
+    contextWindow === undefined
+      ? `${sizeKnown ? "A larger model" : "Another model"} on this device. Its context size is not checked before the ${noun(surface)}.`
+      : `Reported context window: ${contextWindow.toLocaleString("en-US")} tokens.`,
   /**
    * Where the cost lands. The app does not know the admin's plan or price.
    * TODO(ugur): is this cost note enough, or should hosted rows show an estimate?
@@ -119,6 +121,9 @@ export const MODEL_FIT_COPY = {
 
   reviewAgain: "Close this review and open the run again to review where it goes now.",
   modelGone: (model: string, provider: string) => `${provider} no longer lists ${model}, so this run cannot start. Choose a provider again on the run page.`,
+  onDeviceModelMissing: (provider: string, model?: string) => model
+    ? `${model} is unavailable for an on-device rerun. Choose a model that runs on this device.`
+    : `${provider} has no available model for this on-device rerun. Choose or download a model that runs on this device, then recheck providers.`,
   modelMissing: (provider: string) => `${provider} does not report a model yet, so this run cannot start. Check it in Settings, Providers.`,
   destinationPending: (provider: string) => `Checking where ${provider} is reached before the run can start.`,
   destinationFailedChat: (provider: string) =>

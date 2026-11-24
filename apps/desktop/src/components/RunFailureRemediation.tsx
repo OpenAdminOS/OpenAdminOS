@@ -2,6 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
+import { isOllamaKeptContextFailure, ollamaFailureOwnText as ownText } from "../shared/ollama-failure";
 import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 
 interface Suggestion {
@@ -10,12 +11,6 @@ interface Suggestion {
   /** Fixed advice, or advice read from the error when it carries the specifics. */
   body: string | ((error: string) => string);
 }
-
-/**
- * The app's own text of an error. What Ollama said, quoted after "Ollama said:",
- * can contain words such as "context limit" or "invalid" that would pick an unrelated playbook.
- */
-const ownText = (e: string) => e.split("Ollama said:")[0] ?? e;
 
 /**
  * A failed lookup of the model's context limit has its own playbook only.
@@ -45,8 +40,16 @@ function lmStudioContextAdvice(error: string): string {
     : "LM Studio sets a model's context length when the model is loaded, and this request did not fit. In LM Studio, raise Context Length in the model's load settings and reload the model, then re-run.";
 }
 
+/**
+ * The runtime's two messages for an Ollama reply with reasoning and no answer,
+ * read from the app's own text so a quoted server body cannot match.
+ */
+const isReasoningWithoutAnswer = (e: string) =>
+  /^Ollama stopped "[^"]+" at the token limit while it was still reasoning, so there is no answer\./.test(ownText(e)) ||
+  /^Ollama returned only reasoning from "[^"]+" and no answer\./.test(ownText(e));
+
 /** Errors with one cause and one recovery: only their own playbook is shown. */
-const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
+const EXCLUSIVE = [isOllamaKeptContextFailure, isLmStudioContextTooSmall, isContextLimitLookup, isReasoningWithoutAnswer];
 
 /**
  * A Microsoft sign-in error as MSAL reports it: the message starts with an
@@ -56,11 +59,17 @@ const EXCLUSIVE = [isLmStudioContextTooSmall, isContextLimitLookup];
  */
 const MICROSOFT_SIGN_IN_ERROR = /^(?:The (?:plan|proposal) could not be checked[^.]*\. |Nothing was applied: )?(?:AADSTS\d+|(?:interaction_required|invalid_grant|consent_required): AADSTS\d+)/;
 
+
 const SUGGESTIONS: Suggestion[] = [
   {
     match: (e) => /ollama/i.test(e) && /(not reachable|connect|refused|econnrefused)/i.test(e) && !isContextLimitLookup(e),
     title: "Ollama isn't running",
     body: "Start it from a terminal with `ollama serve`, confirm it's reachable at http://127.0.0.1:11434, then re-run.",
+  },
+  {
+    match: isOllamaKeptContextFailure,
+    title: "Ollama failed with a kept context size",
+    body: "Re-run the same request. OpenAdminOS dropped the kept size, so Ollama can start from its default context size. If it fails again, close other apps to free memory or pick a smaller model in Settings → LLM Providers.",
   },
   {
     match: (e) => /ollama/i.test(e) && /context size/i.test(e),
@@ -76,6 +85,11 @@ const SUGGESTIONS: Suggestion[] = [
     match: isLmStudioContextTooSmall,
     title: "LM Studio context too small",
     body: lmStudioContextAdvice,
+  },
+  {
+    match: isReasoningWithoutAnswer,
+    title: "Model reasoned without answering",
+    body: "The model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
   },
   {
     match: (e) =>
@@ -150,15 +164,20 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   if (run.status !== "failed" || !run.error) return null;
   // A typed reason is exact, so it comes first and replaces the guesses.
   const typed = run.failureReason?.code === "context-too-small" ? run.failureReason : undefined;
-  // A failed lookup of the Ollama model's context limit and an LM Studio
-  // context error each have one cause and one recovery; an HTTP status or a
-  // number in their text (for example 403) is not a Graph denial.
+  // Each exclusive playbook has one cause and one recovery. An HTTP status
+  // or a number in its text (for example 403) does not add another playbook.
   const own = ownText(run.error);
-  const exclusive = typed ? undefined : EXCLUSIVE.find((match) => match(own));
-  const matched = typed
-    ? [contextTooSmallSuggestion(typed)]
-    : exclusive
-      ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+  // A cause the runtime classified from its typed error decides, whatever
+  // wrapper the app put in front of the message.
+  const exclusive = typed
+    ? (typed.ollamaKeptContext === true ? isOllamaKeptContextFailure : undefined)
+    : run.failureCause === "reasoning-without-answer"
+      ? isReasoningWithoutAnswer
+      : EXCLUSIVE.find((match) => match(own));
+  const matched = exclusive
+    ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)
+    : typed
+      ? [contextTooSmallSuggestion(typed)]
       : SUGGESTIONS.filter((suggestion) => suggestion.match(own));
   // Only a Graph error gets Graph recovery advice. Runs stored by earlier
   // versions can carry an accessDenial for a 403 from a model server, a

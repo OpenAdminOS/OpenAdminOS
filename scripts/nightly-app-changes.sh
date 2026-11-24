@@ -58,6 +58,7 @@ changed="$(git diff --name-only "$base" "$commit" -- . \
   ':(exclude)scripts/render-office-rehearsal.mjs' \
   ':(exclude)scripts/setup-qa.sh' \
   ':(exclude)scripts/smoke-*.mjs' \
+  ':(exclude)scripts/verify-release-artifacts.mjs' \
   ':(exclude)scripts/verify-nova-command-routing.ts')"
 
 # The root package.json also holds contributor npm scripts. It counts only

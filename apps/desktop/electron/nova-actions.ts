@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import type { AppState, ConnectorSummary, EffectiveNovaProfile, ManagedPolicyStatus, NovaActionPreview, NovaCapabilityName, NovaFollowUp, NovaNote, NovaNoteSource, NovaProfile, NovaProfilePatch, ProviderId, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
@@ -394,8 +395,9 @@ export async function prepareNovaFollowUp(
   const readOnlyIssue = novaShortcutPromptIssue(question);
   if (readOnlyIssue) throw new Error('A follow-up can only ask a read-only question again. Remove the request to send, run, schedule, change or remember something. Nothing was set.');
   await host.followUps.check(input.minutes);
-  const provider = state.providers.find(p => p.id === state.activeProviderId);
-  const model = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
+  const endpoint = state.providers.find(p => p.id === state.activeProviderId);
+  const model = resolveProviderDefaultModel(endpoint, state.activeModelByProviderId).model;
+  const provider = providerForModel(endpoint, model);
   const providerId = state.activeProviderId;
   const name = organizationName(state, tenantId);
   const due = new Date(Date.now() + input.minutes * 60_000);

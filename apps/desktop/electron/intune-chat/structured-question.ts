@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
+import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite-store.js";
 
 /**
@@ -296,11 +297,12 @@ export function structuredQueryForQuestion(input: {
   question: string;
   generatedAt: string;
   previous?: ChatResultContext;
+  timestampLocale?: ChatDateTimeLocale;
 }): StructuredDeviceQuery | undefined {
   const text = shapeText(input.question);
   if (!text) return undefined;
   if (input.previous) {
-    const followUp = followUpQuery(text, input.previous, input.generatedAt);
+    const followUp = followUpQuery(text, input.previous, input.generatedAt, input.timestampLocale);
     if (followUp !== "none") return followUp;
   }
   return countQuery(text, input.generatedAt) ?? listQuery(text, input.generatedAt);
@@ -368,7 +370,7 @@ function listQuery(text: string, generatedAt: string): StructuredDeviceQuery | u
 }
 
 /** A follow-up query, undefined for a follow-up the shapes cannot answer, or "none" when the text is no follow-up. */
-function followUpQuery(text: string, previous: ChatResultContext, generatedAt: string): StructuredDeviceQuery | undefined | "none" {
+function followUpQuery(text: string, previous: ChatResultContext, generatedAt: string, timestampLocale?: ChatDateTimeLocale): StructuredDeviceQuery | undefined | "none" {
   let added: Part[];
   let switching = false;
   const breakdown: string[] = [];
@@ -424,7 +426,7 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
     return {
       kind: "count",
       resource: previous.resource,
-      scopeLabel: describeFilters(filters),
+      scopeLabel: describeFilters(filters, timestampLocale),
       filters,
       // A per OS split of one OS says nothing; it is dropped once the set is one OS.
       breakdown: inFocus && !inScope ? shape.breakdown : shape.breakdown.filter((entry) => entry !== field),
@@ -459,14 +461,17 @@ function followUpQuery(text: string, previous: ChatResultContext, generatedAt: s
 }
 
 /** A plain label for a filtered device set, such as "Intune managed macOS devices not compliant". */
-function describeFilters(filters: readonly GraphCacheQueryPredicate[]): string {
+function describeFilters(filters: readonly GraphCacheQueryPredicate[], timestampLocale?: ChatDateTimeLocale): string {
   const os = OS_FILTERS.find((entry) => filters.some((filter) => JSON.stringify(filter) === JSON.stringify(entry.predicate)))?.label;
   const state = filters.find((filter) => filter.field === "complianceState")?.value;
   const sync = filters.find((filter) => filter.field === "lastSyncDateTime");
+  const syncDate = typeof sync?.value === "string"
+    ? formatChatDateTime(new Date(sync.value), { ...timestampLocale, dateOnly: true })
+    : undefined;
   const base = `Intune managed ${os ? `${os} ` : ""}devices`;
   const parts = [
     state === "noncompliant" ? "not compliant" : state === "inGracePeriod" ? "in grace period" : state === "compliant" ? "compliant" : undefined,
-    sync && typeof sync.value === "string" ? `${sync.op === "lt" ? "not synced" : "synced"} since ${localDate(sync.value)}` : undefined,
+    sync && syncDate ? `${sync.op === "lt" ? "not synced" : "synced"} since ${syncDate}` : undefined,
   ].filter(Boolean);
   return parts.length ? `${base} ${parts.join(", ")}` : base;
 }
@@ -545,23 +550,19 @@ function groupText(group: Record<string, number> | undefined): string {
 
 const FIELD_WORDS: Record<string, string> = { operatingSystem: "per OS", complianceState: "per compliance state" };
 
-/** Intune reports a device that never synced as 0001-01-01T00:00:00Z; any time before 1971 is read as no sync. */
-function syncReported(iso: string): boolean {
-  const time = new Date(iso).getTime();
-  return !Number.isFinite(time) || new Date(time).getUTCFullYear() >= 1971;
+/** A sync time that does not parse at all, as opposed to Intune's never-synced 0001-01-01. */
+function syncUnreadable(iso: string): boolean {
+  return !Number.isFinite(new Date(iso).getTime());
 }
 
-/** A timestamp's date on this device: the same calendar the "today" and "this month" windows use. */
-function localDate(iso: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return iso.slice(0, 10);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function rowLine(row: ComputedListedRow): string {
-  const details = [row.operatingSystem, row.complianceState, row.lastSyncDateTime ? (syncReported(row.lastSyncDateTime) ? `last sync ${localDate(row.lastSyncDateTime)}` : "no sync reported") : undefined].filter(Boolean);
-  return `- ${row.name}${details.length ? ` (${details.join(", ")})` : ""}`;
+function rowLine(row: ComputedListedRow, timestampLocale?: ChatDateTimeLocale): string {
+  const details = [row.operatingSystem, row.complianceState];
+  if (row.lastSyncDateTime) {
+    const date = formatDeviceSyncDate(row.lastSyncDateTime, timestampLocale);
+    details.push(date ? `last sync ${date}` : syncUnreadable(row.lastSyncDateTime) ? "no readable sync time" : "no sync reported");
+  }
+  const reported = details.filter(Boolean);
+  return `- ${row.name}${reported.length ? ` (${reported.join(", ")})` : ""}`;
 }
 
 /** Runs a structured query over the cache. Every number is counted in SQL over all cached rows. */
@@ -571,12 +572,14 @@ export function computeStructuredResult(input: {
   query: StructuredQuery;
   cacheStatus: readonly GraphCacheResourceStatus[];
   generatedAt: string;
+  timestampLocale?: ChatDateTimeLocale;
 }): ComputedResult | undefined {
   const { store, tenantId, query } = input;
   const status = input.cacheStatus.find((entry) => entry.resource === query.resource);
   const snapshot = snapshotOf(status);
   if (!status?.refreshedAt) return undefined;
-  if (query.kind === "device-detail") return computeDeviceDetail(input.store, tenantId, query, snapshot, input.generatedAt);
+  const refreshTime = formatCacheRefreshTime(status.refreshedAt, input.timestampLocale);
+  if (query.kind === "device-detail") return computeDeviceDetail(input.store, tenantId, query, snapshot, input.generatedAt, refreshTime, input.timestampLocale);
 
   const listSet = query.list && !query.focus;
   const ids = query.ids ? { ids: query.ids } : {};
@@ -646,10 +649,10 @@ export function computeStructuredResult(input: {
     const showOs = os && (Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 || (query.followUp !== undefined && query.breakdown.includes("operatingSystem")));
     const parts = [...(showOs ? [os] : []), ...focusBreakdown];
     facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length ? ":" : "."}`);
-    facts.push(...focusRows.map(rowLine));
+    facts.push(...focusRows.map(row => rowLine(row, input.timestampLocale)));
     if (focusCount.total > focusRows.length) facts.push(`${focusCount.total - focusRows.length} more match and are not listed.`);
   } else if (listSet) {
-    facts.push(...rows.map(rowLine));
+    facts.push(...rows.map(row => rowLine(row, input.timestampLocale)));
     if (counted.total > rows.length) facts.push(`${counted.total - rows.length} more match and are not listed.`);
   }
   // A sync window counts devices with a reported sync time; those without one are said, not silently left out.
@@ -661,11 +664,11 @@ export function computeStructuredResult(input: {
     if (unknown > 0) facts.push(`${unknown} ${unknown === 1 ? "device has" : "devices have"} no reported sync time and ${unknown === 1 ? "is" : "are"} not counted in the sync window.`);
   }
   // A failed latest refresh is said, as the direct answers say it: these counts are older evidence.
-  if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
-  facts.push(`Counted from the Intune device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
+  if (snapshot?.lastError) facts.unshift(`The latest refresh failed, so these counts are from the snapshot refreshed ${refreshTime ?? "earlier"}.`);
+  facts.push(`Counted from the Intune device cache${refreshTime ? ` refreshed ${refreshTime}` : ""}${snapshot?.partial ? "; the cache does not hold every device, so these counts cover the cached part only" : ""}.`);
 
   // Built from the filters, so a chain of follow-ups reads "Intune managed Windows devices not compliant".
-  const listedLabel = describeFilters(dedupe(listedFilters));
+  const listedLabel = describeFilters(dedupe(listedFilters), input.timestampLocale);
   return {
     kind: "count",
     resource: query.resource,
@@ -704,6 +707,8 @@ function computeDeviceDetail(
   query: DeviceDetailQuery,
   snapshot: ComputedResult["snapshot"],
   generatedAt: string,
+  refreshTime: string | undefined,
+  timestampLocale?: ChatDateTimeLocale,
 ): ComputedResult | undefined {
   // The asked name is resolved again in the snapshot that answers, as the first lookup did it: a refresh in this
   // turn can have renamed the device, added another of that name, or added the whole name ("Device Lab" next to
@@ -717,9 +722,9 @@ function computeDeviceDetail(
   if (!row) return undefined;
   const facts: string[] = [];
   // A failed latest refresh is said, as the computed counts say it: this state is older evidence.
-  if (snapshot?.lastError) facts.push(`The latest refresh failed, so this is the device's state in the snapshot refreshed ${snapshot.refreshedAt ?? "earlier"}.`);
+  if (snapshot?.lastError) facts.push(`The latest refresh failed, so this is the device's state in the snapshot refreshed ${refreshTime ?? "earlier"}.`);
   const state = row.complianceState ?? "not reported";
-  facts.push(`${row.name}${row.operatingSystem ? ` (${row.operatingSystem})` : ""} is marked ${state} in the Intune device cache${snapshot?.refreshedAt ? ` refreshed ${snapshot.refreshedAt}` : ""}.`);
+  facts.push(`${row.name}${row.operatingSystem ? ` (${row.operatingSystem})` : ""} is marked ${state} in the Intune device cache${refreshTime ? ` refreshed ${refreshTime}` : ""}.`);
   // Only a failing state has a failed rule to look up; for any other state the question's premise is corrected first.
   const premise = FAILING_COMPLIANCE_STATES.has(state)
     ? undefined
@@ -738,13 +743,16 @@ function computeDeviceDetail(
         : ["The cached data does not include per policy compliance results for this device. Open the device in Intune, Device compliance, to see each policy's state."];
   if (premise) facts.push(premise);
   facts.push(...notInData);
-  if (row.lastSyncDateTime && syncReported(row.lastSyncDateTime)) {
-    const lastSyncDate = localDate(row.lastSyncDateTime);
+  const lastSyncDate = row.lastSyncDateTime ? formatDeviceSyncDate(row.lastSyncDateTime, timestampLocale) : undefined;
+  if (row.lastSyncDateTime && lastSyncDate) {
     const days = Math.floor((new Date(generatedAt).getTime() - new Date(row.lastSyncDateTime).getTime()) / MS_PER_DAY);
     const age = Number.isFinite(days) && days >= 0 ? `, ${days} ${days === 1 ? "day" : "days"} before this answer` : "";
     // An old sync is a lead for a device short of a policy; a recent one, or any sync of a compliant device, is plain context.
     const lead = (FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod") && Number.isFinite(days) && days >= STALE_SYNC_LEAD_DAYS;
     facts.push(`${lead ? "Lead in the data: the last sync" : "The last sync"} was on ${lastSyncDate}${age}.`);
+  } else if (row.lastSyncDateTime && syncUnreadable(row.lastSyncDateTime)) {
+    // Not Intune's never-synced marker: the cached value is not a time at all, so neither a date nor "no sync" is claimed.
+    facts.push("The cached last sync time for this device is not readable.");
   } else if (row.lastSyncDateTime) {
     facts.push(FAILING_COMPLIANCE_STATES.has(state) || state === "inGracePeriod" ? "Lead in the data: Intune reports no sync for this device." : "Intune reports no sync for this device.");
   } else {
@@ -848,11 +856,12 @@ export function planStructuredQuery(input: {
   question: string;
   generatedAt: string;
   previous?: ChatResultContext;
+  timestampLocale?: ChatDateTimeLocale;
   store: IntelligenceSqliteStore;
   tenantId: string;
 }): StructuredQuery | undefined {
   return deviceComplianceReasonQuery(input.question, input.store, input.tenantId)
-    ?? structuredQueryForQuestion({ question: input.question, generatedAt: input.generatedAt, ...(input.previous ? { previous: input.previous } : {}) });
+    ?? structuredQueryForQuestion({ question: input.question, generatedAt: input.generatedAt, previous: input.previous, timestampLocale: input.timestampLocale });
 }
 
 /** The stored follow-up context of a conversation, when it belongs to this tenant. */

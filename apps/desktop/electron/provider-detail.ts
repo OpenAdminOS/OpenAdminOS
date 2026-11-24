@@ -11,7 +11,8 @@ import {
   isRefusedRedirect,
   modelServerRedirect,
   redirectRefusedDetail,
-  isConnectionRefused,
+  describeModelServerCheckFailure,
+  modelServerHttpFailure,
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
   probeCodexLlm,
@@ -21,9 +22,12 @@ import {
   type CliProbe,
   probeLemonadeLlm,
   probeLmStudioLlm,
+  beginOllamaModelRead,
+  recordOllamaModelList,
   resolveLemonadeEndpoint,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
+  ollamaHostEndpoint,
   type LmStudioEndpointTrust,
   type LmStudioProbeResult,
   type LmStudioProviderOptions,
@@ -46,7 +50,10 @@ export const providerIds = new Set<ProviderId>(
 export interface OllamaTagsResponse {
   models?: Array<{
     name?: string;
+    /** Some Ollama versions name an entry here instead of in name. */
+    model?: string;
     digest?: string;
+    details?: { family?: string };
     /** Set for a model whose prompts this server sends to another host (Ollama Cloud, remote aliases). */
     remote_model?: string;
     remote_host?: string;
@@ -96,6 +103,10 @@ async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item:
   return results;
 }
 
+function isRemoteOllamaTag(entry: NonNullable<OllamaTagsResponse["models"]>[number], model: string): boolean {
+  return Boolean(entry.remote_host || entry.remote_model || isOllamaCloudModel(model));
+}
+
 /**
  * Whether Ollama runs this model on this device right now, from a fresh
  * /api/tags read (model metadata only; nothing is loaded). False when the
@@ -103,25 +114,36 @@ async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item:
  * remote-backed, or the list cannot be read: an on-device retry that cannot
  * be confirmed is not sent.
  */
-export async function ollamaModelIsOnDevice(model: string): Promise<boolean> {
-  const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
-  if (!classifyOllamaEndpoint(endpoint).isLocal || isOllamaCloudModel(model)) return false;
+export async function ollamaModelIsOnDevice(model: string, address = resolveOllamaEndpoint()): Promise<boolean> {
+  return (await readLocalOllamaModelCloud(model, address)) === false;
+}
+
+/** True for a cloud model, false for an installed local model, undefined if unverifiable. */
+export async function readLocalOllamaModelCloud(model: string, address = resolveOllamaEndpoint()): Promise<boolean | undefined> {
+  const endpoint = address.replace(/\/$/, "");
+  if (!classifyOllamaEndpoint(endpoint).isLocal) return undefined;
+  if (isOllamaCloudModel(model)) return true;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
   try {
     const response = await fetchLocal(`${endpoint}/api/tags`, { signal: controller.signal });
-    if (!response.ok) return false;
+    if (!response.ok) return undefined;
     const payload = (await response.json()) as OllamaTagsResponse;
-    const entry = payload.models?.find((candidate) => candidate.name === model);
-    return Boolean(entry && !entry.remote_host && !entry.remote_model);
+    const entry = payload.models?.find((candidate) => (candidate.name ?? candidate.model) === model);
+    return entry ? isRemoteOllamaTag(entry, model) : undefined;
   } catch {
-    return false;
+    return undefined;
   } finally {
     clearTimeout(timeout);
   }
 }
 
 export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const endpointSetting = process.env.OPENAGENTS_OLLAMA_URL !== undefined
+    ? "OPENAGENTS_OLLAMA_URL"
+    : ollamaHostEndpoint(process.env.OLLAMA_HOST) !== undefined
+      ? "OLLAMA_HOST"
+      : undefined;
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
   if (options.localOnly && !endpointTrust.isLocal) {
@@ -140,7 +162,9 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
   // With a budget (a scan check), the tags request and the capability reads share it.
   const deadline = options.timeoutMs !== undefined ? Date.now() + options.timeoutMs : undefined;
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? OLLAMA_TAGS_TIMEOUT_MS);
-  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+  const abortFromCaller = () => controller.abort();
+  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (options.signal?.aborted) abortFromCaller();
   const trustedProvider = endpointTrust.isLocal
     ? provider
     : {
@@ -150,10 +174,13 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         isLocal: false,
       };
 
+  const tagsUrl = `${endpoint}/api/tags`;
+  let httpStatus: number | undefined;
   try {
-    const response = await fetchLocal(`${endpoint}/api/tags`, {
-      signal: controller.signal,
-    });
+    // Numbered before it is sent, so an adapter's read that starts later wins.
+    const modelRead = beginOllamaModelRead();
+    const response = await fetchLocal(tagsUrl, { signal: controller.signal });
+    httpStatus = response.status;
 
     if (!response.ok) {
       return {
@@ -162,7 +189,9 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         checkFailed: true,
         detail: ollamaEndpointDetail(
           endpointTrust,
-          isRefusedRedirect(response, `${endpoint}/api/tags`) ? redirectRefusedDetail("Ollama", `${endpoint}/api/tags`) : `Ollama responded with HTTP ${response.status}`,
+          isRefusedRedirect(response, tagsUrl)
+            ? redirectRefusedDetail("Ollama", tagsUrl)
+            : modelServerHttpFailure("Ollama", endpoint, response.status, { isLocal: endpointTrust.isLocal }),
         ),
         models: [],
       };
@@ -170,8 +199,17 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
 
     const payload = (await response.json()) as OllamaTagsResponse;
     clearTimeout(timeout);
-    const installed =
-      payload.models?.filter((model): model is { name: string; digest?: string; remote_model?: string; remote_host?: string } => Boolean(model.name)) ?? [];
+    if (!Array.isArray(payload?.models)) throw new TypeError("The model list has an unexpected shape.");
+    const installed = payload.models.map((model) => {
+      const name = model?.name ?? model?.model;
+      if (typeof name !== "string" || !name.trim()) throw new TypeError("A model has no name.");
+      return { ...model, name };
+    });
+    // The family sets the think value Chat and runs send to each model. The
+    // list is read on every check, so a model replaced under the same name,
+    // or restored to a digest seen before, never keeps an old family.
+    // A model missing from the list is forgotten, so one installed later under its name starts fresh.
+    recordOllamaModelList(endpoint, installed, modelRead);
     const installedModels = installed.map((model) => model.name);
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.
@@ -209,7 +247,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const models = installedModels.filter((_, i) => supported[i]);
     // A remote-backed model is listed like a local one, but its prompts leave this device.
     const remoteModels = installed
-      .filter((model) => Boolean(model.remote_host || model.remote_model) && models.includes(model.name))
+      .filter((model) => models.includes(model.name) && isRemoteOllamaTag(model, model.name))
       .map((model) => model.name);
     const capabilityWarning = models.length > 0 && redirectedShow
       ? `Some model capabilities could not be verified. ${redirectedShow} Check Ollama's endpoint and refresh providers.`
@@ -230,35 +268,29 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
             : "Ollama has no text-generation models available. Install a text-generation model, then refresh providers.",
       ),
       models,
-      defaultModel: models[0],
+      defaultModel: models.find((model) => !remoteModels.includes(model)) ?? models[0],
       ...(remoteModels.length > 0 ? { remoteModels } : {}),
     };
   } catch (error) {
-    // Only a refused connection means Ollama is not running. A timeout, a
-    // stopped check or an unreadable response is a failed check.
-    if (isConnectionRefused(error)) {
-      return {
-        ...trustedProvider,
-        status: "not-installed",
-        // Settings and the scan read the same answer: installed on this device, server not running.
-        ...(endpointTrust.isLocal && (await installedOnDisk("ollama")) ? { installed: true } : {}),
-        detail: ollamaEndpointDetail(endpointTrust, `Ollama is not reachable on ${endpoint}`),
-        models: [],
-      };
-    }
-    const timedOut = error instanceof Error && error.name === "AbortError";
+    const { notRunning, detail } = describeModelServerCheckFailure({
+      name: "Ollama",
+      endpoint,
+      endpointSetting,
+      defaultPort: "11434",
+      isLocal: endpointTrust.isLocal,
+      startHint: "Start Ollama with ollama serve, then try again.",
+    }, error, { httpStatus, stopped: options.signal?.aborted });
     return {
       ...trustedProvider,
-      status: "error",
-      checkFailed: true,
-      detail: ollamaEndpointDetail(
-        endpointTrust,
-        timedOut ? `Ollama on ${endpoint} did not answer in time.` : `Ollama on ${endpoint} answered with a response OpenAdminOS could not read.`,
-      ),
+      status: notRunning ? "not-installed" : "error",
+      ...(notRunning ? {} : { checkFailed: true }),
+      ...(notRunning && (await installedOnDisk("ollama")) ? { installed: true } : {}),
+      detail: ollamaEndpointDetail(endpointTrust, detail),
       models: [],
     };
   } finally {
     clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -383,7 +415,6 @@ async function checkLocalOpenAiServer(
         isLocal: false,
       };
   const probe = await server.probe({
-    endpoint,
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
   });
@@ -396,7 +427,9 @@ async function checkLocalOpenAiServer(
       ...(probe.status !== "error" && endpointTrust.isLocal && (await installedOnDisk(server.id)) ? { installed: true } : {}),
       detail: lmStudioEndpointDetail(
         endpointTrust,
-        (probe.status === "not-running" ? server.notRunningHint?.() : undefined) ?? probe.detail ?? server.notRunningDetail,
+        probe.status === "not-running" && server.notRunningHint
+          ? `The connection to ${server.name} on ${endpoint} was refused. ${server.notRunningHint()}`
+          : probe.detail ?? server.notRunningDetail,
       ),
       models: probe.models,
       defaultModel: probe.defaultModel,
@@ -481,7 +514,7 @@ export function ollamaEndpointDetail(
   detail: string,
 ): string {
   if (endpointTrust.isLocal) return detail;
-  return `${detail}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
+  return `${detail.replace(/\.$/, "")}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
 }
 
 
@@ -491,7 +524,7 @@ export function lmStudioEndpointDetail(
   detail: string,
 ): string {
   if (endpointTrust.isLocal) return detail;
-  return `${detail}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
+  return `${detail.replace(/\.$/, "")}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
 }
 
 

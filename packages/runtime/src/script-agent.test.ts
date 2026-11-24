@@ -8,6 +8,8 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { exec } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -27,8 +29,20 @@ import {
   agentTemplateToModule,
   parseAgentTemplate,
 } from "./agent-template.js";
+import { reasoningWithoutAnswerInChain } from "./llm-ollama.js";
 import { endedOnSizeRefusal, scriptAgentTemplateToModule } from "./script-agent.js";
 import type { SandboxRunInput, SandboxRunner } from "./sandbox.js";
+
+/**
+ * Stderr as Node writes it for an uncaught exception with this header and
+ * message, and the exit record the run's hook writes for it, with the broker
+ * request id the error carries, as the bundled scripts set it.
+ */
+const uncaught = (input: SandboxRunInput, text: string, brokerRequestId?: string) => {
+  const message = text.replace(/^[A-Za-z]*Error: /, "");
+  writeFileSync(input.env!.OPENADMINOS_EXIT_RECORD!, JSON.stringify(brokerRequestId ? { message, brokerRequestId, brokerErrorMessage: message } : { message }));
+  return `file:///agent.mjs:1\nthrow error;\n^\n\n${text}\n    at main (file:///agent.mjs:1:1)\n\nNode.js v22.0.0`;
+};
 
 describe("script-backed MXC agents", () => {
   it("runs a read agent through the sandbox runner and host broker", async () => {
@@ -365,6 +379,64 @@ definition:
     });
   });
 
+  it("lets the recorded broker failure the script ended on decide over the output's size refusal", async () => {
+    const reasoning = Object.assign(
+      new Error('Ollama returned only reasoning from "context-too-small:latest" and no answer.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    const timeout = new Error('Ollama timed out after 180000ms for "tokens of context:latest".');
+    const refusal = { code: "context-too-small" as const, promptTokens: 20_000, answerTokens: 100, neededTokens: 20_100, limitTokens: 16_384, model: "m" };
+    for (const [first, expected] of [[reasoning, "reasoning"], [timeout, "none"]] as const) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-terminal-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const one = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          // A later request is refused for its size; the script ends on the first failure.
+          await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-2", method: "llm.complete", params: { prompt: "Summarize more." } } satisfies SandboxBrokerRequest);
+          const stderr = uncaught(input, `Error: llm.complete: ${one.ok ? "" : one.error.message}`, "llm-1");
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      let calls = 0;
+      ctx.llm = { ...ctx.llm, complete: async () => { calls += 1; throw calls === 1 ? first : new ContextTooSmallError(refusal); } };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error);
+      assert.equal(error instanceof ContextTooSmallError, false, expected);
+      assert.equal(reasoningWithoutAnswerInChain(error), expected === "reasoning", expected);
+    }
+  });
+
   it("reads only the error the script ended on", () => {
     const refusal = "Error: llm.complete: This request needs about 20,100 tokens of context (20,000 for the prompt and 100 for the answer), but m accepts 16,384.";
     assert.equal(endedOnSizeRefusal(`${refusal}\n    at main (agent.mjs:4:1)\n\nNode.js v22.23.5`), true);
@@ -374,6 +446,240 @@ definition:
     const thrown = (value: string) => `file:///work/agent.mjs:9\n  throw ${value};\n  ^\n\n${value}\n(Use \`node --trace-uncaught ...\` to show where the exception was thrown)`;
     assert.equal(endedOnSizeRefusal(`${refusal}\n${thrown("fallback failed")}`), false, "a string thrown after a logged refusal");
     assert.equal(endedOnSizeRefusal(`file:///work/agent.mjs:4\n  const llm = await brokerRequest(...);\n  ^\n\n${refusal}\n    at main (agent.mjs:4:1)`), true);
+  });
+
+  it("keeps a brokered model reply with reasoning and no answer the script exited on as the cause", async () => {
+    const failure = Object.assign(
+      new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    for (const [exitOnModel, readAfter] of [[true, false], [true, true], [false, false]] as const) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-reasoning-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          assert.equal(llm.ok, false);
+          // A brokered read after the model failure, as in a finally block.
+          if (readAfter) await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "read-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices" } } satisfies SandboxBrokerRequest);
+          const stderr = exitOnModel ? uncaught(input, `Error: llm.complete: ${llm.error?.message}`, "llm-1") : uncaught(input, "Error: result file could not be written");
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      ctx.llm.complete = async () => { throw failure; };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /^MXC script agent "script-auditor" failed: /);
+      assert.equal(reasoningWithoutAnswerInChain(error), exitOnModel);
+    }
+  });
+
+  it("keeps the cause the script exited with when its output carries a model failure and a Graph denial", async () => {
+    const reasoning = Object.assign(
+      new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    const denial = new GraphAccessDeniedError({ method: "GET", path: "/deviceManagement/managedDevices", requiredScopes: ["DeviceManagementManagedDevices.Read.All"], grantedScopes: [] });
+    for (const exitOn of ["model", "graph"] as const) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-both-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), "process.exit(1);\n");
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          const dir = input.env!.OPENADMINOS_BROKER_DIR!;
+          const llm = await requestViaBrokerDir(dir, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          const graph = await requestViaBrokerDir(dir, { id: "graph-1", method: "graph.request", params: { method: "GET", path: "/deviceManagement/managedDevices", query: { $select: "id,deviceName" } } } satisfies SandboxBrokerRequest);
+          assert.equal(llm.ok, false);
+          assert.equal(graph.ok, false);
+          const model = `llm.complete: ${llm.error?.message}`;
+          const read = `graph.request: ${graph.error?.message}`;
+          // The cleanup read's denial is logged, then the script rethrows its error, or the other way round.
+          const stderr = exitOn === "model" ? `Warning: ${read}\n${uncaught(input, `Error: ${model}`, "llm-1")}` : `Warning: ${model}\n${uncaught(input, `Error: ${read}`, "graph-1")}`;
+          return { exitCode: 1, signal: null, stdout: "", stderr };
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      ctx.llm.complete = async () => { throw reasoning; };
+      ctx.graph.request = async () => { throw denial; };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error);
+      assert.equal(reasoningWithoutAnswerInChain(error), exitOn === "model", exitOn);
+      assert.equal(graphAccessDenialFromError(error)?.cause, exitOn === "graph" ? "missing-consent" : undefined, exitOn);
+    }
+  });
+
+  it("reads the error a real script process ended with from its own exit record", async () => {
+    const reasoning = Object.assign(
+      new Error('Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.'),
+      { name: "OllamaReasoningWithoutAnswerError" },
+    );
+    const carried = JSON.stringify(`llm.complete: ${reasoning.message}`);
+    const caretNote = JSON.stringify("config.json:3\n  \"model\": gpt-oss\n           ^\n");
+    const timeout = new Error("Ollama timed out after 180000ms at http://127.0.0.1:11434/api/chat.");
+    const carriedTimeout = JSON.stringify(`llm.complete: ${timeout.message}`);
+    // With reuse, the script sent llm-1 twice: a timeout, then the reasoning failure.
+    const cases: Array<{ agent: string; cause: boolean; reuse?: boolean }> = [
+      // Throws the brokered failure with its request id.
+      { agent: `throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // A rejected promise carrying it.
+      { agent: `await Promise.reject(Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }));`, cause: true },
+      // The failure was handled; a fresh error of the script's own has the same text but no request id.
+      { agent: `throw new Error(${carried});`, cause: false },
+      // The script prints a diagnostic with a caret, then throws the failure carrying the request id, as the bundled scripts set it.
+      { agent: `console.error(${caretNote}); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // An error carrying the request id with a message of its own is not the failure.
+      { agent: `throw Object.assign(new Error(${caretNote} + "\\n" + ${carried}), { brokerRequestId: "llm-1" });`, cause: false },
+      // The reasoning failure was caught; the same id then got an answer the broker never handled (a refused request file).
+      { agent: `throw Object.assign(new Error("llm.complete: Broker request file id must match the JSON request id."), { brokerRequestId: "llm-1" });`, cause: false },
+      // Wrapped: the failure with its request id is the cause of the error the script throws.
+      { agent: `throw new Error("summary step failed", { cause: Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }) });`, cause: true },
+      // An error of the script's own that only quotes the failure.
+      { agent: `throw new Error("ENOSPC: could not write the fallback report after " + ${carried});`, cause: false },
+      // Handled by a capture callback, then a later explicit exit.
+      { agent: `process.setUncaughtExceptionCaptureCallback((error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
+      // Prints a diagnostic with a caret, logs the failure it caught, and exits.
+      { agent: `console.error(${caretNote}); console.error(new Error(${carried})); process.exit(1);`, cause: false },
+      // A fatal error listener that logs and rethrows the failure: the error that escapes it is the one the script ended with.
+      { agent: `process.on("uncaughtException", (error) => { console.error("fatal"); throw error; }); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // A monitor listener of the script's own that throws: Node ends on that error.
+      { agent: `process.on("uncaughtExceptionMonitor", () => { throw new Error("monitor failed"); }); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: false },
+      // A monitor listener that only logs: the failure stays the one the script ended with.
+      { agent: `process.on("uncaughtExceptionMonitor", (error) => console.error("monitor", error.message)); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // A capture callback that rethrows the failure.
+      { agent: `process.setUncaughtExceptionCaptureCallback((error) => { throw error; }); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: true },
+      // A listener that throws an error of its own instead.
+      { agent: `process.on("uncaughtException", () => { throw new Error("cleanup failed"); }); throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });`, cause: false },
+      // Handles the failure with its own listener, carries on, and exits later.
+      { agent: `process.on("uncaughtException", (error) => console.error(error.message)); setTimeout(() => process.exit(1), 20); throw new Error(${carried});`, cause: false },
+      // A Worker started from a file, which loads the hook too, fails with it; the script handles that and exits for another reason.
+      { agent: `import { Worker } from "node:worker_threads"; const worker = new Worker(new URL("./worker.mjs", import.meta.url)); worker.on("error", () => setTimeout(() => process.exit(1), 50));`, cause: false },
+      // Logs the failure, then ends on an error of its own.
+      { agent: `console.error(new Error(${carried})); throw new Error("ENOSPC: no space left on device, write");`, cause: false },
+      // A reused id, the reasoning failure wrapped: the error carrying the id decides.
+      { agent: `throw new Error("Could not write summary", { cause: Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" }) });`, cause: true, reuse: true },
+      // A reused id, the earlier timeout wrapped and rethrown.
+      { agent: `throw new Error("Could not write summary", { cause: Object.assign(new Error(${carriedTimeout}), { brokerRequestId: "llm-1" }) });`, cause: false, reuse: true },
+    ];
+    for (const testCase of cases) {
+      const tempRoot = await mkdtemp(path.join(tmpdir(), "openadminos-script-exit-"));
+      const agentDir = path.join(tempRoot, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(path.join(agentDir, "agent.mjs"), `${testCase.agent}\n`);
+      await writeFile(path.join(agentDir, "worker.mjs"), `throw Object.assign(new Error(${carried}), { brokerRequestId: "llm-1" });\n`);
+      const runner: SandboxRunner = {
+        id: "mxc",
+        probe: async () => ({ backend: "mxc", status: "available", experimentalEnabled: true, supported: true, detail: "test" }),
+        run: async (input) => {
+          if (testCase.reuse) {
+            const first = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+            assert.equal(first.ok, false);
+          }
+          const llm = await requestViaBrokerDir(input.env!.OPENADMINOS_BROKER_DIR!, { id: "llm-1", method: "llm.complete", params: { prompt: "Summarize." } } satisfies SandboxBrokerRequest);
+          assert.equal(llm.ok, false);
+          // The command line the app builds, run by a real Node process.
+          return await new Promise((resolve) => {
+            exec(input.commandLine, { cwd: input.cwd, env: input.env }, (error, stdout, stderr) => {
+              resolve({ exitCode: error ? (typeof error.code === "number" ? error.code : 1) : 0, signal: null, stdout, stderr });
+            });
+          });
+        },
+      };
+      const manifest = parseAgentTemplate(`
+descriptor:
+  id: script-auditor
+  name: Script Auditor
+  description: Test script auditor.
+  version: 0.1.0
+  author:
+    name: OpenAdminOS
+  category: devices
+  mode: read
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+skills:
+  - id: summarize
+    format: llm
+    label: Summarize
+    settings:
+      prompt: Summarize.
+definition:
+  result:
+    summary: Script result.
+`);
+      const module = scriptAgentTemplateToModule(manifest, agentDir, { sandboxRunner: runner, tempRoot, nodePath: process.execPath });
+      const ctx = fakeRunContext();
+      const replies = testCase.reuse ? [timeout, reasoning] : [reasoning];
+      ctx.llm.complete = async () => { throw replies.length > 1 ? replies.shift()! : replies[0]!; };
+      const error = await module.run(ctx).then(() => undefined, (thrown: unknown) => thrown);
+      assert.ok(error instanceof Error, testCase.agent);
+      assert.equal(reasoningWithoutAnswerInChain(error), testCase.cause, testCase.agent);
+    }
   });
 
   it("refuses direct template-module conversion for script agents", () => {

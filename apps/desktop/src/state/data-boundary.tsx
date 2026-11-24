@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import {
   createContext,
   useContext,
@@ -85,11 +86,12 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
   const activeTenant = state.activeTenantId
     ? tenantsNamedByOrganization(state).find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
-  const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
+  const endpoint = state.providers.find((entry) => entry.id === state.activeProviderId);
   const resolved = resolveProviderDefaultModel(
-    provider,
+    endpoint,
     state.activeModelByProviderId,
   ).model;
+  const provider = providerForModel(endpoint, resolved);
   // Shown as admins know it ("Copilot Fusion High"), not as its id.
   const model = resolved ? providerModelLabel(provider, resolved) : undefined;
   const modelNote = provider && resolved ? modelTrustNote(provider.id, resolved) : undefined;

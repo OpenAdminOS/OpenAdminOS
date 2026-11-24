@@ -188,14 +188,14 @@ it.each([
 it("does not read a context limit in what Ollama said as a failed lookup", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: out of memory at the requested context limit" };
   render(<RunFailureRemediation run={run} />);
-  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
   expect(screen.queryByText("Ollama did not report the model's context limit")).not.toBeInTheDocument();
 });
 
 it("does not read a 403 in what Ollama said as a Graph denial", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: cudaMalloc failed: out of memory (403 MiB)" };
   render(<RunFailureRemediation run={run} />);
-  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
   expect(screen.queryByText(/Graph/)).not.toBeInTheDocument();
 });
 
@@ -206,7 +206,7 @@ it("ignores a Graph denial an older build saved from what Ollama said", () => {
     accessDenial: legacyDenial(),
   };
   render(<RunFailureRemediation run={run} />);
-  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
   expect(screen.queryByText(classifyGraphAccessDenied({}).title)).not.toBeInTheDocument();
 });
 
@@ -224,15 +224,38 @@ it("keeps a stored Graph denial whose error only mentions the Ollama marker", ()
 it("does not pick a playbook from words in what Ollama said", () => {
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: CUDA allocation failed: invalid argument" };
   render(<RunFailureRemediation run={run} />);
-  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
   expect(screen.queryByText("Manifest validation failed")).not.toBeInTheDocument();
 });
 
-it("gives a memory failure with the kept context the context playbook", () => {
-  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. The next request starts from Ollama's default context size. Ollama said: model requires more system memory (24.1 GiB) than is available (12.0 GiB)" };
+it.each([
+  "Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: model requires more system memory",
+  "Ollama failed partway through an answer from gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: runner terminated",
+  "Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request. Ollama said: prompt is too long",
+  'MXC script agent "test" failed: Error: llm.complete: Ollama could not load gpt-oss:20b with the 45,056 token context size kept from an earlier request, usually because free memory ran out. Ollama said: out of memory',
+  "The proposal could not be checked against the tenant before applying, so nothing was applied. Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.",
+  "Nothing was applied: Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.",
+])("gives a kept context failure only its own playbook: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
   render(<RunFailureRemediation run={run} />);
-  expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
+  expect(screen.getByText(/^Re-run the same request.*default context size.*close other apps to free memory or pick a smaller model/)).toBeInTheDocument();
+  expect(screen.queryByText("Ollama context too small")).not.toBeInTheDocument();
   expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+});
+
+it("uses the kept context playbook for a typed Ollama overflow", () => {
+  const failureReason: ContextTooSmallFailure = {
+    code: "context-too-small", promptTokens: 44_033, answerTokens: 1_024, neededTokens: 45_057,
+    limitTokens: 45_056, model: "gpt-oss:20b", sentToProvider: true, ollamaKeptContext: true,
+  };
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z",
+    steps: [], logs: [], error: contextTooSmallMessage(failureReason), failureReason,
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Ollama failed with a kept context size")).toBeInTheDocument();
+  expect(screen.queryByText("Prompt larger than the model's context")).not.toBeInTheDocument();
 });
 
 it("gives the overall deadline during a streaming answer the Ollama generation playbook", () => {
@@ -352,10 +375,12 @@ it("shows the sizes and the load settings steps in the LM Studio playbook, which
 });
 
 it("does not give an Ollama context error the LM Studio playbook", () => {
-  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but qwen3:8b supports at most 40,960." };
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Ollama context size too small: This request needs 40,652 tokens of context, but qwen3:8b supports at most 40,960. Ollama said: Ollama could not load qwen3:8b with the 45,056 token context size kept from an earlier request, usually because free memory ran out." };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Ollama context too small")).toBeInTheDocument();
   expect(screen.queryByText("LM Studio context too small")).not.toBeInTheDocument();
+  expect(screen.getByText(/Narrow the question or the agent's scope/)).toBeInTheDocument();
+  expect(screen.queryByText("Ollama failed with a kept context size")).not.toBeInTheDocument();
 });
 
 it("keeps the LM Studio playbook for a model whose name mentions Ollama", () => {
@@ -376,4 +401,54 @@ it("shows Graph advice for a stored replan failure on a required Teams connector
   const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error: "Nothing was applied: Connector 'teams' failed its health check: Microsoft Graph rejected the request (HTTP 403). The signed-in admin lacks the required Teams scopes." };
   render(<RunFailureRemediation run={run} />);
   expect(screen.getByText("Graph access cause unverified")).toBeInTheDocument();
+});
+
+it("explains a reasoning-only Ollama reply instead of suggesting a model pull", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
+});
+
+it.each([
+  'Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.',
+])("gives the other reasoning-only Ollama reply the same recovery: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+});
+
+it("does not read a server body that mentions reasoning as a reasoning-only reply", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama responded with HTTP 500: proxy note: upstream returned only reasoning from "gpt-oss:20b" and no answer.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.queryByText("Model reasoned without answering")).not.toBeInTheDocument();
+});
+
+it("shows only the reasoning card for a model whose name matches another playbook", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: 'Ollama returned only reasoning from "gpt-oss-timeout" and no answer. Retry, or pick a model that answers without reasoning.',
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Ollama generation timed out")).not.toBeInTheDocument();
+  expect(screen.queryByText("Request timed out")).not.toBeInTheDocument();
+});
+
+it.each([
+  'The plan could not be checked against the tenant before applying, so nothing was applied. Ollama stopped "gpt-oss:20b" at the token limit while it was still reasoning, so there is no answer.',
+  'MXC script agent "intune-device-posture-auditor" failed: Error: llm.complete: Ollama returned only reasoning from "gpt-oss:20b" and no answer. Retry, or pick a model that answers without reasoning.',
+])("gives a wrapped reasoning-only failure its card from the recorded cause: %s", (error) => {
+  const run: RunRecord = { id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [], error, failureCause: "reasoning-without-answer" };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+  expect(screen.queryByText("Model not pulled")).not.toBeInTheDocument();
+  expect(screen.queryByText("No matching playbook")).not.toBeInTheDocument();
 });

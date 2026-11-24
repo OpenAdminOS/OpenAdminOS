@@ -3,6 +3,7 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 import {
   classifyOpenAiCompatibleEndpoint,
   createOpenAiCompatibleLlm,
+  fetchLocal,
   probeOpenAiCompatibleLlm,
   resolveOpenAiCompatibleEndpoint,
   type OpenAiCompatibleEndpointTrust,
@@ -27,12 +28,12 @@ const LEMONADE: OpenAiCompatibleServer = {
   timeoutEnv: "OPENADMINOS_LEMONADE_TIMEOUT_MS",
   noModelMessage:
     "No Lemonade model available. Download a chat model in Lemonade, then try again.",
-  notRunningDetail: "Lemonade isn't running. Start Lemonade Server, then try again.",
+  startHint: "Start Lemonade Server, then try again.",
   noModelsDetail: "Lemonade is running but has no chat model downloaded.",
   httpStatusDetail: (status) =>
     status === 401
       ? // TODO(ugur): send a Lemonade API key? Today the admin has to run the server without LEMONADE_API_KEY.
-        "Lemonade asks for an API key because LEMONADE_API_KEY is set where it runs. OpenAdminOS does not send Lemonade API keys, so start Lemonade without it, then try again."
+        "The server requires an API key. To connect from OpenAdminOS, unset LEMONADE_API_KEY, restart the server, then try again."
       : undefined,
   chatModelIds: lemonadeChatModelIds,
   unlistedModelMessage: lemonadeUnlistedModelMessage,
@@ -79,6 +80,22 @@ function isLemonadeCloudModel(model: OpenAiCompatibleModel): boolean {
     (typeof model.recipe === "string" && model.recipe.trim().toLowerCase().startsWith("cloud")) ||
     (model.cloud_provider !== undefined && model.cloud_provider !== null && model.cloud_provider !== "")
   );
+}
+
+/** The context Lemonade reports for a downloaded local chat model. */
+export async function readLemonadeContextWindow(endpoint: string, model: string): Promise<number | undefined> {
+  try {
+    const response = await fetchLocal(`${endpoint.replace(/\/$/, "")}/models`, { signal: AbortSignal.timeout(1500) });
+    if (!response.ok) return undefined;
+    const { data } = await response.json() as { data?: Array<OpenAiCompatibleModel & { context_length?: unknown }> };
+    if (!Array.isArray(data)) return undefined;
+    const entry = data.find((item) => item?.id === model);
+    if (!entry || !lemonadeChatModelIds([entry]).includes(model)) return undefined;
+    const limit = entry.context_length;
+    return typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0 ? limit : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function createLemonadeLlm(options: LemonadeProviderOptions = {}): RunLlmApi {

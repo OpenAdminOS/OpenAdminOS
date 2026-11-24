@@ -393,6 +393,97 @@ LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
 
+Reasoning models on Ollama (added 2026-11-21, PR #222). Every request sends
+`think: false`, except to gpt-oss, which ignores `false` and always reasons, so
+it gets `think: "low"`. The model family that provider detection reads from
+`/api/tags` on every check (`gptoss` or `gpt-oss`) decides, so a copy under
+another name, or a name replaced and restored, gets the right value before its
+first request; the chat path adds no `/api/show` call for a model the list
+names. Before each request, the
+app reads the model's entry from `/api/tags` (which loads no model; a name
+it does not list, such as a server alias, is read with `/api/show`, which
+reports the family of the model it points to; on Ollama 0.17, where
+`/api/show` does not know server aliases but Chat resolves them, a 404 there
+is followed by `GET /api/experimental/aliases` (an exact alias, else the
+longest prefix alias on the short name, then exact aliases from there, a
+cycle resolving to nothing); only which model the alias points to is kept,
+and the alias then resolves to that installed model like a lone `:local`
+does, so its family, version and limits are the target's when each send and
+lookup is made, while Chat still gets the alias; a list read without such a
+name keeps what `/api/show` showed, which only a "not found" from it clears; a
+list read overtaken by a newer one never skips that lookup,
+and without a digest a new `modified_at` counts as another version), so a model
+replaced under the name since the provider check, or between two requests of
+one answer, gets its own family and version; names are compared as Ollama
+resolves them (a `:local` after a tag is dropped; a lone `x:local` is
+`x:latest` on Ollama 0.18 and later, which drop the suffix, and the model
+tagged `local` before that, read from `/api/version` only for such a name
+(a failed read is tried once more; when both fail, the name is read as
+current Ollama does until a read succeeds),
+before each send and retry, so an upgraded server is followed; a version
+read that started before the newest one applied for the endpoint does not
+decide, and a newer one applied while the list was read does;
+what is known is kept under the installed model the name resolves to), a read that started before another is ignored, and the retry
+after a context overflow reads the family again. Every successful model list read,
+from the provider check or the adapter, is ignored when an older one than the
+last applied for the endpoint, and forgets what was learned about a model
+it no longer lists, also for a reply still in flight, and the fallback after a
+rejected level reads the list again. A family Ollama reported decides. For a model without
+one, Ollama's answers decide, per endpoint and model and only for the version
+(digest) the request was sent to and learned against: a rejected level (`think value ... is not
+supported`, `... does not support thinking`, or an older Ollama whose `think`
+is a Boolean only) is sent again with
+`false`, and reasoning streamed after `false` switches later requests to "low".
+The model is resolved again before that resend; when it now resolves to
+another model, that model's own value is sent instead and a rejection of it is
+handled the same way, at most two resends per request.
+Without either, the name decides. Reasoning a model writes inline in its
+content, in `<think>` blocks before any answer text (also split across
+chunks, nested, or never closed), is taken out of the answer as it streams;
+once the answer has started, a tag is its text (code that names one); a tag start the token limit cut off
+after reasoning is not an answer. The model list is read before context
+sizing; when the sizing lookup saw another revision (`modified_at`) than the
+list (compared to the nanosecond), the list is read and the request sized
+again, once. A think level resend to another model than the one the request
+was sized for sizes it again first, with its own timeout, and is refused when
+that model cannot take it; its think value is chosen after that lookup, and
+a context overflow on that resend is checked, and reported, against what the
+new lookup saw and the size that resend sent; a resend during the context
+retry keeps the retry's room, held to the new model's limits. The
+retry after a context overflow reads its lookup again when the list then
+names another revision or the name resolves to another installed model. A name that resolves to another
+installed model by the first send (an upgrade seen meanwhile) is sized again
+before the lookup refuses or sizes anything, so that model's own pin holds.
+The think value, version and family a send uses are taken right before it,
+and the chat request's timeout starts only then; the last
+resend after a rejected level always sends `false`, without remembering it
+when the model could not be confirmed. A reply with reasoning and no answer
+is never returned as the answer: it fails with
+`OllamaReasoningWithoutAnswerError`, naming the token limit when
+`done_reason` is `length`, before any completed chunk. A run records it as
+`failureCause: "reasoning-without-answer"`, also through a failed plan check
+before apply or a sandboxed script's exit (when the error the script ended with
+carries it; the script's Node process records that error through a hook the
+app loads with `--import`, in the launched process's main thread only and
+unless the script handles it itself (an error that escapes its
+`uncaughtException` or monitor listener, or capture callback, is recorded
+instead; the original only once the monitor listeners ran), with the broker
+request id it or its cause carries, which the bundled scripts set, and the
+message of the error carrying it; only a failure under that id with that
+message counts, also when the script wrapped it or reused the id, so an
+answer the broker never handled (a refused request file) is none; an error
+without an id is the script's own, even with the same text as a failure it
+handled, so the output is never parsed for it, and every matching failure must
+be this cause; that recorded failure also decides before the output is read
+for a context size refusal), and the failure panel shows only the
+"Model reasoned without answering" card; such a run gets no model fit offer
+from text that reads like a context limit, and Chat's compact loop fails the
+message with the cause instead of falling back to cached data. Chat shows a failed message with the
+cause, also when the model writing an MCP query reasoned without answering
+(other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
+cause, other summary failures keep the deterministic summary. The provider Test
+allows 64 tokens so a model that reasons first can still reply.
+
 LM Studio support uses its local OpenAI-compatible server at
 `http://127.0.0.1:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
 development override. Like Ollama, LM Studio is local only when the configured
@@ -555,8 +646,17 @@ lookup fails. Chat leaves it unset,
 so #211's raise still serves a larger request there. A kept `num_ctx` belongs
 to the model revision the lookup that chose it saw (`/api/show`
 `modified_at`), even when the request finishes after the model was created
-again; a model created again under the same name starts from its own settings. LM Studio reports none for now because its
-context fields could not be verified.
+again; a model created again under the same name starts from its own settings.
+When Ollama fails to load or answer with a kept context size, or refuses it
+without reporting token counts, the adapter drops the kept size. An uncounted
+refusal from a kept size carries `ollamaKeptContext: true` in its typed reason
+and names the kept size in the saved error. The run failure panel and schedule
+status advise re-running first. If the failure repeats, the advice is to free memory
+or choose a smaller model. The run page shows this recovery in place of the
+model-fit offer, including when an app error wraps the original failure or
+the run has a saved offer.
+LM Studio reports no context limit for now because its context fields could
+not be verified.
 
 The runtime's `estimateTokens` counts letters, digits, mixed ids,
 punctuation and line breaks separately. Calibrated against OpenAdmin 8B
@@ -575,8 +675,9 @@ Agent prompts carry summaries, not inventories. The runtime's
 `compact-conditional-access` transform turns each Conditional Access policy
 into one short record (scope as counts or `All`, built-in role names,
 conditions, grant and session controls), and `group-by-age` can keep names
-only (`pick`). The explainer manifest that uses them (1.2.0) ships in a
-follow-up change; with it, 100 policies of the test fixture need about
+only (`pick`). Conditional Access explainer 1.2.0 is planned for OpenAdminOS
+0.8.0 and keeps `0.7.3-nightly.20261123094040` as its minimum app version.
+With the compact manifest, 100 policies of the test fixture need about
 15,500 estimated tokens with an 1,100 token answer and fit a 16k local model,
 and up to 107 fit by the estimate. Grouped
 records reach prompts only as counts (`count-by-field` steps), and breakdowns
@@ -2594,7 +2695,8 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   model in auto mode a context overflow no longer fails the turn (PR #215): the
   loop ends with `failureReason: "context-too-small"` and Chat answers from
   cached data, and that answer carries the offer ("Ask this again with"). A
-  `thinking-only` loop failure does the same; repeated malformed or unfinished
+  context overflow concerns the current request and does not count towards
+  disabling tool use on later questions. A `thinking-only` loop failure does the same; repeated malformed or unfinished
   loop answers give the repeated-failure offer once the failure memory takes the
   model off the loop. The issue names the model the turn ran on, the adapter's
   own default when the provider list names none. A typed runtime failure, where `kind`, `code` or `reason`
@@ -2620,8 +2722,14 @@ price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
 Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
 follows redirects; up to two installed local models with a larger parameter count in
-their name, marked as on this device and not checked against the request
-size; Split the question (a hint, and the question back in an empty
+their name. For a context overflow, local choices must report a context
+window at least as large as the request's known token count. This includes
+a 1,024-token answer margin when llama.cpp reports only the prompt size.
+A model of the same parameter count can qualify if its context fits.
+The row shows the reported window. The app reads model metadata without loading the model:
+Ollama uses the window from `/api/show` (including a pinned `num_ctx`),
+LM Studio uses the loaded instance's setting, and Lemonade uses the context
+reported for its downloaded model. Split the question (a hint, and the question back in an empty
 composer); and Keep on the local model, which leaves "Kept on <model>. Nothing was
 sent. Narrow the question ... then send again." Providers the managed policy
 does not allow are not in the provider list, so they are never offered; when
@@ -2643,10 +2751,8 @@ model that is no longer listed or is now remote-backed, or when the list
 cannot be read; for LM Studio and Lemonade it classifies the address they
 are reached at, and refuses one outside this device (Lemonade's address can
 be set to another machine, so its local choice is bound to that address too). That check runs again
-before every model call of the request, not only once. The Ollama adapter's
-own context retry inside one call goes to the same address and model name and
-is not checked again; a hook there is a follow-up for the adapter
-(packages/runtime/src/llm-ollama.ts). A hosted choice takes a destination fingerprint
+before every model call of the request and before Ollama resends the prompt
+inside a call. A hosted choice takes a destination fingerprint
 (`getProviderDestination`: its address, or the Azure OpenAI resource and
 deployment) when its accept step opens, and the host refuses the send if the destination
 changed since. The check and the binding come from one read of the
@@ -2660,8 +2766,8 @@ Host checks (`apps/desktop/electron/intune-chat/model-fit.ts`). A failed
 answer that may be run again carries a host-issued, single-use `offerId`,
 bound to its conversation, organization, the exact question, its workspace
 selection and the provider and model active at the time; offers live in
-memory for 15 minutes. The
-renderer sends `modelOverride` (`offerId`, chosen provider and model) on
+memory for 15 minutes. At the deadline Chat withdraws the choices, closes
+any open confirmation, and says to send the question again. The renderer sends `modelOverride` (`offerId`, chosen provider and model) on
 `SendIntuneChatMessageInput`. The service refuses it unless the offer exists
 for this conversation (not deleted), organization and question, the same
 provider and model are still active, the chosen provider is listed and ready,
@@ -2683,6 +2789,10 @@ data policy (PR #209 onward) applies to this send like any hosted send, since
 it goes through the same model choke point; no masking exists on main yet. The
 renderer shows an offer only in its own conversation and withdraws it when the
 organization or the active model changes.
+
+For prompt-only counts from LM Studio or llama.cpp, model fit adds 1,024
+tokens for the answer when checking whether another local model can fit the
+request.
 
 Apple Foundation reports the prompt's own tokens and the model's total; the
 helper also reserves room for the answer, so a prompt below the total reads
@@ -2734,8 +2844,13 @@ such a provider as ready for it. Start passes the provider and model the review 
 host resolves again. A model the choice named that the provider no longer
 lists keeps Start disabled, and the review says so; the host refuses it too. When the chosen provider is not ready and the review opens setup, a
 provider picked there stays on that run: setup does not change the active
-provider for a model fit rerun or for Run for real of a model fit dry run, and
-checks the picked provider in full the way selecting it does. A run resumed
+provider for a model fit rerun, and checks the picked provider in full the
+way selecting it does. Run for real keeps its dry run provider and model
+through setup. Setup names why it is blocked, including a missing provider,
+a disconnected provider, a missing model, a model list supplied by IT
+policy, or a required on-device model that now runs in Ollama Cloud. A configured Azure OpenAI deployment can be ready at "available".
+The admin can recheck that provider or open the agent page to
+start a new run with different settings. A run resumed
 from setup opens only its own review, and setup moves on from a provider
 picked for one run only once its full check is done. A hosted provider that
 reports no model, or only a CLI default placeholder such as Gemini's
@@ -2771,11 +2886,7 @@ was sent. A write agent still stops at the diff and its typed confirmation. Team
 runs keep their own review in Agent Team.
 
 Open questions (TODO(ugur) in code): a "remember for this conversation"
-option; reading each local model's context length so only models that can
-take the request are offered; whether hosted rows should show a cost estimate;
-whether provider detection should read Ollama's `remote_host` and label Ollama
-Cloud models everywhere (today an active cloud model on a loopback Ollama is
-treated as local outside this offer).
+option and whether hosted rows should show a cost estimate.
 
 #### Agents as skills
 
@@ -2868,7 +2979,7 @@ reinstall restored tenant access with no sign-in (tester finding, 18 Nov,
 macOS). Settings > Data has
 **Reset OpenAdminOS**: a product modal with the data folder, what is removed and
 what stays (the enterprise application and admin consent in each tenant, the IT
-`policy.json`, exports), and the typed phrase `RESET OPENADMINOS`, checked again
+`policy.json`, exports, and models already in Ollama's own store), and the typed phrase `RESET OPENADMINOS`, checked again
 in the main process. The impact list scrolls and the buttons stay in view at
 the smallest window height; a refusal from the main process is shown in full.
 Mockup: `docs/mockups/34-local-reset.html`.
@@ -2894,6 +3005,10 @@ Mockup: `docs/mockups/34-local-reset.html`.
   scheduler and the menu bar login item (installed builds), stops the gateway
   and MCP servers and drains every organization's work with a bounded wait
   (the SQLite databases stay open until the process exits), and relaunches.
+- **Local index model download.** Reset cancels the app's Ollama model check
+  or download when the reset marker is committed. If the reset is cancelled,
+  a later automatic install can start a fresh download. On exit the app stops
+  the download once any updater handling of the quit request has finished.
 - **No sign-out before the restart** (decided in review round 22; the brief
   listed it as a phase 1 step). Signing out rewrites the token caches in
   place, and that rewrite cannot be bound to the folder the reset was
@@ -3004,6 +3119,9 @@ Mockup: `docs/mockups/34-local-reset.html`.
   rejections and resets are gated the same way. A documentation index
   download is refused once a reset has started but does not hold one: the
   commit aborts it, and it stops by itself after 30 minutes.
+  The reset commit and app quit also abort OpenAdminOS's Ollama index model
+  pull. The dialog gives `ollama rm nomic-embed-text` for admins who want to
+  remove the already downloaded model from Ollama.
 - **Data folder guard** (review round 36). Beneath the writers' own checks,
   the commit wraps every path based change through Node's file system API
   in the main process (writes, appends, folders, removals, renames, copies,
@@ -3207,6 +3325,7 @@ Required before public v1 release:
 - **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. The apt repository script validates `.deb` architecture from control metadata rather than Debian filename suffixes because Electron Builder release assets use `*-linux-amd64.deb` names. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Linux packages use `openadminos` as the executable and `com.openadminos.desktop.desktop` as the desktop-entry filename, with Electron Builder desktop-name synchronization enabled so GNOME/KDE window association matches the application ID.
 - Packaged Linux desktop builds use Chromium software rendering by default and avoid VAAPI/GPU initialization. AppImages must tolerate Debian/Ubuntu VMs and desktops without working 3D acceleration; the main window also has a load/timeout reveal fallback so a missing `ready-to-show` event cannot leave the app invisible.
+- Stable and nightly releases require the complete channel-specific asset set for every platform. Publish checks updater sizes and SHA-512 hashes against the update manifests, checks build-time SHA-256 hashes for the manifests, Linux packages, and stable macOS PKG, and uses `dpkg-deb` to read the `.deb` data archive. The stable apt job checks its copy of the `.deb` against the verified release checksum before signing repository metadata. Manual apt backfills check the downloaded stable `.deb` size and SHA-512 against that release's `latest-linux.yml` before building the repository.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 #### Windows signing and distribution decisions
@@ -3450,6 +3569,29 @@ These are visible in the mockups and need to be built as proper React components
 
 The phrase "Local-only · No data leaves this device" appears in multiple places. It is a **single source of truth**: when the user selects a hosted LLM, every instance of this messaging must flip simultaneously to honestly state where data goes (e.g., "Claude Code · location set by your account", with what that location depends on in its detail). Implement this as a single derived state, not as duplicated copy.
 
+Ollama can list local and cloud models from the same on-device server. Cloud
+tags ending in `-cloud` or `:cloud`, and aliases with remote metadata in
+`/api/tags`, are hosted. The status strip, Chat, and run review name Ollama
+Cloud and disclose that prompts are processed on ollama.com. Chat uses the
+same confirmation rules as other hosted models. Chat remembers consent for
+Ollama Cloud and an off-device Ollama server separately. The host checks the
+destination on each hosted Chat send, and decisions saved before this
+distinction require confirmation again. A mixed Ollama installation
+defaults to a local model when no model is pinned. An on-device rerun can
+use only a listed model that runs on this device, and setup and review show
+a recovery message when none is available.
+
+When an agent schedule is enabled or its model is reviewed, the host records
+the provider, model, endpoint fingerprint and Ollama Cloud status. Existing
+schedules record their current destination on first load and keep their
+enabled state. If the destination is hosted or cannot be identified, the
+schedule waits for someone to review it before the first automatic run.
+The scheduler checks the saved destination at admission and
+reads Ollama model aliases again before an automatic run. A changed or
+unverifiable local destination pauses the schedule and records why on its
+card and in run history. Reviewing the current model on the schedule card
+resumes the schedule after one full interval.
+
 The cost cell follows the same pattern: green `$0.00 local` for local providers, real cost numbers for hosted.
 
 ---
@@ -3578,6 +3720,7 @@ Removed from navigation:
 A fresh install offered three ways forward: sign in to Microsoft, use sample data, or skip into an app that could not answer anything. Since the Marketplace, Chat can answer from public reference servers that need no sign-in, and Microsoft 365 is one service among several an admin runs (SPEC §1 already calls the product service-agnostic). The first run follows that.
 
 - **First launch (built 2026-11-09, scope change from the maintainer the same day).** No welcome screen and no setup dialog that opens on its own. A fresh install (the state file did not exist at launch, recorded as `firstRunScan: "pending"`) first shows one full-window model scan, before anything else and once: every provider check runs in parallel in the main process (`electron/model-scan.ts`, built on the existing provider checks) with a 2.5 second timeout each, and each result streams to the window over IPC as it resolves: found with detail, not found, or could not check with Retry (10 second timeout on retry), never a gap. Checks are Ollama (installed from local files, running on its loopback port, models, OpenAdmin 8B pulled), LM Studio (installed, server, loaded models; ready only with a loaded model), Apple Intelligence on macOS, Claude Code and Codex (installed, signed in), GitHub Copilot CLI (installed only: its full probe starts an RPC server and lists models from GitHub, so the scan reads `copilot --version` and the sign-in is checked when the admin selects it), Gemini CLI (installed; it shows "sign-in not confirmed" until a Test, because its sign-in is only known after a request) and Azure OpenAI (saved configuration). What runs is pinned by a test: `--version` for every CLI, plus `claude auth status --text` and `codex login status`. Those status commands may check the sign-in with the vendor, and the screen says so; no prompt and no model call is ever sent. An Ollama or LM Studio endpoint off the device is not contacted ("Endpoint outside this device"). The 2.5 second timeout covers a whole check and aborts it, which stops its requests and kills its CLI process with everything a wrapper script started: its own process group on macOS and Linux, also after the wrapper exited; on Windows `taskkill /T` ends the tree while the wrapper runs, but a child left behind by a wrapper that already exited is not reached (a Job Object would close that; not used yet). A check that fails (an HTTP error, unreadable model capabilities, a CLI that errors) is could not check, not a negative result. One scan runs at a time: a second request shares the running one, and progress carries a scan id so the window ignores an older run. While the scan is pending, app state loads without provider detection, so the first screen never waits for, or contacts, anything outside the bounded scan, and no provider test prompt is sent. Leaving the scan (Continue, Open chat) runs no discovery: from the moment any scan, Retry or Start is asked for, Scan again in a completed profile included, provider listing serves the scan results for the rest of the session (a read that overlaps the scan detects nothing; a check that timed out or was refused is served as could not check with its reason), a provider is checked in full only when the admin selects or tests it or saves its settings (a Gemini Test checks Gemini again afterwards, because its sign-in is only known from a request), and Refresh providers in Settings checks all of them again (round 3 review, 2026-11-09). A failed check (an HTTP failure, a failed Apple helper, Azure settings that cannot be read) is could not check with its reason for every provider. Retry gives the HTTP checks its longer budget. A local server stopped after an earlier check reads as not running: a reused keep-alive socket that was closed is retried once on a new connection. The outcome names the model Chat will use: the saved model when it is installed, otherwise the provider default, and OpenAdmin 8B only when no model was chosen. The closing line lists what ran and names a refused off-device endpoint as not contacted. The scan is one orchestrated sequence of about two and a half seconds (redesigned 2026-11-09): this device in the centre and each tool a node on an orbit; rings radiate and a sweep turns while checks run; nodes resolve one by one, found ones draw a link to the device (green when prompts stay local, amber when they would leave it) and not-found ones recede; at the settle the result rises in as one choice of what answers in Chat (design round below). Escape, Skip scan or a click settles at once; reduced motion shows the settled state; the check list beside it is the screen reader source and announces each result. Ollama or LM Studio installed but not running gets Start (the Ollama app on macOS or `ollama serve`, or `lms server start`, detached, only for an endpoint on this device), which waits up to 12 seconds and then runs a fresh scan (Start runs in the scan queue, so it never returns a scan from before the runtime answered, and a second window's Start finds the runtime up and spawns nothing); it spawns through the shared CLI launcher (no console window on Windows, `.exe` before a `.cmd` launcher), and a failure names the command to run by hand, or, when LM Studio is installed without its `lms` command, says to start the server in LM Studio. The outcome follows the provider rules: a ready local provider is selected for an admin who never chose one, preferring OpenAdmin 8B when it is pulled and no model was chosen; when the admin chose another provider, a ready local model is only offered ("ready on this device, not selected") and nothing local is promised until they switch; Retry returns the whole scan, so a check that now succeeds changes the result; a signed-in hosted tool is offered with its residency line and needs one click if its model is usable. When the scan already knows the signed-in tool cannot use the IT-locked model, its choice says Unavailable with the policy reason and no Retry. With nothing found the screen offers OpenAdmin 8B (the provider setup until the model explorer, #102, ships), all providers and Scan again. Settings, Providers has Scan again. After the scan the admin goes to Connect Microsoft 365 (below), then lands in Chat, where an inline model choice stays for anyone who continued without a model. That choice shows a provider whose check failed the way the scan does, local or hosted (a hosted CLI whose status request failed included): the state Could not check next to its reason and Retry, which checks only that provider again, the check selecting it runs but local only for Ollama, LM Studio and Lemonade while the scan's results are served, and keeps the other providers' results (Retry and Scan again in Chat never refresh every provider, so an endpoint outside this device that the scan did not contact is refused rather than contacted, and one set outside this device since is served as not contacted; Refresh providers in Settings still checks everything in full; a local model that is ready after a Retry follows the provider rules, so it is selected with the notice for an admin who never chose one; a failed Gemini request clears only after a Test, which the row says), writes a failed check under the row and announces the outcome, also when the provider is no longer offered. If a Retry, Scan again, Start or Use makes the active model ready and closes the choice, Chat announces readiness and focuses the composer, unless the admin already moved focus elsewhere. The row cannot be chosen until a check succeeds. An endpoint outside this device that the scan did not contact is served as off the device and not contacted, and Chat shows it as Not checked with its reason and no Retry, because Retry would contact it (added 2026-11-18, PR #204). A signed-in tool that a finished check rules out, such as a GitHub Copilot model set by IT that the account cannot use, shows as Unavailable with that reason and no Retry, never as Signed in, because the send path refuses it (PR #204 review round 9). Design reference: mockup 32, section B.
+- Ollama, LM Studio and Lemonade model checks name the endpoint and give recovery for a refused connection, blocked port, DNS failure, unreachable network, interrupted connection, TLS failure, proxy failure, timeout or unreadable model list. A refusal on this device can show the runtime as not running. Other failures show Could not check with Retry in the model choice. For a blocked port, the message names the port and the runtime’s default. It names an environment override only when that override supplied the address. An unreadable model list includes the HTTP status.
 - **Design and enterprise round (decided by the maintainer, 2026-11-09; mockup 32 revision 2, sections A to E and L).** The scan runs as one 2.4 second sequence (device tile springs in, two rings, a conic sweep, nodes enter staggered and pop on resolve; reduced motion renders the end state) with a check list of one 32 px line per check and no buttons or technical targets while it runs. The result is one radio group of found options, local runtimes first and the first one that can answer or be started preselected; a hosted tool is never preselected and always says where prompts go; with only hosted tools found nothing is preselected and the button reads "Choose a model". One primary button follows the choice ("Open Chat", "Start Ollama and open Chat", "Use Claude Code", "Get OpenAdmin 8B" when Ollama has no model, whose row says "No model yet"), with a 12 px note under it; a failed start writes its reason under its row. The choice is mirrored in the orbit, and a found node selects its row. Continue without a model is a quiet link; the targets, commands and ledger sit in a "What ran" disclosure next to Scan again. Chat's model choice uses the same choice list (in Chat the start button reads "Start Ollama"). Settings, Providers and the scan read one installed answer for Ollama and LM Studio (`ProviderSummary.installed`, from local files), so both say "Installed, not running". The empty Chat states the destination once, in a 12 px line under the composer ("Prompts leave this device through Claude Code; location set by your account. Nothing is connected, so no tenant data is sent."; with a tenant "Prompts and tenant data leave this device through ..."), drops the "Answering with" line, and shows starters as two columns of plain rows ("Works now" and "Needs Intune" with a dashed service mark) and references as a divided list of two with a Marketplace link. The hosted send confirmation is inline above the composer: "Send this question through Claude Code?" (for a hosted API such as Azure OpenAI, "Send this question to Azure OpenAI?"), one sentence, Goes to (amber, with the location detail under it), What is sent, Stays here, a checkbox that names the model, "Send through Claude Code", Cancel and "Use a model on this device"; focus starts on the send button, Escape cancels and returns to the composer. The not-connected card leads with the dashed service mark, folds its permissions into "N read-only Microsoft Graph permissions", and orders its actions Connect, own registration, Ask an admin. Hosted data locations (second decision, 2026-11-09, replacing "Anthropic API · US" and "OpenAI API · US", which were wrong: Anthropic API inference defaults to global unless the workspace restricts it to the US, Azure OpenAI depends on the deployment type, and a CLI decides its own channel). `providerDataLocation` is the one source, with a short label for the scan rows, the status strip and the composer, and `providerDataLocationDetail` for tooltips, the hosted send confirmation and What ran: Claude Code "Claude Code · location set by your account" (detail: it sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex if its settings select them; on Anthropic's API inference can run in any region by default, data at rest stays in the US, and a workspace can restrict inference to the US); Codex "Codex · location set by your account" (detail: OpenAI or the endpoint its configuration selects; processing follows the workspace's data residency setting); Azure OpenAI "Azure OpenAI · location set by your deployment type" (detail: Global in any Azure region, Data Zone within the US, EU or Asia Pacific, Standard within the resource's geography); "GitHub Copilot CLI · location not stated" and "Gemini CLI · location not stated" with no detail (labels name the tool, not the vendor API). For a CLI (Claude Code, Codex, GitHub Copilot CLI, Gemini CLI) the sentence names the way prompts leave ("Prompts leave this device through Claude Code; location set by your account"); for an API it names the place ("Prompts go to Azure OpenAI · location set by your deployment type"). Nova voice says its audio and prompts go to OpenAI and that processing follows the OpenAI workspace's data residency. PR #174 uses the same values. Since PR #174 merged, the scan and Connect Microsoft 365 use its `DeviceTile` and motion tokens, the active scope says organization ("No organization", "No organization is active, so no tenant data is sent"), the no-scope hosted acknowledgement is bound to no organization, provider names follow the scan (Claude Code, Codex, Apple Intelligence, GitHub Copilot CLI, Gemini CLI), and provider and model changes from the scan, Chat's model choice and Settings are recorded by #174's configuration audit (every state write is diffed, so these flows need no event code of their own).
 - **Provider and service logos (maintainer decision, 2026-11-09, superseding the guideline-based limits of the same day).** Every provider and every Microsoft 365 service shows its real logo, taken unmodified from the vendor's official brand, press or icon files, with the vendor's light and dark variants where it publishes both; the maintainer accepts that a vendor may ask for removal. One `ProviderLogo` shows a provider in the scan orbit, the choice list (scan result and Chat) and Settings, Providers: Ollama, LM Studio, GitHub Copilot CLI and the OpenAI Blossom for Codex switch light and dark variants; the Claude spark, the Gemini mark (Google publishes it as PNG only), the Azure OpenAI service icon and Apple's Apple Intelligence icon (from developer.apple.com, which offers no separate download) are single files on both appearances. A file whose artwork carries its own clear space (the Blossom fills about half its canvas) is rendered larger so marks read at one optical size; no file is cropped. `ServiceMark` and `ServiceLogo` show Microsoft's Intune, Entra ID and Defender icons on the not-connected card, the Chat starters, the Connect Microsoft 365 step (rows, result and stage); a service that is not connected keeps its dashed tile with the icon unchanged inside. Microsoft publishes no Defender XDR icon in its downloads, so Defender shows the Defender for Cloud icon until one exists. Intune shows the icon Microsoft introduced in 2025 (maintainer request, 2026-11-10): Microsoft's Azure icon archive still holds the earlier design, so the file is the 256 px frame of the icon the Intune admin center serves at intune.microsoft.com, copied byte for byte. The neutral two-letter mark remains only for a provider or service OpenAdminOS does not know. A not-found node fades through its ring, surface and name, never by dimming a logo. Settings, About, the README License section and both NOTICE files carry: "Product names and logos are trademarks or registered trademarks of their respective owners. OpenAdminOS is not affiliated with, endorsed by, or sponsored by any of them." Owners, source URLs and retrieval dates are in `apps/desktop/src/assets/provider-logos/NOTICE.md` and `apps/desktop/src/assets/service-logos/NOTICE.md`, with how to request removal; the logos are not covered by the MIT license. The same logos are on PR #174's surfaces: the Connections reach map and service rows (`ProviderMark` for the model and voice rows), the organization switcher's services line, Agents need chips and the run review (provider logo by the model, service marks by Reads).
 - **Reference and connector logos, and the reach map layout (2026-11-10, extends the logo decision above).** Every public reference host and every result connector shows its real logo in place of the two-letter mark: on the Connections reach map, the Public references rows, the suggested references in the empty Chat, and each connector's row and card under Results go to (the rows since 2026-11-10; a connector OpenAdminOS has no logo for shows two letters there too). `ReferenceMark` picks the file from the host or the connector name; a listing that names its own logo (the Splashtop references, 2026-11-10) is drawn by `ListingMark` from the listing and falls back to `ReferenceMark` otherwise. A host shows the icon of whoever runs its domain (microsoft.com, kqlsearch.com, intuneautomation.com, windowsforum.com, endoflife.ai) only when it is that domain or one of its subdomains, so a lookalike domain keeps its letters (a trailing dot on a fully qualified host is ignored); a host or connector OpenAdminOS does not know keeps its two letters. Result connectors (Microsoft Teams, Outlook, Slack, Discord, Signal, WhatsApp) use the owner's logo download where one exists (Slack, Discord, Signal, WhatsApp); Microsoft publishes no download of the current Teams and Outlook icons, so those are the icons in each product's web app manifest. Reference hosts publish no logo download, so each shows the icon its owner serves on its own site. Signal switches to its white file on dark surfaces; KQL Search and Splashtop keep a white tile in both themes. Known deviations, accepted under the decision above and confirmed by the maintainer on 2026-11-10: Signal asks for a 26 px minimum and the tiles show it at 13 to 20 px, Microsoft's trademark guidelines ask for a licence for product icons, and Meta offers the WhatsApp logo pack under its brand guidelines. The KQL Search icon stays at 48 px, the largest file its site serves. The redrawn connector icons from the Iconify set are removed. Reach map layout: the wide map is one centred block (services, a 128 px tile column, a column of at most 440 px for what leaves, 76 px gaps); the services sit next to the tile with names and states in columns; the model name follows its destination instead of sitting at the far edge; each line meets its row at the row's mark, runs level from the tile until it is past the caption under the tile and bends 35 percent of the way from the row, so no line crosses the caption however many rows there are; with many rows the fan tightens so the line ends stay on the tile edge. The stacked layout below 760 px is unchanged. Sources and owners are in `apps/desktop/src/assets/service-logos/NOTICE.md`.
@@ -3870,7 +4013,9 @@ no window manager; CI still covers the controller lifecycle and renderer behavio
 
 The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
 Graph/model fixtures: assessment change → research → bounded Chief delegation → script
-draft → evidence question → admin review. Captures identify rehearsal data. Quality
+draft → evidence question → admin review. A loopback Ollama fixture lists the
+rehearsal model in `/api/tags` so Agent Team checks its locality before each model
+call. Captures identify rehearsal data. Quality
 evidence covers responsive layouts, 24 personas, floor navigation, motion, reduced
 motion, hidden-window behavior, high-contrast emulation, and 200% zoom. Linux
 Xvfb memory measurement, attempted frame sampling, and a recording accompany the design reference; they do not
@@ -3994,7 +4139,7 @@ These must exist and work well before any public release.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
-- Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act. Only installed builds register or remove the OS scheduler: the LaunchAgent label and Windows task name are per user, so a development checkout that registered them would take over the installed app's scheduler and single-instance lock. On launch, an installed app repoints a LaunchAgent or scheduler task that runs a development checkout or a binary that no longer exists, and stops the copy it was running; a registration that launches another installed copy is left alone. On macOS the plist stays on disk only when launchd accepts it, so a failed registration surfaces as an error and is retried rather than reading as enabled.
+- Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. Schedules paused for model destination review show a notice with a Review schedule action. Scheduled run failures show an error with an Open runs link. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act. Only installed builds register or remove the OS scheduler: the LaunchAgent label and Windows task name are per user, so a development checkout that registered them would take over the installed app's scheduler and single-instance lock. On launch, an installed app repoints a LaunchAgent or scheduler task that runs a development checkout or a binary that no longer exists, and stops the copy it was running; a registration that launches another installed copy is left alone. On macOS the plist stays on disk only when launchd accepts it, so a failed registration surfaces as an error and is retried rather than reading as enabled.
 - A macOS-only menu bar companion is planned as an optional bundled surface inside the signed OpenAdminOS app package. It shows active tenant, provider trust, cache freshness, scheduler state, upcoming schedules, recent activity when there is actual work to inspect, and a compact read-only Intune Chat prompt entry point. It is not an error center: passive run failures, cache refresh errors, provider failures, and scheduler diagnostics stay in the full desktop app instead of being reported as issue cards in the popover. It must call the same host-owned services as the full app, persist to the same local SQLite store, and route write confirmations, hosted-provider first-use confirmation, tenant setup, provider setup, and long investigations to the full desktop window. The current implementation uses a monochrome template image of the oa mark (`build/menu-bar-iconTemplate.png` plus `@2x`) as the Electron Tray status item, so macOS tints it like other status items, a frameless `#/companion` renderer route with Ask as the primary flow plus compact schedule/activity sections, shared preload IPC, a `--menu-bar` launch mode, Settings -> General launch-at-login controls, and a generated nested Swift helper bundle at `OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app`. Packaged builds register that helper through Electron's macOS `loginItemService` settings so the helper starts OpenAdminOS in tray-only mode; development builds fall back to the main-app login item path. See `../vision.md`.
 - Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal are wired through this surface. Agents can save delivery rules that post terminal run reports to either the connector default target or a per-agent target where that connector supports one, with manual/scheduled, success/failure, and changed-only controls. Per-agent delivery rules autosave when the admin enables a connector, changes a target, or changes delivery checkboxes; starting a run waits for any in-flight delivery save so the run uses the latest rule. Saved delivery rules are explicit approval to post without another prompt. Connector delivery appends post-run activity steps so the run timeline shows sent, failed, or skipped delivery outcomes after the agent result is created. Connector delivery is queued locally when a run reaches a terminal state, retried with bounded backoff for transient failures, and processed again on app reopen or scheduler ticks. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
 - Agents should not hard-code routine Teams, WhatsApp, Outlook, Slack, Discord, or Signal posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to one connector, or to multiple targets.
@@ -4205,7 +4350,7 @@ OpenAdminOS is open core. The desktop app is MIT and fully functional on its own
 
 **Mobile companion (hard constraint #5 exception).** iOS and Android apps pair with the admin's own desktop instances. The desktop stays the host for tenant tokens, Graph calls, run history, and every write; typed write confirmation and the final apply stay on the requester's desktop. Tracked in #139.
 
-**Managed configuration (local policy file, #176, 2026-11-09).** Reading a policy file on one device is free core; central distribution, MDM-delivered keys and fleet reporting are team features and not built here. The app reads `policy.json` once per launch from a machine path (macOS `/Library/Application Support/OpenAdminOS/`, Windows `%ProgramData%\OpenAdminOS\`, Linux `/etc/openadminos/`) and a user path (macOS `~/Library/Application Support/OpenAdminOS/`, Windows `%APPDATA%\OpenAdminOS\`, Linux `~/.config/openadminos/`); the machine file wins key by key. Format: `schemas/policy.schema.json` (version 1) with `allowedProviders`, `defaultProvider`, `defaultModel`, `allowedPublicReferences` (empty list allows none), `appRegistration` (`clientId`, optional `tenantId`, `label`), `skipFirstRunScan`, the Nova keys `novaVoiceModes`, `novaInstructions`, `novaCapabilities` and `novaMemory` (see "Nova profile, notes, follow-ups and IT policy") and `lock` (setting keys; without it every key the file sets is locked, `[]` locks nothing). Enforcement is in the main process: the provider list leaves out what the policy does not allow, and setting, testing or building a model for such a provider is refused (`ManagedPolicyError`), so Chat, agents, schedules, Office, Nova and drafts all follow it; a locked provider is the only provider and a locked model the only model of it; the MCP host never connects to or calls a public reference the policy does not allow, and the Marketplace hides it; a locked registration is the only one sign-in accepts and cannot be removed. Unlocked defaults apply until the admin changes them. Problems never pass silently: every problem names the file, line and reason in Settings, Providers (IT policy panel) and in a one-time notice per set of problems; a file that is not JSON applies nothing, an invalid key is not applied, and an unknown id in an allowed list is dropped from the list (a typo allows less, never more). The configuration audit records `policy.loaded`, `policy.changed`, `policy.removed` and `policy.invalid` once per change, and provider or model changes made by the policy with `setByPolicy`. First run: the scan checks and offers only allowed providers and keeps the policy's provider selected; with `skipFirstRunScan` and a `defaultProvider`, launch runs the scan's bounded check of that one provider, and when it is ready the scan is skipped and the first run opens at Connect Microsoft 365, then Chat. Changes to the file apply at the next launch; there is no file watcher. Unpackaged builds may point the paths elsewhere with `OPENADMINOS_POLICY_MACHINE_PATH` and `OPENADMINOS_POLICY_USER_PATH`; smoke and capture launches ignore policy files. IT admin guide: `docs/gitbook/getting-started/managed-configuration.md`.
+**Managed configuration (local policy file, #176, 2026-11-09).** Reading a policy file on one device is free core; central distribution, MDM-delivered keys and fleet reporting are team features and not built here. The app reads `policy.json` once per launch from a machine path (macOS `/Library/Application Support/OpenAdminOS/`, Windows `%ProgramData%\OpenAdminOS\`, Linux `/etc/openadminos/`) and a user path (macOS `~/Library/Application Support/OpenAdminOS/`, Windows `%APPDATA%\OpenAdminOS\`, Linux `~/.config/openadminos/`); the machine file wins key by key. Format: `schemas/policy.schema.json` (version 1) with `allowedProviders`, `defaultProvider`, `defaultModel`, `allowedPublicReferences` (empty list allows none), `appRegistration` (`clientId`, optional `tenantId`, `label`), `skipFirstRunScan`, the Nova keys `novaVoiceModes`, `novaInstructions`, `novaCapabilities` and `novaMemory` (see "Nova profile, notes, follow-ups and IT policy") and `lock` (setting keys; without it every key the file sets is locked, `[]` locks nothing). Enforcement is in the main process: the provider list leaves out what the policy does not allow, and setting, testing or building a model for such a provider is refused (`ManagedPolicyError`), so Chat, agents, schedules, Office, Nova and drafts all follow it; a locked provider is the only provider and a locked model the only model of it; the MCP host never connects to or calls a public reference the policy does not allow, and the Marketplace hides it; a locked registration is the only one sign-in accepts and cannot be removed. An allowlist that includes `ollama` allows Ollama Cloud models and aliases on a signed-in Ollama. Each Chat send to one requires the usual hosted confirmation. To exclude cloud models while keeping Ollama, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on the device. The lock pins the model name. To exclude Ollama entirely, omit `ollama` from `allowedProviders`. Unlocked defaults apply until the admin changes them. Problems never pass silently: every problem names the file, line and reason in Settings, Providers (IT policy panel) and in a one-time notice per set of problems; a file that is not JSON applies nothing, an invalid key is not applied, and an unknown id in an allowed list is dropped from the list (a typo allows less, never more). The configuration audit records `policy.loaded`, `policy.changed`, `policy.removed` and `policy.invalid` once per change, and provider or model changes made by the policy with `setByPolicy`. First run: the scan checks and offers only allowed providers and keeps the policy's provider selected; with `skipFirstRunScan` and a `defaultProvider`, launch runs the scan's bounded check of that one provider, and when it is ready the scan is skipped and the first run opens at Connect Microsoft 365, then Chat. Changes to the file apply at the next launch; there is no file watcher. Unpackaged builds may point the paths elsewhere with `OPENADMINOS_POLICY_MACHINE_PATH` and `OPENADMINOS_POLICY_USER_PATH`; smoke and capture launches ignore policy files. IT admin guide: `docs/gitbook/getting-started/managed-configuration.md`.
 
 ---
 
@@ -4511,7 +4656,8 @@ the format. Decisions:
   Intune, managed devices, a compliance state or a sync window (a later
   clause about compliance does not qualify it); devices with no reported sync
   time are said, not silently left out of a sync window; a device Intune
-  reports as never synced (0001-01-01) reads "no sync reported"; dates are
+  reports as never synced (0001-01-01) reads "no sync reported", and a sync
+  time that does not parse is never shown as a date; dates are
   shown on this device's calendar; when the cache is partial, an unfiltered
   count leads with the total Graph reported (or says "at least" the cached
   count) and filtered counts and splits say they cover the cached part only;
@@ -4523,8 +4669,16 @@ the format. Decisions:
   that resource, only for a tenant or mixed question whose resource the tenant
   grants. "Not compliant" is Intune's `noncompliant` state, as the direct
   evidence answers count it; grace period is its own state. A failed latest
-  refresh is said in the computed answer. `count_cached` on a resource that
-  was never refreshed returns no count.
+  refresh is said in the computed answer. Chat, Nova and the multi-tenant
+  dossier show cache refreshes as an absolute date and time. They share
+  Electron's app locale and the device time zone resolved at launch. Chat
+  labels the epoch marker for data made stale by a write as
+  "Before the last write (stale)". Device
+  last-sync dates omit the time and show the year when it differs from the
+  current year in that time zone. Chat prompts ask the model to use the
+  formatted facts, and Nova formats any remaining ISO timestamps before
+  speaking them. Evidence and audit records retain the exact timestamps.
+  `count_cached` on a resource that was never refreshed returns no count.
 - Intune is the device inventory. Device, OS, sync and compliance wording plans
   `managedDevices` only; `entraDevices` joins for Entra, directory, join,
   registration, stale-device cleanup, duplicate and deleted-record wording.
@@ -4607,12 +4761,21 @@ the format. Decisions:
   left to use its result. Counting the writer without these rules pushed
   ordinary Microsoft Learn answers into the fallback). After a failed compact
   loop the cached-data fallback is one model call with no promise retries;
-  a "tool" naming a Chat tool anywhere in the reply (before or after prose,
-  next to a JSON example, cut short) makes it a request; a whole-reply object
-  is read as the loop reads it (final with an answer or content text is the
-  answer); a final answer object after prose is the answer; any other JSON
-  example inside a prose answer stays prose; when the reply is empty, only
-  promises work or is a request, the message fails with
+  a final answer object is the answer when it is the whole reply or the
+  object the loop reads (the last fenced block or balanced object, with
+  prose before or after it), also when it names a tool too; otherwise a
+  "tool" naming a Chat tool makes the reply a request when the request was
+  cut short (an unclosed fence, or a brace left open outside JSON strings),
+  when a sentence outside the JSON announces a lookup in the words a
+  progress message uses ("I will check ...", "Let me look ..."; an offer
+  that depends on the admin does not count), or when that prose is a short
+  lead-in; a longer prose answer that quotes a tool call as an example stays
+  an answer, so a model that writes a long preamble before a real request,
+  and announces the lookup in other words ("We will check ...", "For this
+  organization I will check ..."), gets that reply shown; any other JSON example inside a prose
+  answer stays prose; the fallback call is not shown live, only when
+  complete, and nothing of it when it is stopped; when the reply is empty, a progress message or a request, the
+  message fails with
   "The local model did not finish an answer ..." instead of showing it. The
   "Answered from cached data instead" notice is set only once that answer
   exists, so a provider that refuses every call leaves no such notice on the

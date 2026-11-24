@@ -1,3 +1,4 @@
+import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import type { WebSearch, WebSearchResult } from "./web-search.js";
 import { randomUUID } from "node:crypto";
 
@@ -15,7 +16,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { GRAPH_CACHE_LOG_WINDOW_DAYS, graphAccessDenialFromError, graphAccessDenialText, isGraphCacheLogResource, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
-import { fenceTenantData } from "@openadminos/runtime";
+import { fenceTenantData, reasoningWithoutAnswerInChain } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { mcpHost, type McpCatalogEntry, type McpItemIdForm, type McpItemIdRule, type McpResultFormat, type McpResultShape } from "../mcp/catalog.js";
@@ -676,7 +677,10 @@ export const SPLASHTOP_TOOL_RULES = [
   "These tools only read. Splashtop changes (reboot, delete, rename, disable, end a session) are planned with Plan a change on Connections and confirmed in Runs; say so when asked.",
 ].join(" ");
 
+const TOOL_TIMESTAMP_NOTE = "Never show an ISO timestamp to the user. Use the date or time wording in the facts when available. Use refreshedAtText for cache freshness when provided.";
+
 export interface IntuneChatToolContext {
+  timestampLocale?: ChatDateTimeLocale;
   /** The active organization's Splashtop connection, when it has one. */
   splashtop?: SplashtopChatContext;
   /** Identity values from this turn's tenant tool results, for the MCP egress check. */
@@ -878,14 +882,16 @@ export function toolDefinitionsForPrompt(webSearch = false, compact = false, ten
     ...(tenantTools ? ['- graph_get {path, query?:object}: live Graph GET only; query may include $select,$top,$filter,$orderby,$count. At most 50 rows.',
       '- refresh_resource {resource}: refresh one cached resource before querying missing/stale data.',
       '- query_drift {resource?:string,from?:ISO,to?:ISO,changeKind?:"added"|"removed"|"modified",top?:number}: local change history.'] : []),
+    ...(tenantTools ? [TOOL_TIMESTAMP_NOTE] : []),
     ...(webSearch ? ['- web_search {query:string}: research current PUBLIC facts on any topic with OpenAI. Limit 1000 characters. Only public product terms; never tenant/user/device identifiers or credentials. Returns dated evidence with URLs.'] : []),
   ].join("\n");
-  return INTUNE_CHAT_TOOL_DEFINITIONS.filter(tool => (tool.name !== "web_search" || webSearch) && (tenantTools || !isTenantTool(tool.name))).map((tool) =>
+  const definitions = INTUNE_CHAT_TOOL_DEFINITIONS.filter(tool => (tool.name !== "web_search" || webSearch) && (tenantTools || !isTenantTool(tool.name))).map((tool) =>
     [
       `- ${tool.name}: ${tool.description}`,
       `  params: ${JSON.stringify(tool.params)}`,
     ].join("\n"),
   ).join("\n");
+  return tenantTools ? `${definitions}\n${TOOL_TIMESTAMP_NOTE}` : definitions;
 }
 
 export async function executeIntuneChatTool(
@@ -1011,6 +1017,9 @@ export async function executeIntuneChatTool(
     };
     return { result, trace };
   } catch (caught) {
+    // Not a tool result: a model that reasoned without answering fails the
+    // Chat message with that cause instead of handing the loop a fallback.
+    if (reasoningWithoutAnswerInChain(caught)) throw caught;
     const completedAtMs = Date.now();
     const message = caught instanceof Error ? caught.message : String(caught);
     const trace: IntuneChatToolTraceEntry = {
@@ -1220,6 +1229,8 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     proposed = await hooks.writeQuery(entry);
   } catch (caught) {
     ctx.signal?.throwIfAborted();
+    // A model that reasoned without answering fails the Chat message with that cause.
+    if (reasoningWithoutAnswerInChain(caught)) throw caught;
     throw new Error(`the ${entry.serverName} query could not be written: ${caught instanceof Error ? caught.message : String(caught)}. Nothing was sent to ${entry.host}.`);
   }
   const { args, checked } = canonicalMcpArgs(entry, validateMcpArgs(entry, proposed), hooks.references(entry.serverId));
@@ -1396,6 +1407,8 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     snapshot,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
+    timestampNote: TOOL_TIMESTAMP_NOTE,
+    refreshedAtText: snapshot?.refreshedAt ? formatCacheRefreshTime(snapshot.refreshedAt, ctx.timestampLocale) : undefined,
     limit: result.limit,
     capped: result.totalCount > result.returnedRows,
     ...(availableFields ? { availableFields } : {}),
@@ -1495,6 +1508,8 @@ function countCached(ctx: IntuneChatToolContext, params: unknown): unknown {
     // The number to state: every cached row matching the filters, counted in code.
     totalCount: counted.total,
     exact: true,
+    timestampNote: TOOL_TIMESTAMP_NOTE,
+    refreshedAtText: formatCacheRefreshTime(snapshot.refreshedAt, ctx.timestampLocale),
     ...(filters?.length ? { filters } : {}),
     ...(groupBy.length ? { groups: counted.groups } : {}),
     ...(listed ? { returnedRows: listed.length, rows: listed } : { returnedRows: 0 }),

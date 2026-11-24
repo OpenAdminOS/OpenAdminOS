@@ -1,10 +1,12 @@
+import type { ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
+import { hostedOllamaDestination, providerForModel } from "@openadminos/agent-sdk";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
-import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
+import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, announcesLookup, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { NOVA_PROFILE_BLOCK_END, novaProfilePromptBlock, novaReasoningProfileByteLimit, type NovaProfilePromptInput } from "../nova-profile.js";
-import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
+import { fenceTenantData, isReasoningWithoutAnswerError, reasoningWithoutAnswerInChain, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -457,6 +459,7 @@ export interface ChatPersistedState {
 /** Said when a cache refresh meets a disconnect; nothing it read is saved. */
 
 export interface ChatServiceHost {
+  timestampLocale?: ChatDateTimeLocale;
   read(): Promise<ChatPersistedState>;
   /** False once a disconnect of this tenant began (see tenant-lifecycle.ts). */
   tenantWritable?(tenantId: string): boolean;
@@ -474,6 +477,7 @@ export interface ChatServiceHost {
   listProviders(): Promise<ProviderSummary[]>;
   /** A fresh check that this provider runs this model on this device, before a model fit retry on it. */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
+  verifyLocalOllamaModel?(model: string): Promise<boolean>;
   /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
   providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
@@ -653,6 +657,20 @@ export class IntuneChatService {
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
     if (!this.host.tenantLease) return work(signal);
     return this.host.tenantLease(tenantId, (leaseSignal) => work(signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal));
+  }
+
+  private protectLocalOllama(llm: RunLlmApi, provider: ProviderSummary, model: string | undefined): RunLlmApi {
+    const verify = this.host.verifyLocalOllamaModel;
+    if (provider.id !== "ollama" || !provider.isLocal || !model || !verify) return llm;
+    return guardModelFitLlm(llm, {
+      model,
+      before: async () => {
+        if (!(await verify(model))) {
+          throw new Error(`OpenAdminOS could not confirm that ${model} still runs on this device. Refresh Ollama in Settings, Providers, then send the question again.`);
+        }
+      },
+      dispatched: () => undefined,
+    });
   }
 
   /**
@@ -1031,7 +1049,7 @@ export class IntuneChatService {
     // The job runs under the lease of every tenant it reads or writes for,
     // so Disconnect of any of them refuses, stops and drains it.
     return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async () => {
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const provider = providerForModel(this.resolveActiveProvider(providers, persisted.activeProviderId), preflight.model);
     const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
     if (provider?.isLocal === false && input.hostedProviderConsent) {
@@ -1276,7 +1294,7 @@ export class IntuneChatService {
     }
 
     const summary = buildMultiTenantSummary(comparisons);
-    const assistantText = await this.buildMultiTenantAssistantText({
+    const { text: assistantText, error: assistantError } = await this.buildMultiTenantAssistantText({
       tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
@@ -1293,6 +1311,7 @@ export class IntuneChatService {
       summary,
       comparisons,
       rows: deviceRows,
+      timestampLocale: this.host.timestampLocale,
     });
     const finalStatus =
       skippedNotes.size > 0 ||
@@ -1338,7 +1357,10 @@ export class IntuneChatService {
       conversationId: conversation.id,
       role: "assistant",
       content: assistantText,
-      status: finalStatus === "completed" || finalStatus === "partial" ? "completed" : "failed",
+      // The tenant results stay in the job; a summary model that reasoned
+      // without answering fails the message.
+      status: !assistantError && (finalStatus === "completed" || finalStatus === "partial") ? "completed" : "failed",
+      ...(assistantError ? { error: assistantError } : {}),
       createdAt: new Date().toISOString(),
       providerId,
       ...(preflight.model ? { model: preflight.model } : {}),
@@ -1617,12 +1639,10 @@ export class IntuneChatService {
     }
     const resources = sanitizeGraphResources([...resourceSet]);
     const providers = await this.host.listProviders();
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const endpointProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const model = resolveProviderDefaultModel(endpointProvider, persisted.activeModelByProviderId).model;
+    const provider = providerForModel(endpointProvider, model);
     const providerId = provider.id;
-    const model = resolveProviderDefaultModel(
-      provider,
-      persisted.activeModelByProviderId,
-    ).model;
     const now = new Date().toISOString();
     const tenants = persisted.tenants
       .filter((tenant) => selectedTenantSet.has(tenant.id))
@@ -1743,10 +1763,11 @@ export class IntuneChatService {
     model?: string;
     summary: MultiTenantChatJob["summary"];
     comparisons: MultiTenantChatJob["comparisons"];
-  }): Promise<string> {
+  }): Promise<{ text: string; error?: string }> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
-    if (!llm.available) return deterministic;
+    const built = await this.tenantLlm(input.providerId, input.model, input.tenantIds);
+    const llm = withTenantDataOutputFilter(input.provider ? this.protectLocalOllama(built, input.provider, input.model) : built);
+    if (!llm.available) return { text: deterministic };
     try {
       const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
       const prompt = [
@@ -1770,10 +1791,12 @@ export class IntuneChatService {
         temperature: 0.2,
         maxTokens: 700,
       })).text.trim(), prompt);
-      return text || deterministic;
+      return { text: text || deterministic };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      const text = `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+      // Other provider failures keep the deterministic summary as the answer.
+      return isReasoningWithoutAnswerError(error) ? { text, error: message } : { text };
     }
   }
 
@@ -2137,12 +2160,10 @@ export class IntuneChatService {
     // A tenant send runs under the tenant's lease; Disconnect refuses and drains it. No tenant, no lease.
     return this.leasedScope(noTenant ? undefined : tenant.id, undefined, async () => {
     const providers = await this.host.listProviders();
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const endpointProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const selectedModel = resolveProviderDefaultModel(endpointProvider, persisted.activeModelByProviderId).model;
+    const provider = providerForModel(endpointProvider, selectedModel);
     const providerId = provider.id;
-    const selectedModel = resolveProviderDefaultModel(
-      provider,
-      persisted.activeModelByProviderId,
-    ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
     if (noTenant && input.workspaceContext) {
       throw new Error("Workspaces belong to an organization. Choose one to attach workspace context, or send without it.");
@@ -2213,7 +2234,7 @@ export class IntuneChatService {
     // Attached workspace instructions ("exclude LAB- devices") are read by the model; code answers none of them.
     // Nor does code read a standing instruction earlier in the chat ("for the rest of this chat, exclude WIN-"):
     // once a model wrote an answer here, the conversation memory may hold one, so the model answers.
-    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext && !modelAnsweredBefore(history) ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext && !modelAnsweredBefore(history) ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id, timestampLocale: this.host.timestampLocale }) : undefined;
     if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const userMessage: IntuneChatMessage = {
@@ -2357,9 +2378,11 @@ export class IntuneChatService {
     // Attached workspace context is read by the model; no direct answer from the cache stands in for it.
     // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
     const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs" && !input.workspaceContext && !modelAnsweredBefore(history)
-      ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
-        voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
-          this.graphAggregatesFor(store, tenant.id, [resource])[resource],
+      ? codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), answerGeneratedAt, () => {}, entry => { (toolTrace ??= []).push(entry); }, this.host.timestampLocale) ??
+        voiceAppPlatformCountAnswer(
+          content, cacheStatus,
+          (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource],
+          this.host.timestampLocale,
         )
       : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
@@ -2377,7 +2400,8 @@ export class IntuneChatService {
       responseModel = undefined;
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
-      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]), verifyConsent));
+      const built = noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]);
+      const llm = withTenantDataOutputFilter(gateHostedLlm(this.protectLocalOllama(built, provider, selectedModel), verifyConsent));
       const withMemory = conversationMemory
         ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
         : content;
@@ -2394,6 +2418,7 @@ export class IntuneChatService {
         usedDeterministic = true;
         provenance.add("answer-pack");
         const answerPack = buildAnswerPack({
+          timestampLocale: this.host.timestampLocale,
           question: modelQuestion,
           tenant,
           cacheStatus,
@@ -2499,9 +2524,9 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            // A hosted context overflow says more about the question than the model; a local one is the model's fit.
-            // A provider that could not be reached says nothing about the model.
-            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // Track failures that reflect tool-use reliability. Context overflows apply to
+            // this request, and an unreachable provider did not attempt the tool loop.
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && agentic.reason !== "context-limit")) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
@@ -2659,7 +2684,7 @@ export class IntuneChatService {
       consent: input.hostedProviderConsent,
       nova: Boolean(options.voice || options.scope),
     });
-    const provider = turn.provider;
+    const provider = providerForModel(turn.provider, turn.model);
     const providerId = provider.id;
     // An on-device retry goes out only after a fresh check that the model runs here.
     if (turn.switchedFrom && provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, turn.model))) {
@@ -2790,7 +2815,7 @@ export class IntuneChatService {
     // Attached workspace instructions ("exclude LAB- devices") are read by the model; code answers none of them.
     // Nor does code read a standing instruction earlier in the chat ("for the rest of this chat, exclude WIN-"):
     // once a model wrote an answer here, the conversation memory may hold one, so the model answers.
-    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext && !modelAnsweredBefore(history) ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id }) : undefined;
+    const structured = followUp && !planned.hasWriteIntent && !input.workspaceContext && !modelAnsweredBefore(history) ? planStructuredQuery({ question: content, generatedAt: now, ...(followUp.result ? { previous: followUp.result } : {}), store, tenantId: tenant.id, timestampLocale: this.host.timestampLocale }) : undefined;
     // Code answers this question exactly from one resource; nothing else is planned or refreshed for it.
     if (structured) planned.resources = [structured.resource];
     const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
@@ -3155,7 +3180,21 @@ export class IntuneChatService {
     // Neither does one after a model answer, whose memory may hold a standing instruction code cannot apply.
     const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs" || (!options.voice && input.workspaceContext) || modelAnsweredBefore(history)
       ? undefined
-      : codeAnswer() ?? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+      : codeAnswer() ?? await voiceDeviceEvidenceAnswer(
+          content, cacheStatus, this.buildChatToolContext(tenant, options.signal), answerGeneratedAt,
+          message => sendProgress({ message, stage: "running-tools" }),
+          entry => { (toolTrace ??= []).push(entry); },
+          this.host.timestampLocale,
+        ) ?? voiceInventoryAnswer(content, cacheStatus, this.host.timestampLocale)
+        ?? voiceAppPlatformCountAnswer(
+          content, cacheStatus,
+          (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource],
+          this.host.timestampLocale,
+        ) ?? voiceDeviceSummaryAnswer(
+          content, cacheStatus,
+          () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices,
+          this.host.timestampLocale,
+        );
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -3202,6 +3241,7 @@ export class IntuneChatService {
           model: selectedModel,
         });
       }
+      if (!turn.switchedFrom) built = this.protectLocalOllama(built, provider, selectedModel);
       const llm = withTenantDataOutputFilter(gateHostedLlm(built, verifyConsent));
       fitModel = selectedModel ?? llm.defaultModel;
       const contextualQuestion =
@@ -3219,6 +3259,7 @@ export class IntuneChatService {
         usedDeterministic = true;
         provenance.add("answer-pack");
         let answerPack = buildAnswerPack({
+          timestampLocale: this.host.timestampLocale,
           question: modelQuestion,
           tenant,
           cacheStatus,
@@ -3261,7 +3302,9 @@ export class IntuneChatService {
             assistantContent = chunk.accumulated;
             if (assistantContent.trim()) finishAnswerStep.writing();
             // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-            emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+            // The one fallback call after a compact loop is not shown live: only the complete reply tells a tool
+            // request from an answer, whatever the stream's chunks are, and it is shown in full below.
+            if (!afterCompactLoop) emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
           }
           // After a compact loop the fallback is one model call, so the turn stays bounded.
           if (isCancelled() || nudge >= (afterCompactLoop ? 0 : MAX_PROMISE_NUDGES) || !looksLikeUnkeptPromise(assistantContent)) break;
@@ -3288,7 +3331,8 @@ export class IntuneChatService {
         if (!isCancelled()) engineNotice = notice;
         // The answer was written from the computed result, so a follow-up may narrow it; a blank one shows nothing.
         if (computed && assistantContent.trim()) computedShown = true;
-        emitDelta(assistantContent, "");
+        // A stopped fallback shows nothing of the text held back: the stopped answer replaces it.
+        if (!(afterCompactLoop && isCancelled())) emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
 
@@ -3409,9 +3453,9 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            // A hosted context overflow says more about the question than the model; a local one is the model's fit.
-            // A provider that could not be reached says nothing about the model.
-            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // Track failures that reflect tool-use reliability. Context overflows apply to
+            // this request, and an unreachable provider did not attempt the tool loop.
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && agentic.reason !== "context-limit")) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
@@ -3507,7 +3551,8 @@ export class IntuneChatService {
               ? "The provider's settings changed after you chose it, so nothing was sent with the new settings. Send the question again."
               : caught instanceof Error ? caught.message : String(caught);
             // Nova (voice or a follow-up's scope) never gets an offer: it cannot take an override.
-            modelFit = options.voice || options.scope ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
+            // A reply with reasoning and no answer has its own cause, whatever its text (a model name) matches.
+            modelFit = options.voice || options.scope || reasoningWithoutAnswerInChain(caught) ? undefined : chatModelFitFailure(caught, provider, fitModel) ?? modelFit;
             assistantContent = assistantContent.trim()
               ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
               : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
@@ -3580,7 +3625,7 @@ export class IntuneChatService {
         ? {
             modelFit: {
               ...modelFit,
-              offerId: this.modelFitOffers.issue({
+              ...this.modelFitOffers.issue({
                 conversationId: conversation.id,
                 tenantId: noTenant ? undefined : tenant.id,
                 content,
@@ -3690,7 +3735,7 @@ export class IntuneChatService {
   /** Exact counts for a structured question, from the cache as it is now. */
   private computeStructured(store: IntelligenceSqliteStore, tenantId: string, query: StructuredQuery | undefined, generatedAt: string): ComputedResult | undefined {
     if (!query) return undefined;
-    return computeStructuredResult({ store, tenantId, query, cacheStatus: store.getGraphCacheStatus(tenantId, [...GRAPH_CACHE_RESOURCES]), generatedAt });
+    return computeStructuredResult({ store, tenantId, query, cacheStatus: store.getGraphCacheStatus(tenantId, [...GRAPH_CACHE_RESOURCES]), generatedAt, timestampLocale: this.host.timestampLocale });
   }
 
   /**
@@ -3949,6 +3994,7 @@ export class IntuneChatService {
       tenantId,
       store,
       signal,
+      timestampLocale: this.host.timestampLocale,
       // Titles and follow-ups are checked for tenant names and cached values also without an MCP server.
       privateTerms: mcpPrivateTermsForTenant(tenant),
       cachedTenantValues: () => store.tenantIdentityValues(tenantId),
@@ -4050,7 +4096,7 @@ export class IntuneChatService {
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const model = resolveProviderDefaultModel(provider, persisted.activeModelByProviderId).model;
-    return this.noTenantRoute(input.content.trim(), persisted, provider, model);
+    return this.noTenantRoute(input.content.trim(), persisted, providerForModel(provider, model), model);
   }
 
   private requireHostedChatConsent(
@@ -4079,6 +4125,9 @@ export class IntuneChatService {
       throw new Error(
         "Hosted provider confirmation does not match the selected provider. Confirm the chat send again.",
       );
+    }
+    if (!scheduled && consent.ollamaDestination !== hostedOllamaDestination(provider, model)) {
+      throw new Error("The Ollama destination changed or was not confirmed. Review where the question will be sent and confirm again.");
     }
     if (tenant && consent.noTenant === true) {
       throw new Error(
@@ -4241,29 +4290,67 @@ export class IntuneChatService {
 }
 
 
-/** Tool names the Chat loop offers: a "tool" naming one of these is a request wherever it sits in a reply. */
+/** Tool names the Chat loop offers; protocolReply says when a "tool" naming one makes a reply a request. */
 const CHAT_TOOL_NAME = /^(?:mcp__\S+|splashtop_\S+|list_cached_resources|query_cache|count_cached|find_graph_endpoint|graph_get|refresh_resource|query_drift|web_search)$/;
+
+/** Prose this long around a quoted tool call is an answer that shows the call, not a lead-in to a request. */
+const PROSE_AROUND_REQUEST_LIMIT = 160;
+
+/** Whether a reply leaves a brace open, counting braces outside JSON strings only (a "WIN-{01" value is not one). */
+function leavesBraceOpen(text: string): boolean {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && depth > 0) depth -= 1;
+  }
+  return depth > 0;
+}
+
+/**
+ * The prose of a reply outside its JSON: closed and unclosed code fences and balanced brace spans are cut out,
+ * and an unclosed brace or fence runs to the end, so the body of a cut-short request is never counted as prose.
+ */
+function proseOutsideJson(text: string): string {
+  let rest = text.replace(/```[\s\S]*?```/g, " ").replace(/```[\s\S]*$/, " ");
+  for (let previous = ""; previous !== rest; ) {
+    previous = rest;
+    rest = rest.replace(/\{[^{}]*\}/g, " ");
+  }
+  return rest.replace(/\{[\s\S]*$/, " ").replace(/\s+/g, " ").trim();
+}
 
 /**
  * A reply in the tool loop's JSON protocol: `{ answer }` when it carries an answer text, `{ request }` when it
- * is a tool request or a protocol object with no answer, undefined for prose.
- * - A "tool" naming a Chat tool anywhere in the reply is a request: before or after prose, next to a JSON
- *   example, or cut short with its closing brace missing.
+ * is a tool request or a protocol object with no answer, undefined for prose. Read in this order:
  * - A whole-reply object (bare or in one fence) is read as the loop reads it: final with an answer or content
- *   text is the answer; otherwise a tool, final or kind key makes it a request.
- * - A final answer object after prose ("Hope this helps." after it, or before it) is the answer.
+ *   text is the answer, also when it names a tool too; otherwise a tool, final or kind key makes it a request.
+ * - Otherwise the object the loop reads (the last fenced block or balanced object) is the answer when it is a
+ *   final answer, with prose before or after it.
+ * - A "tool" naming a Chat tool makes the reply a request when the request was cut short, when the prose
+ *   outside the JSON announces a lookup ("I will check the cached data now"), or when that prose is a short
+ *   lead-in ("I need to check:"). A longer prose answer that quotes a tool call as an example stays an answer.
  * - A reply that opens as a protocol object and does not parse was cut short: a request.
  * - Any other JSON, such as an FAQ example inside a prose answer, stays prose.
  */
 function protocolReply(text: string): { answer: string } | { request: true } | undefined {
-  for (const match of text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)) {
-    if (CHAT_TOOL_NAME.test(match[1]!.trim())) return { request: true };
-  }
   const answerOf = (record: Record<string, unknown>): string | undefined => {
     const value = typeof record.answer === "string" ? record.answer : typeof record.content === "string" ? record.content : undefined;
     return value?.trim() ? value.trim() : undefined;
   };
   const bare = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
+  const namesChatTool = [...text.matchAll(/"tool"\s*:\s*"([^"\\]{1,120})"/g)].some((match) => CHAT_TOOL_NAME.test(match[1]!.trim()));
   if (bare.startsWith("{")) {
     let whole: unknown;
     let parses = true;
@@ -4283,10 +4370,19 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
     }
   }
   const extracted = extractLastJsonObject(text);
-  if (extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)) {
-    const record = extracted.value as Record<string, unknown>;
-    const answer = answerOf(record);
-    if (record.final === true && answer) return { answer };
+  const extractedRecord = extracted.found && extracted.valid && extracted.value && typeof extracted.value === "object" && !Array.isArray(extracted.value)
+    ? extracted.value as Record<string, unknown>
+    : undefined;
+  if (extractedRecord?.final === true) {
+    const answer = answerOf(extractedRecord);
+    if (answer) return { answer };
+  }
+  if (namesChatTool) {
+    const unclosedFence = ((text.match(/```/g) ?? []).length % 2) === 1;
+    // Braces are counted from the first one, so a stray quote in the prose before it cannot hide an open brace.
+    const cutShort = unclosedFence || (extracted.found && !extracted.valid) || leavesBraceOpen(text.slice(Math.max(0, text.indexOf("{"))));
+    const outside = proseOutsideJson(text);
+    if (cutShort || outside.length < PROSE_AROUND_REQUEST_LIMIT || announcesLookup(outside)) return { request: true };
   }
   // Opens as a protocol object and does not parse: cut short, never an answer.
   if (/^(?:```(?:json)?\s*)?\{\s*"(?:tool|kind|final|answer|sources)"\s*:/.test(text.trim()) && !(extracted.found && extracted.valid)) return { request: true };
@@ -4295,7 +4391,7 @@ function protocolReply(text: string): { answer: string } | { request: true } | u
 
 /** A local model whose tool loop and one cached-data answer both came back without an answer. */
 const LOCAL_FALLBACK_UNFINISHED =
-  "The local model did not finish an answer. Its answer from cached data was empty, only a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
+  "The local model did not finish an answer. Its answer from cached data was empty, a progress message or a tool request, so no answer is shown. Retry, or select a larger model in Settings, Providers.";
 
 /**
  * Observed agentic capability, per provider+model.
@@ -4305,7 +4401,8 @@ const LOCAL_FALLBACK_UNFINISHED =
  * models and keeps re-attempting models that provably cannot emit the
  * tool schema, burning a round trip on every question before falling
  * back. Record what actually happened instead and stop retrying a model
- * that has failed repeatedly.
+ * that has failed repeatedly. A context overflow is specific to the
+ * current request, so it does not count against the model's tool use.
  *
  * Deliberately in-memory: if the user pulls a better build of the same
  * tag, or the failures were caused by a transient provider problem, a

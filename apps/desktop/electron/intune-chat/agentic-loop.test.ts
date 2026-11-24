@@ -600,6 +600,10 @@ describe("compact budget for a local model in Chat", () => {
       const typedResult = await runAgenticChat({ ...baseInput(store, typed), budget: "compact" });
       assert.equal(typedResult.ok, false);
       if (!typedResult.ok) assert.equal(typedResult.failureReason, "context-too-small");
+      // A reply with reasoning and no answer fails with its own cause, even when its text (a model name) reads like a context limit.
+      const reasoning = Object.assign(new Error('Ollama returned only reasoning from "team-num_ctx:latest" and no answer.'), { name: "OllamaReasoningWithoutAnswerError" });
+      const reasoned: RunLlmApi = { available: true, async complete() { throw reasoning; }, async *stream() {} };
+      await assert.rejects(runAgenticChat({ ...baseInput(store, reasoned), budget: "compact" }), (error) => error === reasoning);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });

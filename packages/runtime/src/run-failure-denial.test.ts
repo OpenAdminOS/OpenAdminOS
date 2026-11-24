@@ -82,3 +82,13 @@ it("stores the Graph denial when an agent wraps the Graph error as its cause", a
   assert.equal(result.accessDenial?.cause, "missing-consent");
   assert.equal(result.accessDenial?.source, "microsoft-graph");
 });
+
+it("records a model reply with reasoning and no answer as the failure cause, also as an agent's cause", async () => {
+  const failure = Object.assign(new Error("Ollama stopped \"gpt-oss:20b\" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning."), { name: "OllamaReasoningWithoutAnswerError" });
+  for (const error of [failure, new Error("Summarizing failed.", { cause: failure })]) {
+    const result = await runFailingWith(error);
+    assert.equal(result.status, "failed");
+    assert.equal(result.failureCause, "reasoning-without-answer");
+  }
+  assert.equal((await runFailingWith(new Error("Ollama timed out after 500ms at http://127.0.0.1:11434/api/chat."))).failureCause, undefined);
+});

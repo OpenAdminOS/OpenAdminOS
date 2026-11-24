@@ -1,3 +1,5 @@
+import type { ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
+import { activeModelProvider, isOnDeviceModel, providerForModel } from "@openadminos/agent-sdk";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -240,6 +242,8 @@ import {
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
+  type AgentScheduleInput,
+  type ScheduleModelDestination,
   type AgentSignalDelivery,
   type AgentSlackDelivery,
   type AgentSummary,
@@ -370,7 +374,7 @@ import {
 } from "./telemetry/usage.js";
 import { DataFolderSealedError, dataFolderSealed, sealDataFolder, unsealDataFolder } from "./data-folder-seal.js";
 import { LOCAL_RESET_MARKER_FILES } from "./local-reset.js";
-import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
+import { LocalResetInProgressError, OrganizationBoundaryError, RunService, gatewayRejectionCoolingDown, scheduleModelDestination, type RunGraphExecution, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -411,6 +415,7 @@ import {
   checkOllama,
   isProviderId,
   ollamaModelIsOnDevice,
+  readLocalOllamaModelCloud,
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
@@ -1609,6 +1614,7 @@ function serializeAuditLogCsv(input: AuditLogSerializeInput): string {
 const AUDIT_RETENTION_NOTE = `Audit events are recorded when they happen and listed in the order they were recorded, not sorted by timestamp: events imported from an earlier version at upgrade may follow newer ones. They are kept for ${AUDIT_LOG_RETENTION_DAYS.toLocaleString("en-US")} days, independent of run-history retention and of disconnecting an organization. Events of runs that retention removed before the audit log existed are not in it, nor configuration changes older than the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")} kept until then. In CSV, a cell that starts with =, +, - or @, also after spaces, or with a tab or carriage return, gets a leading apostrophe so a spreadsheet does not run it as a formula.`;
 
 export interface AppStateStoreOptions {
+  chatDateTimeLocale?: ChatDateTimeLocale;
   filePath: string;
   tokenStore: TokenCacheStorage;
   openBrowser?(url: string): Promise<void>;
@@ -1801,7 +1807,7 @@ function errorText(cause: unknown): string {
 export interface ProviderEndpointBinding {
   endpoint: string | undefined;
   /** A model fit binding also covers Lemonade's address (modelFitProviderEndpoint); a Nova binding keeps its own scope. */
-  scope?: "model-fit";
+  scope?: "model-fit" | "schedule";
 }
 
 /** A bound model build found its provider configured for another endpoint; nothing was sent. */
@@ -2108,6 +2114,7 @@ export class AppStateStore {
     });
     const host = this;
     this.chatService = new IntuneChatService({
+      timestampLocale: typeof options === "string" ? undefined : options.chatDateTimeLocale,
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
       tenantSignal: (tenantId) => this.tenantLifecycle.signal(tenantId),
@@ -2117,6 +2124,7 @@ export class AppStateStore {
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      ...(!host.llmFactory ? { verifyLocalOllamaModel: ollamaModelIsOnDevice } : {}),
       providerTarget: (providerId) => host.providerTarget(providerId),
       now: () => host.clock(),
       buildLlm: (providerId, model, binding) => host.buildLlm(providerId, model, binding),
@@ -2203,6 +2211,7 @@ export class AppStateStore {
       serialize: (task) => host.serialize(task),
       listProviders: () => host.listProviders(),
       verifyOnDeviceModel: (providerId, model) => verifyOnDeviceModel(providerId, model),
+      ...(!host.llmFactory ? { verifyLocalOllamaModel: ollamaModelIsOnDevice, readLocalOllamaModelCloud } : {}),
       providerTarget: (providerId) => host.providerTarget(providerId),
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
@@ -2306,17 +2315,28 @@ export class AppStateStore {
       },
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
-      complete: async (p, question, context, planning) => {
+      complete: async (p, question, context, { model, isLocal, planning }) => {
         // Egress of tenant evidence to the model: refused for a closing
         // tenant, and stopped by its signal when Disconnect begins.
         this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
-        const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
+        const localOllamaEndpoint = p.providerId === "ollama" && isLocal === true
+          ? resolveOllamaEndpoint().replace(/\/$/, "")
+          : undefined;
+        const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId, model,
+          localOllamaEndpoint ? { endpoint: localOllamaEndpoint } : undefined));
+
         if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
         this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
         const system = withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? ""));
         // Each model call has one minute; with the promise nudge an answer takes at most three calls.
         const once = eachAttemptWithin(
-          async (prompt, signal) => (await llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,system,prompt })).text,
+          async (prompt, signal) => {
+            if (localOllamaEndpoint && (!model || !(await ollamaModelIsOnDevice(model, localOllamaEndpoint)))) {
+              throw new Error(`OpenAdminOS could not confirm that ${model ?? "the assigned Ollama model"} still runs on this device. Refresh Ollama in Settings, Providers, then review the teammate and try again.`);
+            }
+            signal.throwIfAborted();
+            return (await llm.complete({ model, signal, maxTokens: planning ? 600 : 1800, temperature: 0.1, system, prompt })).text;
+          },
           60000,
           "The assigned provider did not answer within one minute. Check its status and try again.",
           this.tenantLifecycle.signal(p.tenantId),
@@ -2389,6 +2409,7 @@ export class AppStateStore {
   }
 
   close(): void {
+    this.stopEmbeddingModelDownload();
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
     void this.mcpHost.closeAll();
@@ -2487,6 +2508,7 @@ export class AppStateStore {
    */
   markLocalResetCommitted(): void {
     this.localResetCommitted = true;
+    this.embeddingDownload?.abort(new Error("OpenAdminOS is resetting."));
     this.auditLog.freezeSideFiles();
     // The work that writes on its own stops first, so a guard that failed
     // to install would still leave nothing running.
@@ -3063,7 +3085,7 @@ export class AppStateStore {
       appVersion: this.appVersion,
       platform: process.platform,
       arch: process.arch,
-      providerIsLocal: activeProvider?.isLocal === true,
+      providerIsLocal: activeModelProvider(activeProvider, persisted.activeModelByProviderId)?.isLocal === true,
       tenantCount: persisted.tenants.length,
       installedAgentCount: persisted.installedAgents.length,
       runCount: persisted.runs.length,
@@ -3323,6 +3345,15 @@ export class AppStateStore {
     }
   }
 
+  private embeddingDownload?: AbortController;
+  private embeddingDownloadsStopped = false;
+
+  /** Stops the app's embedding model pull and prevents new ones before exit. */
+  stopEmbeddingModelDownload(): void {
+    this.embeddingDownloadsStopped = true;
+    this.embeddingDownload?.abort(new Error("OpenAdminOS is closing."));
+  }
+
   /**
    * Pull the embedding model in the background when Ollama is running
    * and the model is missing. Same contract as the index install: never
@@ -3332,30 +3363,35 @@ export class AppStateStore {
    * on the next launch rather than a day later.
    */
   async autoInstallEmbeddingModel(): Promise<void> {
+    const skipped = (reason: string) => console.info("[retrieval] automatic embedding model pull skipped:", reason);
+    if (this.embeddingDownloadsStopped) return skipped("OpenAdminOS is closing.");
+    if (this.localResetStarted) return skipped("OpenAdminOS is resetting.");
+    if (this.embeddingDownload) return skipped("An embedding model check or download is already running.");
+    const controller = new AbortController();
+    this.embeddingDownload = controller;
+    const { signal } = controller;
     try {
       const persisted = await this.read();
-      if (persisted.retrievalAutoInstall === false) return;
+      signal.throwIfAborted();
+      if (persisted.retrievalAutoInstall === false) return skipped("Automatic installation is off.");
       const endpoint = embeddingEndpoint();
-      const state = await embeddingModelState(endpoint);
+      const state = await embeddingModelState(endpoint, undefined, undefined, signal);
+      signal.throwIfAborted();
       if (state.error) throw new Error(state.error);
-      if (!state.ollamaReachable || state.installed) return;
+      if (!state.ollamaReachable) return skipped("Ollama is not reachable.");
+      if (state.installed) return skipped("The embedding model is already installed.");
 
       const lastAttempt = persisted.embeddingModelPullAttemptedAt;
       if (lastAttempt) {
         const age = Date.now() - new Date(lastAttempt).getTime();
-        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
+        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return skipped("A download was attempted in the last 24 hours.");
       }
-      await this.serialize(async () => {
-        const current = await this.read();
-        await this.write({
-          ...current,
-          embeddingModelPullAttemptedAt: new Date().toISOString(),
-        });
-      });
-
+      // Record only settled attempts so quitting during a pull doesn't delay the next launch.
+      const attemptedAt = new Date().toISOString();
       try {
-        await pullEmbeddingModel(endpoint);
+        await pullEmbeddingModel(endpoint, undefined, undefined, signal);
       } catch (error) {
+        signal.throwIfAborted();
         // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
         // A stall of the local Ollama is not a registry failure; its own message names the recovery.
         const message = error instanceof EmbeddingPullStalledError ? error.message :
@@ -3364,22 +3400,25 @@ export class AppStateStore {
         // Like an unreachable Ollama, a stalled one is not the day's attempt, so the next launch tries again.
         const stalled = error instanceof EmbeddingPullStalledError;
         await this.serialize(async () => {
-          const { embeddingModelPullAttemptedAt, ...current } = await this.read();
-          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt }), embeddingModelPullError: message });
+          const { embeddingModelPullAttemptedAt: _previous, ...current } = await this.read();
+          signal.throwIfAborted();
+          await this.write({ ...current, ...(stalled ? {} : { embeddingModelPullAttemptedAt: attemptedAt }), embeddingModelPullError: message });
         });
+        signal.throwIfAborted();
         this.emitStateChanged("retrieval-embedding-failed");
         throw error;
       }
       await this.serialize(async () => {
         const { embeddingModelPullError: _cleared, ...rest } = await this.read();
-        await this.write(rest);
+        signal.throwIfAborted();
+        await this.write({ ...rest, embeddingModelPullAttemptedAt: attemptedAt });
       });
+      signal.throwIfAborted();
       this.emitStateChanged("retrieval-embedding-installed");
     } catch (error) {
-      console.info(
-        "[retrieval] automatic embedding model pull skipped:",
-        error instanceof Error ? error.message : error,
-      );
+      skipped(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.embeddingDownload = undefined;
     }
   }
 
@@ -4013,7 +4052,10 @@ export class AppStateStore {
     const pendingScan = (await this.read()).firstRunScan === "pending";
     // listProviders serves the scan's results or "not checked" while pending.
     const providers = await this.listProviders();
-    const persisted = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
+    const selected = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
+    const persisted = selected.installedAgents.some((agent) => agent.schedule && !agent.schedule.modelDestination)
+      ? await this.migrateScheduleDestinations(providers)
+      : selected;
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
@@ -4803,7 +4845,9 @@ export class AppStateStore {
         system:
           "Connectivity smoke test. Reply with exactly: OPENADMINOS_PROVIDER_OK",
         prompt: "Reply with exactly: OPENADMINOS_PROVIDER_OK",
-        maxTokens: 24,
+        // Room for models that always reason first (gpt-oss at low effort
+        // uses about 20 tokens here) to also write the reply.
+        maxTokens: 64,
       });
       const normalized = completion.text.trim();
       const ok = normalized.includes("OPENADMINOS_PROVIDER_OK");
@@ -5888,7 +5932,7 @@ export class AppStateStore {
       const state = await this.getAppState();
       const provider = state.providers.find(p => p.id === state.activeProviderId);
       if (state.activeTenantId !== options.scope.tenantId || state.activeProviderId !== options.scope.providerId ||
-          resolveProviderDefaultModel(provider, state.activeModelByProviderId).model !== options.scope.model || provider?.isLocal !== options.scope.isLocal)
+          resolveProviderDefaultModel(provider, state.activeModelByProviderId).model !== options.scope.model || providerForModel(provider, options.scope.model)?.isLocal !== options.scope.isLocal)
         throw new Error("Nova's tenant or provider changed. Start a new conversation.");
     };
     await check();
@@ -6175,9 +6219,48 @@ export class AppStateStore {
     return this.getAppState();
   }
 
+  private async captureScheduleModel(
+    state: PersistedState,
+    agent: AgentSummary,
+    providers: readonly ProviderSummary[],
+  ): Promise<ScheduleModelDestination> {
+    const destination = scheduleModelDestination(state, agent, providers);
+    return { ...destination, endpointFingerprint: await this.providerDestination(destination.providerId) };
+  }
+
+  private async migrateScheduleDestinations(providers?: readonly ProviderSummary[]): Promise<PersistedState> {
+    const persisted = await this.read();
+    const unpinned = (agent: AgentSummary) => agent.schedule && !agent.schedule.modelDestination;
+    if (!persisted.installedAgents.some(unpinned)) return persisted;
+
+    return this.serialize(async () => {
+      const current = await this.read();
+      if (!current.installedAgents.some(unpinned)) return current;
+      const listed = providers ?? await this.listProviders();
+      const installedAgents = await Promise.all(current.installedAgents.map(async (agent) => {
+        if (!agent.schedule || agent.schedule.modelDestination) return agent;
+        const modelDestination = await this.captureScheduleModel(current, agent, listed);
+        const provider = listed.find((entry) => entry.id === modelDestination.providerId);
+        const needsReview = !provider || !isOnDeviceModel(provider, modelDestination.model);
+        const lastSkipReason = agent.schedule.lastSkipReason ?? (needsReview
+          ? modelDestination.ollamaCloud
+            ? "Skipped: This schedule uses Ollama Cloud on ollama.com. Review the schedule to continue."
+            : "Skipped: Review the schedule to continue with the current model destination."
+          : undefined);
+        return {
+          ...agent,
+          schedule: { ...agent.schedule, modelDestination, ...(lastSkipReason ? { lastSkipReason } : {}) },
+        };
+      }));
+      const next = { ...current, installedAgents };
+      await this.write(next);
+      return next;
+    });
+  }
+
   async updateAgentSchedule(
     slug: string,
-    schedule: AgentSchedule | null,
+    schedule: AgentScheduleInput | null,
   ): Promise<AppState> {
     const updatedAt = new Date().toISOString();
     if (schedule !== null) {
@@ -6201,6 +6284,7 @@ export class AppStateStore {
           throw new Error(`updateAgentSchedule: ${key} must be a boolean when provided.`);
         }
       }
+      if (schedule.enabled && schedule.reviewModelDestination !== true) await this.migrateScheduleDestinations();
     }
 
     await this.serialize(async () => {
@@ -6222,10 +6306,18 @@ export class AppStateStore {
         const { schedule: _, ...rest } = existing;
         next[idx] = rest;
       } else {
-        const activationAnchor =
-          schedule.enabled && existing.schedule?.enabled !== true
-            ? updatedAt
-            : undefined;
+        const reviewModel = schedule.enabled && (existing.schedule?.enabled !== true || schedule.reviewModelDestination === true);
+        const modelDestination = reviewModel || !existing.schedule?.modelDestination
+          ? await this.captureScheduleModel(persisted, existing, await this.listProviders())
+          : existing.schedule.modelDestination;
+        if (reviewModel && schedule.reviewModelDestination && modelDestination.ollamaCloud === false && modelDestination.model) {
+          const liveCloud = await readLocalOllamaModelCloud(modelDestination.model);
+          if (liveCloud !== false) {
+            throw new Error(`OpenAdminOS could not confirm that ${modelDestination.model} still runs on this device. Refresh Ollama in Settings, Providers, then review the schedule again.`);
+          }
+        }
+        const activationAnchor = reviewModel ? updatedAt : undefined;
+        const lastSkipReason = reviewModel ? undefined : existing.schedule?.lastSkipReason;
         // Ownership is decided once, when the schedule is created: it
         // belongs to the active organization, or waits unassigned with
         // none active. An edit keeps it, including unassigned, so changing
@@ -6242,6 +6334,8 @@ export class AppStateStore {
             ...(organizationId ? { organizationId } : {}),
             enabled: schedule.enabled,
             intervalSeconds: Math.floor(schedule.intervalSeconds),
+            modelDestination,
+            ...(lastSkipReason ? { lastSkipReason } : {}),
             notifyOnSuccess: schedule.notifyOnSuccess ?? existing.schedule?.notifyOnSuccess ?? true,
             notifyOnFailure: schedule.notifyOnFailure ?? existing.schedule?.notifyOnFailure ?? true,
             notifyOnChangeOnly:
@@ -6312,7 +6406,7 @@ export class AppStateStore {
    * same app entrypoint in hidden mode while the user is signed in.
    */
   async fireDueSchedules(): Promise<void> {
-    const persisted = await this.read();
+    const persisted = await this.migrateScheduleDestinations();
     const nowMs = Date.now();
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
@@ -6339,7 +6433,7 @@ export class AppStateStore {
 
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
-      if (!schedule?.enabled) continue;
+      if (!schedule?.enabled || schedule.lastSkipReason) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
       if (!activeOrganization || schedule.organizationId !== activeOrganization.id) {
         waiting += 1;
@@ -6365,14 +6459,6 @@ export class AppStateStore {
 
       try {
         await this.startRun(agent.slug, { trigger: "schedule" });
-        await this.updateAgentSchedule(agent.slug, {
-          enabled: true,
-          intervalSeconds: schedule.intervalSeconds,
-          notifyOnSuccess: schedule.notifyOnSuccess,
-          notifyOnFailure: schedule.notifyOnFailure,
-          notifyOnChangeOnly: schedule.notifyOnChangeOnly,
-          lastScheduledRunAt: new Date(nowMs).toISOString(),
-        });
       } catch (error) {
         // The organization changed after this tick read the state, or the
         // schedule lost its assignment: it waits for its organization. No
@@ -6447,13 +6533,18 @@ export class AppStateStore {
       ],
     };
     if (failedRun.tenantId) await this.persistRunSnapshot(failedRun);
-    await this.updateAgentSchedule(agent.slug, {
-      enabled: true,
-      intervalSeconds: schedule.intervalSeconds,
-      notifyOnSuccess: schedule.notifyOnSuccess,
-      notifyOnFailure: schedule.notifyOnFailure,
-      notifyOnChangeOnly: schedule.notifyOnChangeOnly,
-      lastScheduledRunAt: now,
+    await this.serialize(async () => {
+      const latest = await this.read();
+      const installedAgents = latest.installedAgents.map((entry) =>
+        entry.slug === agent.slug && entry.schedule?.enabled && !entry.schedule.lastSkipReason &&
+          entry.schedule.lastScheduledRunAt === schedule.lastScheduledRunAt &&
+          (entry.schedule.organizationId === schedule.organizationId || !entry.schedule.organizationId) &&
+          JSON.stringify(entry.schedule.modelDestination) === JSON.stringify(schedule.modelDestination)
+          ? { ...entry, schedule: { ...entry.schedule, lastScheduledRunAt: now } }
+          : entry);
+      if (installedAgents.some((entry, index) => entry !== latest.installedAgents[index])) {
+        await this.write({ ...latest, installedAgents });
+      }
     });
   }
 
@@ -6585,9 +6676,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           },
     );
 
-    const provider = (await this.listProviders()).find(
+    const endpoint = (await this.listProviders()).find(
       (candidate) => candidate.id === persisted.activeProviderId,
     );
+    const provider = activeModelProvider(endpoint, persisted.activeModelByProviderId);
     checks.push(
       this.providerCanRun(provider)
         ? {
@@ -7782,7 +7874,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const model = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
     if (state.activeProviderId !== input.providerId || model !== input.model) throw new Error(NOVA_FOLLOW_UP_PROVIDER_CHANGED);
     const organizationId = state.activeOrganizationId;
-    const hosted = !provider?.isLocal;
+    const hosted = !providerForModel(provider, model)?.isLocal;
     const acknowledgedAt = this.clock().toISOString();
     // Where the provider runs is part of the follow-up: a local provider
     // moved off this device later does not get the question. A hosted
@@ -7891,14 +7983,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         tenantConnected: state.tenants.some((tenant) => tenant.id === followUp.tenantId) && this.tenantLifecycle.isWritable(followUp.tenantId),
         activeProviderId: state.activeProviderId,
         ...(activeModel ? { activeModel } : {}),
-        activeProviderLocal: provider?.isLocal === true,
+        activeProviderLocal: providerForModel(provider, activeModel)?.isLocal === true,
         ...(activeEndpoint ? { activeProviderEndpoint: activeEndpoint } : {}),
         providerAllowed,
       });
       let reason: string | undefined;
       if (decision === "skipped-provider" && !providerAllowed) reason = NOVA_FOLLOW_UP_PROVIDER_NOT_ALLOWED;
       else if (decision === "skipped-provider" && state.activeProviderId === followUp.providerId &&
-          ((provider?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== activeEndpoint))
+          ((providerForModel(provider, activeModel)?.isLocal === true) !== followUp.providerLocal || (followUp.providerEndpoint ?? undefined) !== activeEndpoint))
         reason = NOVA_FOLLOW_UP_PROVIDER_MOVED;
       return { decision, provider, ...(activeEndpoint ? { endpoint: activeEndpoint } : {}), ...(reason ? { reason } : {}) };
     };
@@ -7946,7 +8038,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
                 () => undefined,
                 {
                   signal: AbortSignal.any([signal, controller.signal]),
-                  scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: provider?.isLocal === true },
+                  scope: { tenantId: followUp.tenantId, providerId: followUp.providerId, ...(followUp.model ? { model: followUp.model } : {}), isLocal: providerForModel(provider, followUp.model)?.isLocal === true },
                   // Checked against the stored follow-up instead of the five-minute window of a typed send.
                   scheduledConsent: (check) => this.novaFollowUpConsentMatches(followUp.id, check, fresh.endpoint),
                   // The model is built for the endpoint the follow-up was set for, not one saved since.
@@ -8207,7 +8299,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       persisted.activeTenantId,
     )?.id;
     const next = [...scheduledAgents
-      .filter((agent) => activeOrganizationId !== undefined && agent.schedule?.organizationId === activeOrganizationId)
+      .filter((agent) => !agent.schedule?.lastSkipReason && activeOrganizationId !== undefined && agent.schedule?.organizationId === activeOrganizationId)
       .map((agent) => {
         const schedule = agent.schedule;
         const last = schedule?.lastScheduledRunAt
@@ -8222,7 +8314,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule");
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
-    const latestFailureMessage = latestWake?.status === "failed"
+    // Destination-review skips were recorded as failed runs without a start time.
+    // Their current review notice comes from the schedule, even after a restart.
+    const skipMessage = latestWake?.error ?? latestWake?.summary;
+    const skippedForReview = !latestWake?.startedAt &&
+      skipMessage?.startsWith("Skipped: ") &&
+      skipMessage.endsWith("Review the schedule to continue.");
+    const latestFailureMessage = latestWake?.status === "failed" && !skippedForReview
       ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial, latestWake.graphDenialChecked === true)
       : undefined;
     return {
@@ -9205,6 +9303,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.localResetStarted) throw new LocalResetInProgressError();
     this.localResetWorkInFlight += 1;
     try {
+      if (options.trigger === "schedule" && !options.office) await this.migrateScheduleDestinations();
       return await this.runService.startRun(agentSlug, options, boundary);
     } finally {
       this.localResetWorkInFlight -= 1;
@@ -9255,7 +9354,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (binding) {
       const persistedForEndpoint = providerId === "azure-openai" ? await this.read() : undefined;
-      requireBound(binding.scope === "model-fit" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
+      requireBound(binding.scope === "model-fit" || binding.scope === "schedule" ? modelFitProviderEndpoint(providerId, persistedForEndpoint) : novaProviderEndpoint(providerId, persistedForEndpoint));
       // An Azure OpenAI request goes to the configured deployment, so a model fit request for the
       // deployment the admin reviewed is refused when another one is configured now.
       if (binding.scope === "model-fit" && persistedForEndpoint && model !== undefined && model.trim() !== this.azureOpenAIConfigFromState(persistedForEndpoint).deployment.trim()) {
@@ -9282,11 +9381,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // The endpoint is resolved once and given to the adapter, so the one compared is the one used.
       const endpoint = resolveOllamaEndpoint();
       requireBound(endpoint.replace(/\/$/, ""));
-      const options: { defaultModel?: string; endpoint?: string } = binding ? { endpoint } : {};
-      if (defaultModel) {
-        options.defaultModel = defaultModel;
-      }
-      return createOllamaLlm(options);
+      // The adapter reads the model's current family from /api/tags before
+      // each request, so a model replaced under its name gets its own think value.
+      return createOllamaLlm({
+        endpoint,
+        ...(defaultModel ? { defaultModel } : {}),
+      });
     }
     if (providerId === "apple-foundation") {
       return createAppleFoundationLlm({ defaultModel });
@@ -9302,7 +9402,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     if (providerId === "lemonade") {
       // A model fit binding is checked on the address the adapter is built with.
-      if (binding?.scope === "model-fit") {
+      if (binding?.scope === "model-fit" || binding?.scope === "schedule") {
         const endpoint = resolveLemonadeEndpoint();
         requireBound(endpoint.replace(/\/$/, ""));
         return createLemonadeLlm({ endpoint, ...(defaultModel ? { defaultModel } : {}) });

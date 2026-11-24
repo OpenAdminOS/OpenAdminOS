@@ -87,7 +87,7 @@ describe("probeLemonadeLlm", () => {
     }, async () => {
       const probe = await probeLemonadeLlm();
       assert.equal(probe.status, "not-running");
-      assert.equal(probe.detail, "Lemonade isn't running. Start Lemonade Server, then try again.");
+      assert.equal(probe.detail, "The connection to Lemonade on http://127.0.0.1:13305/v1 was refused. Start Lemonade Server, then try again.");
     });
   });
 
@@ -99,11 +99,11 @@ describe("probeLemonadeLlm", () => {
     });
   });
 
-  it("keeps the plain HTTP message for other statuses", async () => {
+  it("names the endpoint and HTTP status for other errors", async () => {
     await withFetch(async () => new Response("", { status: 500 }), async () => {
       const probe = await probeLemonadeLlm();
       assert.equal(probe.status, "error");
-      assert.equal(probe.detail, "Lemonade responded with HTTP 500.");
+      assert.equal(probe.detail, "Lemonade on http://127.0.0.1:13305/v1 responded with HTTP 500. Check the server address and configuration, then try again.");
     });
   });
 });
@@ -176,7 +176,7 @@ describe("createLemonadeLlm", () => {
     });
   });
 
-  it("keeps the partial answer when a stream sends a string error, as before", async () => {
+  it("reports a string context error even after a partial streamed answer", async () => {
     await withFetch(async (input) => {
       if (String(input).endsWith("/models")) return listed("Qwen3-0.6B-GGUF");
       const encoder = new TextEncoder();
@@ -189,13 +189,28 @@ describe("createLemonadeLlm", () => {
       });
       return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
     }, async () => {
-      const chunks = [];
-      for await (const chunk of createLemonadeLlm({ defaultModel: "Qwen3-0.6B-GGUF" }).stream({ prompt: "Say hi" })) {
-        chunks.push(chunk);
-      }
-      assert.equal(chunks.at(-1)?.accumulated, "Hi");
-      assert.equal(chunks.at(-1)?.done, true);
+      await assert.rejects(async () => {
+        for await (const _chunk of createLemonadeLlm({ defaultModel: "Qwen3-0.6B-GGUF" }).stream({ prompt: "Say hi" })) { /* drain */ }
+      }, /Context size has been exceeded/);
     });
+  });
+
+  it("keeps the context error type and counts from successful HTTP responses", async () => {
+    const payload = { error: { type: "exceed_context_size_error", message: "Request too large.", n_prompt_tokens: 9000, n_ctx: 4096 } };
+    for (const mode of ["complete", "stream-json", "stream-event"]) {
+      await withFetch(async (input) => {
+        if (String(input).endsWith("/models")) return listed("Qwen3-0.6B-GGUF");
+        return mode === "stream-event"
+          ? new Response(`data: ${JSON.stringify(payload)}\n\n`, { headers: { "content-type": "text/event-stream" } })
+          : jsonResponse(payload);
+      }, async () => {
+        const llm = createLemonadeLlm({ defaultModel: "Qwen3-0.6B-GGUF" });
+        await assert.rejects(async () => {
+          if (mode === "complete") await llm.complete({ prompt: "x" });
+          else for await (const _chunk of llm.stream({ prompt: "x" })) { /* drain */ }
+        }, /exceed_context_size_error.*"n_prompt_tokens":9000.*"n_ctx":4096/);
+      });
+    }
   });
 
   it("does not read an LM Studio context wording from Lemonade as an LM Studio error", async () => {

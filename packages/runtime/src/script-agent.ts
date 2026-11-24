@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 import type {
@@ -21,7 +22,7 @@ import type {
   SandboxBrokerRequest,
   SandboxBrokerResponse,
 } from "@openadminos/agent-sdk";
-import { ContextTooSmallError } from "@openadminos/agent-sdk";
+import { ContextTooSmallError, contextTooSmallFromError } from "@openadminos/agent-sdk";
 
 import { agentTemplateToRegistrySummary } from "./agent-template.js";
 import {
@@ -31,10 +32,72 @@ import {
   type SandboxRunResult,
   type SandboxRunner,
 } from "./sandbox.js";
-import { createSandboxBroker } from "./sandbox-broker.js";
+import { createSandboxBroker, type ScriptExitRecord } from "./sandbox-broker.js";
 
 const SCRIPT_RESULT_FILE = "result.json";
 const BROKER_DIR_ENV = "OPENADMINOS_BROKER_DIR";
+const EXIT_RECORD_ENV = "OPENADMINOS_EXIT_RECORD";
+
+/**
+ * Loaded into the script's Node process before its entrypoint: records the
+ * error the script ends with (an uncaught exception or an unhandled
+ * rejection), without changing how Node reports it or exits: its message, and
+ * the broker request id it or an error in its cause chain carries with the
+ * message of the error that carries it. Only the
+ * launched process's main thread records: the destination is taken out of
+ * the environment as the hook loads, so Workers and child processes, which
+ * inherit the hook, have none. An error the script handles itself (an
+ * uncaughtException listener or a capture callback) is not recorded; one
+ * that escapes such a listener or callback is.
+ */
+const EXIT_RECORD_HOOK = `import { writeFileSync } from "node:fs";
+import { isMainThread } from "node:worker_threads";
+const target = process.env.${EXIT_RECORD_ENV};
+delete process.env.${EXIT_RECORD_ENV};
+if (isMainThread && target) {
+  const record = (error) => {
+    try {
+      const message = error instanceof Error ? String(error.message) : String(error);
+      let carrier;
+      for (let current = error, depth = 0; current && depth < 8; current = current.cause, depth += 1) {
+        if (typeof current.brokerRequestId === "string") { carrier = current; break; }
+      }
+      writeFileSync(target, JSON.stringify(carrier
+        ? { message, brokerRequestId: carrier.brokerRequestId, brokerErrorMessage: String(carrier.message) }
+        : { message }));
+    } catch {}
+  };
+  // Node tells monitor listeners, then uncaughtException listeners, through
+  // process.emit. An error that escapes either ends the process with that
+  // error instead, so it is the one recorded. The original is recorded once
+  // the monitors ran, unless the script handles it itself.
+  const emit = process.emit;
+  process.emit = function (event, ...args) {
+    if (event !== "uncaughtExceptionMonitor" && event !== "uncaughtException") return emit.call(this, event, ...args);
+    let result;
+    try {
+      result = emit.call(this, event, ...args);
+    } catch (escaped) {
+      record(escaped);
+      throw escaped;
+    }
+    if (event === "uncaughtExceptionMonitor" && process.listenerCount("uncaughtException") === 0 && !process.hasUncaughtExceptionCaptureCallback()) record(args[0]);
+    return result;
+  };
+  // The same for a capture callback that throws.
+  const setCapture = process.setUncaughtExceptionCaptureCallback;
+  process.setUncaughtExceptionCaptureCallback = function (callback) {
+    return setCapture.call(this, typeof callback !== "function" ? callback : function (error) {
+      try {
+        return callback.call(this, error);
+      } catch (escaped) {
+        record(escaped);
+        throw escaped;
+      }
+    });
+  };
+}
+`;
 const BROKER_REQUEST_SUFFIX = ".request.json";
 const BROKER_RESPONSE_SUFFIX = ".response.json";
 const BROKER_POLL_MS = 10;
@@ -114,6 +177,9 @@ async function runScriptAgent(
   const brokerDir = path.join(workDir, "broker");
   await mkdir(brokerDir, { recursive: true });
   const resultPath = path.join(workDir, SCRIPT_RESULT_FILE);
+  const exitHookPath = path.join(workDir, "exit-record-hook.mjs");
+  const exitRecordPath = path.join(workDir, "exit-record.json");
+  await writeFile(exitHookPath, EXIT_RECORD_HOOK);
   const runner = options.sandboxRunner ?? createMxcSandboxRunner();
   const policy = agentTemplateToRegistrySummary(manifest);
   const broker = createSandboxBroker({
@@ -146,6 +212,8 @@ async function runScriptAgent(
 
         const commandLine = [
           quoteCommandArg(nodePath),
+          "--import",
+          quoteCommandArg(pathToFileURL(exitHookPath).href),
           quoteCommandArg(entrypoint),
           "--result",
           quoteCommandArg(resultPath),
@@ -167,6 +235,7 @@ async function runScriptAgent(
               ...process.env,
               ELECTRON_RUN_AS_NODE: "1",
               [BROKER_DIR_ENV]: brokerDir,
+              [EXIT_RECORD_ENV]: exitRecordPath,
             },
           });
         } finally {
@@ -181,21 +250,32 @@ async function runScriptAgent(
         }
 
         if (sandboxResult.exitCode !== 0) {
-          // A script that ended on a refused model request (its error names
-          // the refusal) fails with the typed reason, not its stack trace.
-          // A script that caught the refusal and failed later keeps its error.
-          const tooLarge = broker.getContextFailure();
-          if (tooLarge && endedOnSizeRefusal(sandboxResult.stderr)) {
-            throw new ContextTooSmallError(tooLarge);
-          }
           const detail = sandboxResult.stderr.trim() || `exit code ${sandboxResult.exitCode}`;
+          // A model reply with reasoning and no answer is kept as the cause
+          // when the error the script ended with, as its process recorded
+          // it, carries it. That record decides before any reading of the
+          // script's output.
+          const ended = await readExitRecord(exitRecordPath);
+          const reasoning = ended ? broker.llmFailureFor(ended) : undefined;
+          const terminal = ended ? broker.failuresEndedWith(ended) : [];
+          // A script that ended on a refused model request fails with the
+          // typed reason, not its stack trace. A script that caught the
+          // refusal and failed later keeps its error. The recorded broker
+          // failure decides; only without one is the output read for it.
+          const sizeRefusals = terminal.map((error) => contextTooSmallFromError(error));
+          const tooLarge = reasoning
+            ? undefined
+            : terminal.length > 0
+              ? sizeRefusals.every((failure) => failure !== undefined) ? sizeRefusals.at(-1) : undefined
+              : endedOnSizeRefusal(sandboxResult.stderr) ? broker.getContextFailure() : undefined;
+          if (tooLarge) throw new ContextTooSmallError(tooLarge);
           // The script sees only the message of a Graph denial. When it exits
           // on that denial, the typed error is kept as the cause so the run
           // records the Graph denial.
-          const denied = broker.graphDenialFor(detail);
+          const cause = reasoning ?? broker.graphDenialFor(detail);
           throw new Error(
             `MXC script agent "${manifest.descriptor.id}" failed: ${truncate(detail, 600)}`,
-            denied ? { cause: denied } : undefined,
+            cause ? { cause } : undefined,
           );
         }
 
@@ -204,6 +284,23 @@ async function runScriptAgent(
     );
   } finally {
     await rm(runRoot, { recursive: true, force: true });
+  }
+}
+
+/** The error the script ended with, when its process recorded one. */
+async function readExitRecord(recordPath: string): Promise<ScriptExitRecord | undefined> {
+  try {
+    const record = JSON.parse(await readFile(recordPath, "utf8")) as { message?: unknown; brokerRequestId?: unknown; brokerErrorMessage?: unknown };
+    if (typeof record.message !== "string") return undefined;
+    return {
+      message: record.message,
+      ...(typeof record.brokerRequestId === "string" ? { brokerRequestId: record.brokerRequestId } : {}),
+      ...(typeof record.brokerRequestId === "string" && typeof record.brokerErrorMessage === "string"
+        ? { brokerErrorMessage: record.brokerErrorMessage }
+        : {}),
+    };
+  } catch {
+    return undefined;
   }
 }
 

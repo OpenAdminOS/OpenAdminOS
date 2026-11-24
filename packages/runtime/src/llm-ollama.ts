@@ -16,6 +16,12 @@ export interface OllamaProviderOptions {
   timeoutMs?: number;
   /** How long reading the model's context limit may take (tests). */
   lookupTimeoutMs?: number;
+  /**
+   * Read the model's entry from /api/tags (which loads no model) before each
+   * request, so a model replaced under the same name between two requests on
+   * this adapter gets its own think value. On unless set to false.
+   */
+  refreshModelFamily?: boolean;
 }
 
 interface OllamaChatChunk {
@@ -24,9 +30,8 @@ interface OllamaChatChunk {
     content?: string;
     /**
      * Ollama 0.10+ emits reasoning-model chain-of-thought in this
-     * separate field. We capture it so the Reasoning tab can show it
-     * and so we can fall back to using it as the answer if the model
-     * exhausts its token budget inside the reasoning phase.
+     * separate field. It is never used as the answer; it only tells us
+     * the model reasoned without writing one.
      */
     thinking?: string;
   };
@@ -119,6 +124,24 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       if (!model) {
         throw new Error("No Ollama model available. Pull a model with `ollama pull <model>`.");
       }
+      // The installed model the name resolves to: what is known about the
+      // model is kept under it, while the request sends the name as given.
+      // A newer version read that applied while the list was read decides.
+      const settleInstalledModel = async (): Promise<string> => {
+        let installed = await resolveOllamaModel(endpoint, model, opts.signal);
+        for (let pass = 0; pass < 2; pass += 1) {
+          if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
+          if (options.refreshModelFamily !== false) {
+            await refreshOllamaModelFamily(endpoint, installed, undefined, opts.signal);
+            if (opts.signal?.aborted) throw new Error("Ollama request stopped by user.");
+          }
+          const now = ollamaInstalledModelNow(endpoint, model);
+          if (now === installed) break;
+          installed = now;
+        }
+        return installed;
+      };
+      let installedModel = await settleInstalledModel();
 
       // Each request to /api/chat gets its own controller and timeout, so a
       // retry is not charged for the time the first request and the model
@@ -150,12 +173,40 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         messages,
         stream: true,
         // Ask Ollama to skip reasoning-model "thinking" mode and have
-        // the model produce its answer directly. For reasoning models
-        // (deepseek-r1, qwen-qwq, gpt-oss, etc.) this prevents the
-        // model from spending its entire token budget inside a hidden
-        // chain-of-thought and emitting empty `message.content`. For
-        // non-reasoning models the flag is silently ignored.
+        // the model produce its answer directly, so the model does not
+        // spend its token budget inside a hidden chain-of-thought.
+        // gpt-oss ignores `false` and always reasons, so it gets the
+        // lowest effort level instead. What Ollama showed about this model
+        // (it rejected the level, or reasoned anyway) overrides its name.
+        // Set by captureThink just before a send.
         think: false,
+      };
+      // What Ollama's answers show applies only to the version this request was sent to.
+      let sentDigest: string | undefined;
+      let sentGeneration = 0;
+      // The family the think value was chosen with.
+      let sentFamily: string | undefined;
+      // The think value, version, generation and family of the model as known
+      // right before a send, so a newer list read that applied while this
+      // request waited (for example on context sizing) decides.
+      const captureThink = () => {
+        installedModel = ollamaInstalledModelNow(endpoint, model);
+        const key = familyKey(endpoint, installedModel);
+        body.think = ollamaThinkFor(endpoint, installedModel);
+        sentDigest = ollamaModelDigests.get(key);
+        // Registered, so a model list read that finds it removed while this
+        // request runs changes its generation.
+        if (!ollamaModelGenerations.has(key)) ollamaModelGenerations.set(key, 0);
+        sentGeneration = ollamaModelGenerations.get(key) ?? 0;
+        sentFamily = ollamaModelFamilies.get(key);
+      };
+      const learn = (value: false | "low") => {
+        const key = familyKey(endpoint, installedModel);
+        // Only about the model this request went to: not one removed or
+        // replaced under the name since.
+        if (ollamaModelFamilies.has(key) || ollamaModelDigests.get(key) !== sentDigest) return;
+        if ((ollamaModelGenerations.get(key) ?? 0) !== sentGeneration) return;
+        ollamaThinkLearned.set(key, { value, digest: sentDigest });
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -169,7 +220,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
 
       const cacheKey = `${endpoint}\0${model}`;
+      // The context size the latest attempt sent, none when it sent no override.
+      let lastSentCtx: number | undefined;
+      let sentOnce = false;
       const send = async (numCtx: number | undefined): Promise<Response> => {
+        if (sentOnce && opts.beforeOllamaResend) {
+          await opts.beforeOllamaResend();
+          const stopped = abortError();
+          if (stopped) throw stopped;
+        }
+        sentOnce = true;
+        lastSentCtx = numCtx;
         const payload = numCtx === undefined ? body : { ...body, options: { ...optionsPayload, num_ctx: numCtx } };
         let response: Response;
         try {
@@ -244,7 +305,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         // Ollama still giving all of the size this attempt sent means the
         // prompt outgrew it (Ollama can reject a prompt that exactly fills
         // the context), not that memory ran out; that size stays.
-        const sent = retry ? retry.numCtx : cachedCtx;
+        // The size the latest attempt sent: after a think fallback to a model
+        // that replaced the one the request was built for, not the kept one.
+        const sent = lastSentCtx;
+        const kept = !retry && sent !== undefined && sent === cachedCtx;
         const sentSizeGiven = counted !== undefined && sent !== undefined && counted.available >= sent;
         if (!sentSizeGiven) forgetSize(sent);
         if (memory) {
@@ -255,7 +319,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
                 : contextMemoryMessage(model, retry.requested, retry.numCtx, text),
             );
           }
-          if (cachedCtx !== undefined) return new Error(cachedContextMemoryMessage(model, cachedCtx, text, answering));
+          if (lastSentCtx !== undefined) return new Error(cachedContextMemoryMessage(model, lastSentCtx, text, answering));
           return undefined;
         }
         if (counted && opts.enforceContextWindow) {
@@ -288,6 +352,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               limitTokens: limit,
               model,
               sentToProvider: true,
+              ...(kept ? { ollamaKeptContext: true } : {}),
             });
           }
         }
@@ -299,21 +364,22 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           }
           return new Error(contextTooSmallMessage(model, counted.requested, counted.available, atModelLimit));
         }
-        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : cachedCtx !== undefined ? { size: cachedCtx, kept: true } : undefined, text));
+        return new Error(notFitMessage(model, retry ? { size: retry.numCtx, kept: false } : kept ? { size: sent, kept: true } : undefined, text));
       };
-      try {
-        let numCtx = cachedCtx;
-        // A model without a pinned num_ctx gets room for this request on the
-        // first send, so it is never served at a smaller default.
-        const sized = await ollamaRequestNumCtx({
-          endpoint, model, ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
-          ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
-          ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
-          ...(opts.enforceContextWindow ? { enforce: true } : {}),
-          ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
-          timeoutMs: lookupTimeoutMs, signal: controller.signal,
-        });
-        if (opts.signal?.aborted) throw stoppedByUser();
+      // The context lookup for this request, by the name as given.
+      // Takes the signal of the attempt it belongs to; the lookup has its own timeout.
+      const sizeRequest = (signal: AbortSignal = controller.signal) => ollamaRequestNumCtx({
+        endpoint, model: ollamaLookupName(endpoint, model), ...(opts.system ? { system: opts.system } : {}), prompt: opts.prompt,
+        ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+        ...(cachedCtx !== undefined ? { currentNumCtx: cachedCtx, ...(cachedRevision !== undefined ? { currentRevision: cachedRevision } : {}) } : {}),
+        ...(opts.enforceContextWindow ? { enforce: true } : {}),
+        ...(checkedShows.has(model) ? { fallbackShow: checkedShows.get(model)! } : {}),
+        timeoutMs: lookupTimeoutMs, signal,
+      });
+      // What the request's sizing lookup saw: the first one, or the one for
+      // a model that replaced it before a resend. Retries and limits use it.
+      let sized: Awaited<ReturnType<typeof ollamaRequestNumCtx>>;
+      const applySizing = () => {
         // The revision this request was sized for; a kept size binds to it.
         requestRevision = sized?.revision;
         // Without a known pin status the maximum is not the limit (a pin
@@ -321,6 +387,100 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         lookupLimit = sized?.pinnedNumCtx !== undefined
           ? Math.min(sized.pinnedNumCtx, sized.modelMaxContext ?? Infinity)
           : sized?.pinKnown ? sized.modelMaxContext : undefined;
+      };
+      /**
+       * Sends once, and once more without a level when Ollama rejects the
+       * level this model was sent (a model named like gpt-oss that is not one).
+       */
+      // `resize` sizes the request again for a model that replaced the one it
+      // was sized for: by default as the first send is, the context retry
+      // passes its own, so a fallback keeps the room the retry asked for.
+      const sendWithThinkFallback = async (
+        numCtx: number | undefined,
+        resize?: () => Promise<number | undefined>,
+      ): Promise<[Response, string, number | undefined]> => {
+        let sent = await send(numCtx);
+        let text = await errorDetail(sent);
+        // At most two resends: a model replaced or upgraded since the request
+        // was built gets its own value first, and if it rejects that too, none.
+        // The last resend always sends none.
+        for (let resend = 0; resend < 2 && sent.status === 400 && body.think !== false && rejectsThinkLevel(text); resend += 1) {
+          // The rejected request's budget ends here; the lookups below have their own.
+          clearTimeout(timer);
+          const previous = { model: installedModel, generation: sentGeneration, family: sentFamily };
+          await settleInstalledModel();
+          const changed = () => ollamaInstalledModelNow(endpoint, model) !== previous.model ||
+            (ollamaModelGenerations.get(familyKey(endpoint, ollamaInstalledModelNow(endpoint, model))) ?? 0) !== previous.generation;
+          if (changed() && resize) {
+            numCtx = await resize();
+            if (opts.signal?.aborted) throw stoppedByUser();
+          } else if (changed()) {
+            // Another model now: the context this request was sized for was
+            // another model's, so it is sized again, and refused when the
+            // new one cannot take it.
+            const resized = await sizeRequest(opts.signal ?? new AbortController().signal);
+            if (opts.signal?.aborted) throw stoppedByUser();
+            if (resized?.tooLarge) throw new ContextTooSmallError(resized.tooLarge);
+            sized = resized;
+            applySizing();
+            numCtx = resized?.numCtx;
+            // A timeout names the size this resend sends.
+            attemptLabel = numCtx !== undefined ? ` with a ${formatTokens(numCtx)} token context sized for this request` : "";
+          }
+          // Chosen after every lookup, from what is known right before the resend.
+          installedModel = ollamaInstalledModelNow(endpoint, model);
+          const key = familyKey(endpoint, installedModel);
+          if (!ollamaModelGenerations.has(key)) ollamaModelGenerations.set(key, 0);
+          const generation = ollamaModelGenerations.get(key) ?? 0;
+          const family = ollamaModelFamilies.get(key);
+          if (installedModel === previous.model && generation === previous.generation && family === previous.family) {
+            // The model that rejected the level is still the one installed:
+            // it gets none, and that is remembered for it.
+            learn(false);
+            body.think = false;
+          } else if (resend === 1) {
+            // The last resend sends none, without remembering it: the model
+            // that rejected the level could not be confirmed.
+            body.think = false;
+          } else {
+            // Another model, or one Ollama now reports a family for.
+            body.think = family !== undefined ? ollamaThinkSetting(model, family) : ollamaThinkFor(endpoint, installedModel);
+          }
+          sentDigest = ollamaModelDigests.get(key);
+          sentGeneration = generation;
+          sentFamily = family;
+          startAttempt(attemptLabel);
+          sent = await send(numCtx);
+          text = await errorDetail(sent);
+        }
+        return [sent, text, numCtx];
+      };
+      try {
+        let numCtx = cachedCtx;
+        // A model without a pinned num_ctx gets room for this request on the
+        // first send, so it is never served at a smaller default.
+        sized = await sizeRequest();
+        if (opts.signal?.aborted) throw stoppedByUser();
+        // The sizing lookup saw another revision than the model list read
+        // before it: the model was replaced under the name in between. The
+        // list is read again and the request sized again, once, so the think
+        // value and the context both belong to the model installed now.
+        const listedRevision = ollamaModelRevisions.get(familyKey(endpoint, installedModel));
+        if (sized?.revision !== undefined && listedRevision !== undefined && !sameRevision(sized.revision, listedRevision)) {
+          installedModel = await settleInstalledModel();
+          sized = await sizeRequest();
+          if (opts.signal?.aborted) throw stoppedByUser();
+        }
+        // A name that resolves to another installed model by now (a server
+        // upgraded while this request was sized reads a lone :local as the
+        // default tag) is sized again before anything is decided from the
+        // lookup, so that model's own pin holds, either way.
+        if (ollamaInstalledModelNow(endpoint, model) !== installedModel) {
+          installedModel = await settleInstalledModel();
+          sized = await sizeRequest();
+          if (opts.signal?.aborted) throw stoppedByUser();
+        }
+        applySizing();
         if (sized?.tooLarge) throw new ContextTooSmallError(sized.tooLarge);
         if (sized?.dropKept) {
           if (cachedCtx !== undefined && ollamaContextOverrides.get(cacheKey) === cachedCtx) ollamaContextOverrides.delete(cacheKey);
@@ -343,9 +503,19 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           ? ` with a ${formatTokens(sized.numCtx)} token context sized for this request`
           : cachedCtx === undefined ? "" : ` with the ${formatTokens(cachedCtx)} token context kept from an earlier request`);
         // The size this first send asked for: kept, sized up front, or none.
-        const firstSent = numCtx;
-        response = await send(numCtx);
-        let detail = await errorDetail(response);
+        let firstSent = numCtx;
+        captureThink();
+        let detail: string;
+        let sentCtx: number | undefined;
+        [response, detail, sentCtx] = await sendWithThinkFallback(numCtx);
+        if (sentCtx !== numCtx) {
+          // Sized again for a model that replaced the one the request was built for.
+          numCtx = sentCtx;
+          firstSent = sentCtx;
+          raisedCtx = sentCtx;
+          retry = sentCtx === undefined ? undefined : { requested: sized?.neededTokens ?? retry?.requested ?? 0, numCtx: sentCtx, sizedUpFront: true };
+          if (sentCtx !== undefined) retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, sentCtx)) ?? 0;
+        }
         const overflow = response.status === 400 ? parseContextOverflow(detail) : undefined;
         if (overflow) {
           // Less room than this send asked for means Ollama can no longer give
@@ -376,83 +546,110 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
           // Ollama sizes the context from its own default and free memory,
           // not from the model's limit. Ask for enough room for this prompt
           // plus the answer, up to what the model supports, and retry once.
-          let retryShow: OllamaShowContext | undefined;
-          try {
-            retryShow = await readOllamaShowForRetry(endpoint, model, opts.signal ?? new AbortController().signal, lookupTimeoutMs);
-          } catch (error) {
-            if (opts.signal?.aborted) throw stoppedByUser();
-            // An agent run does not raise without the lookup, and Ollama's
-            // own count is the typed reason; Chat keeps the lookup's error.
-            if (!opts.enforceContextWindow) throw error;
-            throw new ContextTooSmallError({
-              code: "context-too-small",
-              promptTokens: overflow.requested,
-              answerTokens: answerBudget,
-              neededTokens: overflow.requested + answerBudget,
-              limitTokens: overflow.available,
-              model,
-              sentToProvider: true,
-            });
-          }
+          const readRetryShow = async (): Promise<OllamaShowContext | undefined> => {
+            try {
+              return await readOllamaShowForRetry(endpoint, ollamaLookupName(endpoint, model), opts.signal ?? new AbortController().signal, lookupTimeoutMs);
+            } catch (error) {
+              if (opts.signal?.aborted) throw stoppedByUser();
+              // An agent run does not raise without the lookup, and Ollama's
+              // own count is the typed reason; Chat keeps the lookup's error.
+              if (!opts.enforceContextWindow) throw error;
+              throw new ContextTooSmallError({
+                code: "context-too-small",
+                promptTokens: overflow.requested,
+                answerTokens: answerBudget,
+                neededTokens: overflow.requested + answerBudget,
+                limitTokens: overflow.available,
+                model,
+                sentToProvider: true,
+              });
+            }
+          };
+          let retryShow = await readRetryShow();
           if (opts.signal?.aborted) throw stoppedByUser();
+          // The model may have been replaced under its name during the lookup:
+          // the retry gets the think value of the model installed now. When
+          // the list then names another revision than the lookup saw, the
+          // lookup is read again, once, so the context and pin are that model's.
+          const beforeRetry = installedModel;
+          installedModel = await settleInstalledModel();
+          const listedForRetry = ollamaModelRevisions.get(familyKey(endpoint, installedModel));
+          // Also when the name now resolves to another installed model (an
+          // upgraded server reads a lone :local as the default tag).
+          if (installedModel !== beforeRetry || (retryShow?.revision !== undefined && listedForRetry !== undefined && !sameRevision(retryShow.revision, listedForRetry))) {
+            retryShow = await readRetryShow();
+            if (opts.signal?.aborted) throw stoppedByUser();
+          }
           // A retry lookup for the same revision that omits something keeps
           // what the first lookup saw.
-          const sameRevision = retryShow?.revision === undefined || retryShow.revision === sized?.revision;
-          modelMax = retryShow?.modelMaxContext ?? (sameRevision ? sized?.modelMaxContext : undefined);
-          if (retryShow?.revision !== undefined) requestRevision = retryShow.revision;
-          const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
-          // An agent run holds a pinned model to its pin, on the retry too.
-          // Ollama counted more than the estimate, so the request did not fit.
-          // A retry lookup without a pin for the same revision keeps the pin the
-          // first lookup saw.
-          const pin = retryShow?.pinnedNumCtx ?? (sameRevision ? sized?.pinnedNumCtx : undefined);
-          // That the model is unpinned carries over from the first lookup only
-          // for a revision both lookups name.
-          const pinKnown = pin !== undefined || retryShow?.pinKnown === true ||
-            (retryShow?.revision !== undefined && retryShow.revision === sized?.revision && sized?.pinKnown === true);
-          // An agent run that never learned whether the model is pinned does
-          // not raise num_ctx, which would override a pin: the size Ollama
-          // ran it with is the limit it gets.
-          if (opts.enforceContextWindow && !pinKnown) {
-            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
-            throw new ContextTooSmallError({
-              code: "context-too-small",
-              promptTokens: overflow.requested,
-              answerTokens,
-              neededTokens: overflow.requested + answerTokens,
-              limitTokens: overflow.available,
-              model,
-              sentToProvider: true,
-            });
-          }
-          // An agent run is held to the pin, else to the model's maximum, with
-          // room for its answer.
-          const enforcedLimit = !opts.enforceContextWindow
-            ? undefined
-            : pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : modelMax;
-          if (enforcedLimit !== undefined) {
-            const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
-            if (overflow.requested + answerTokens > enforcedLimit) {
+          // The size the retry asks for from a lookup, held to the model's pin
+          // and maximum (refused when an agent run cannot fit), for the retry
+          // and for a think fallback of it to a model that replaced this one.
+          const retrySize = (show: OllamaShowContext | undefined): number => {
+            const retrySameRevision = show?.revision === undefined || show.revision === sized?.revision;
+            modelMax = show?.modelMaxContext ?? (retrySameRevision ? sized?.modelMaxContext : undefined);
+            if (show?.revision !== undefined) requestRevision = show.revision;
+            const wanted = roundUp(overflow.requested + (opts.maxTokens ?? OLLAMA_ANSWER_RESERVE_TOKENS), 1024);
+            // An agent run holds a pinned model to its pin, on the retry too.
+            // Ollama counted more than the estimate, so the request did not fit.
+            // A retry lookup without a pin for the same revision keeps the pin the
+            // first lookup saw.
+            const pin = show?.pinnedNumCtx ?? (retrySameRevision ? sized?.pinnedNumCtx : undefined);
+            // That the model is unpinned carries over from the first lookup only
+            // for a revision both lookups name.
+            const pinKnown = pin !== undefined || show?.pinKnown === true ||
+              (show?.revision !== undefined && show.revision === sized?.revision && sized?.pinKnown === true);
+            // An agent run that never learned whether the model is pinned does
+            // not raise num_ctx, which would override a pin: the size Ollama
+            // ran it with is the limit it gets.
+            if (opts.enforceContextWindow && !pinKnown) {
+              const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
               throw new ContextTooSmallError({
                 code: "context-too-small",
                 promptTokens: overflow.requested,
                 answerTokens,
                 neededTokens: overflow.requested + answerTokens,
-                limitTokens: enforcedLimit,
+                limitTokens: overflow.available,
                 model,
                 sentToProvider: true,
               });
             }
-          }
-          if (modelMax !== undefined && overflow.requested > modelMax) {
-            throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
-          }
-          numCtx = Math.min(wanted, enforcedLimit ?? modelMax ?? Infinity);
+            // An agent run is held to the pin, else to the model's maximum, with
+            // room for its answer.
+            const enforcedLimit = !opts.enforceContextWindow
+              ? undefined
+              : pin !== undefined ? Math.min(pin, modelMax ?? Infinity) : modelMax;
+            if (enforcedLimit !== undefined) {
+              const answerTokens = opts.maxTokens ?? DEFAULT_ANSWER_RESERVE_TOKENS;
+              if (overflow.requested + answerTokens > enforcedLimit) {
+                throw new ContextTooSmallError({
+                  code: "context-too-small",
+                  promptTokens: overflow.requested,
+                  answerTokens,
+                  neededTokens: overflow.requested + answerTokens,
+                  limitTokens: enforcedLimit,
+                  model,
+                  sentToProvider: true,
+                });
+              }
+            }
+            if (modelMax !== undefined && overflow.requested > modelMax) {
+              throw new Error(contextTooSmallMessage(model, overflow.requested, modelMax, true));
+            }
+            return Math.min(wanted, enforcedLimit ?? modelMax ?? Infinity);
+          };
+          captureThink();
+          numCtx = retrySize(retryShow);
           retry = { requested: overflow.requested, numCtx };
           retryFailuresAtStart = ollamaContextFailures.get(contextFailureKey(cacheKey, numCtx)) ?? 0;
           startAttempt(` on the retry with a ${formatTokens(numCtx)} token context`);
-          response = await send(numCtx);
-          detail = await errorDetail(response);
+          [response, detail, numCtx] = await sendWithThinkFallback(numCtx, async () => {
+            const size = retrySize(await readRetryShow());
+            attemptLabel = ` on the retry with a ${formatTokens(size)} token context`;
+            return size;
+          });
+          // A fallback that sized the retry again for a replacement model sent its size.
+          if (retry && numCtx !== retry.numCtx) retry = numCtx === undefined ? undefined : { ...retry, numCtx };
           if (response.ok) raisedCtx = numCtx;
         }
         if (!response.ok) {
@@ -481,7 +678,10 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
       let accumulated = "";
-      let reasoningOnly = "";
+      // Whether the model streamed any reasoning, whitespace included.
+      let reasoned = false;
+      // A model can also reason inline in its content, in think tags.
+      const inlineThink = createInlineThinkFilter();
       let actualModel = model;
 
       try {
@@ -494,8 +694,9 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             throw abortError() ?? error;
           }
           const { value, done } = read;
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
+          // At the end of the body the last record may lack its newline;
+          // it is read like any other.
+          buffer += done ? `${decoder.decode()}\n` : decoder.decode(value, { stream: true });
 
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? "";
@@ -532,18 +733,30 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               actualModel = chunk.model;
             }
             const tokenUsage = extractTokenUsage(chunk);
-            const delta = chunk.message?.content ?? "";
-            // Capture reasoning-model chain-of-thought separately. We
-            // don't yield this as content (the renderer surfaces it via
-            // the runtime's thinking hook on the accumulated stream),
-            // but we keep it around so we can fall back to it if the
-            // model never produced visible content.
+            // Track reasoning-model chain-of-thought separately so a
+            // reply with reasoning and no answer fails with that cause.
             const reasoningDelta = chunk.message?.thinking ?? "";
             if (reasoningDelta.length > 0) {
-              reasoningOnly += reasoningDelta;
+              reasoned = true;
+              // A model of unknown family that reasons although it was asked
+              // not to (gpt-oss under another name) gets the lowest level on
+              // later requests.
+              if (body.think === false) learn("low");
+            }
+            const content = inlineThink.push(chunk.message?.content ?? "");
+            if (inlineThink.reasoned) reasoned = true;
+            // At the end, text held back as a possible tag is the answer's,
+            // unless the reply reasoned and has no answer: then it is the
+            // start of a tag the token limit cut off.
+            const held = chunk.done ? inlineThink.flush() : "";
+            const delta = content + (reasoned && (accumulated + content).trim().length === 0 ? "" : held);
+            accumulated += delta;
+            // Reasoning is not an answer, so it is never returned as one,
+            // and the caller sees no completed chunk before this is known.
+            if (chunk.done && accumulated.trim().length === 0 && reasoned) {
+              throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, chunk.done_reason));
             }
             if (delta.length > 0) {
-              accumulated += delta;
               yield {
                 delta,
                 accumulated,
@@ -553,21 +766,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               };
             }
             if (chunk.done) {
-              // If the model never emitted visible content but did
-              // produce reasoning (e.g. it hit num_predict mid-thought),
-              // surface the reasoning so the agent has *something* to
-              // work with. The cleanLlmText filter in the runtime will
-              // re-strip <think> tags if the model also wrapped output.
-              if (delta.length === 0 && accumulated.length === 0 && reasoningOnly.length > 0) {
-                accumulated = reasoningOnly;
-                yield {
-                  delta: reasoningOnly,
-                  accumulated,
-                  done: true,
-                  model: actualModel,
-                  ...(tokenUsage ? { tokenUsage } : {}),
-                };
-              } else if (delta.length === 0) {
+              if (delta.length === 0) {
                 yield {
                   delta: "",
                   accumulated,
@@ -579,7 +778,18 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
               return;
             }
           }
+          if (done) break;
         }
+        // Text held back as a possible tag is the answer's once the body
+        // ends, unless the reply reasoned and has no answer.
+        const held = inlineThink.flush();
+        const tail = reasoned && accumulated.trim().length === 0 ? "" : held;
+        accumulated += tail;
+        // The body ended without a final record after reasoning alone.
+        if (accumulated.trim().length === 0 && reasoned) {
+          throw new OllamaReasoningWithoutAnswerError(reasoningWithoutAnswerMessage(actualModel, undefined));
+        }
+        if (tail.length > 0) yield { delta: tail, accumulated, done: false, model: actualModel };
       } finally {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", abortFromCaller);
@@ -587,6 +797,561 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       }
     },
   };
+}
+
+/**
+ * Whether two `modified_at` values name the same revision: the same instant
+ * to the full fraction Ollama writes (nanoseconds), also when one is written
+ * with trailing zeroes or another offset.
+ */
+function sameRevision(a: string, b: string): boolean {
+  if (a === b) return true;
+  const parse = (value: string) => {
+    const match = /^(.*T\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)$/i.exec(value);
+    if (!match) return undefined;
+    const seconds = Date.parse(`${match[1]}${match[3]}`);
+    return Number.isFinite(seconds) ? { seconds, fraction: (match[2] ?? "").replace(/0+$/, "") } : undefined;
+  };
+  const [x, y] = [parse(a), parse(b)];
+  return x !== undefined && y !== undefined && x.seconds === y.seconds && x.fraction === y.fraction;
+}
+
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+const THINK_TAGS = { [THINK_OPEN]: /<think>/i, [THINK_CLOSE]: /<\/think>/i } as const;
+
+/**
+ * Takes reasoning a model writes inline in its content, in `<think>` blocks,
+ * out of the answer as it streams: a tag split across chunks is held back
+ * until it is known, and a block never closed is reasoning to the end. Models
+ * reason before they answer, so only blocks before any answer text count;
+ * once the answer has started, a tag is text it shows (code that names one).
+ */
+export function createInlineThinkFilter(): { push(text: string): string; flush(): string; readonly reasoned: boolean } {
+  // How many think blocks are open: a block may hold another one.
+  let depth = 0;
+  let pending = "";
+  let reasoned = false;
+  // Whether answer text (other than white space) has been shown.
+  let answering = false;
+  // The longest end of `text` that could start `tag`. Compared character by
+  // character, ASCII case only, so text whose lowercase is longer (İ) never
+  // shifts an offset.
+  const partialTag = (text: string, tag: string): number => {
+    const sameLetter = (a: string, b: string) => a === b || (/[A-Z]/.test(a) && a.toLowerCase() === b);
+    for (let length = Math.min(tag.length - 1, text.length); length > 0; length -= 1) {
+      const tail = text.slice(text.length - length);
+      if ([...tail].every((char, index) => sameLetter(char, tag[index]!))) return length;
+    }
+    return 0;
+  };
+  return {
+    push(text) {
+      let rest = pending + text;
+      pending = "";
+      let visible = "";
+      while (rest.length > 0) {
+        if (answering) {
+          visible += rest;
+          break;
+        }
+        const open = rest.search(THINK_TAGS[THINK_OPEN]);
+        const close = depth > 0 ? rest.search(THINK_TAGS[THINK_CLOSE]) : -1;
+        // The first tag decides: an opening one inside a block nests.
+        const next = [open, close].filter((at) => at >= 0).sort((x, y) => x - y)[0];
+        if (next !== undefined) {
+          if (depth === 0) {
+            const before = rest.slice(0, next);
+            if (before.trim().length > 0) {
+              // The answer started before this tag: it is the answer's text.
+              answering = true;
+              continue;
+            }
+            visible += before;
+            reasoned = true;
+          }
+          const opening = next === open;
+          rest = rest.slice(next + (opening ? THINK_OPEN.length : THINK_CLOSE.length));
+          depth += opening ? 1 : -1;
+          continue;
+        }
+        // Hold back what could start either tag.
+        const held = Math.max(partialTag(rest, THINK_OPEN), depth > 0 ? partialTag(rest, THINK_CLOSE) : 0);
+        if (depth === 0) {
+          const shown = rest.slice(0, rest.length - held);
+          visible += shown;
+          if (shown.trim().length > 0) {
+            // The answer started: nothing more is held back.
+            answering = true;
+            visible += rest.slice(rest.length - held);
+            break;
+          }
+        }
+        pending = rest.slice(rest.length - held);
+        rest = "";
+      }
+      return visible;
+    },
+    flush() {
+      const rest = depth > 0 ? "" : pending;
+      pending = "";
+      return rest;
+    },
+    get reasoned() {
+      return reasoned;
+    },
+  };
+}
+
+/**
+ * For a model whose family is unknown, the think value Ollama's last answer
+ * showed it needs, keyed by endpoint and model: `false` after it rejected a
+ * level, "low" after it reasoned when asked not to. An answer counts only for
+ * the version (digest) its request was sent to. Each answer replaces the one
+ * before; a model that both rejects a level and reasons under `false` would
+ * alternate, and each of its requests still gets an answer, with one retry.
+ */
+const ollamaThinkLearned = new Map<string, { value: false | "low"; digest: string | undefined }>();
+
+/** Model families from the provider check's /api/show, keyed by endpoint and model. */
+const ollamaModelFamilies = new Map<string, string>();
+/** Model list reads in the order they started, and the newest one applied per model. */
+let ollamaFamilyReadSeq = 0;
+/** The newest model list read applied per endpoint. */
+const ollamaListReadApplied = new Map<string, number>();
+const ollamaFamilyReadApplied = new Map<string, number>();
+/** Bumped when a model under a name is removed or replaced, keyed by endpoint and model. */
+const ollamaModelGenerations = new Map<string, number>();
+const nextGeneration = (key: string) => ollamaModelGenerations.set(key, (ollamaModelGenerations.get(key) ?? 0) + 1);
+/** The model version (digest) each recorded family belongs to. */
+const ollamaModelDigests = new Map<string, string>();
+/**
+ * Names known from /api/show and not from the list, such as server aliases:
+ * a list read never names them, so one without them keeps what is known. A
+ * failed /api/show for the name forgets it; a list that names it records it.
+ */
+const ollamaShownOnly = new Set<string>();
+/** When each listed model was last changed (`modified_at`), to compare with the revision a context lookup saw. */
+const ollamaModelRevisions = new Map<string, string>();
+const familyKey = (endpoint: string, model: string) => `${endpoint.trim().replace(/\/$/, "")}\0${ollamaModelName(model)}`;
+
+/**
+ * A model name as Ollama resolves it, so "team-model",
+ * "team-model:latest" and "registry.ollama.ai/library/team-model:latest"
+ * are one model: lower case, without the default registry and namespace,
+ * with the default tag.
+ */
+export function ollamaModelName(name: string): string {
+  // Ollama's name parts: [scheme://][host/][namespace/]model[:tag][@digest][:local].
+  // A ":local" after a tag only says the installed model is meant, as Ollama
+  // 0.40 reads it. A lone ":local" stays: older Ollama reads it as a tag.
+  const parts = name.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split("/").filter(Boolean);
+  if (parts.length > 0 && /:[^:]+:\s*local\s*$/.test(parts.at(-1)!)) parts[parts.length - 1] = parts.at(-1)!.replace(/:\s*local\s*$/, "");
+  if (parts.length === 3 && parts[0] === "registry.ollama.ai") parts.shift();
+  if (parts.length === 2 && parts[0] === "library") parts.shift();
+  let normalized = parts.join("/");
+  const last = parts.at(-1) ?? "";
+  if (!last.includes(":") && !last.includes("@")) normalized += ":latest";
+  return normalized;
+}
+
+/**
+ * Records a model's family as the provider check read it (`details.family`
+ * in /api/tags or /api/show, or `general.architecture` in `model_info`), so a
+ * copy of a model under another name gets the right think value before its
+ * first request, without another /api/show call. An answer without a family
+ * forgets the one recorded before, so the name decides again.
+ */
+export function recordOllamaModelFamily(endpoint: string, model: string, show: unknown, read?: number): void {
+  const key = familyKey(endpoint, model);
+  // A read that started before the last one applied for this model is older
+  // than what is known and is ignored. Without a read number the observation
+  // is the newest.
+  const seq = read ?? beginOllamaModelRead();
+  if (seq <= (ollamaFamilyReadApplied.get(key) ?? 0)) return;
+  ollamaFamilyReadApplied.set(key, seq);
+  recordFamily(key, show);
+}
+
+const entryName = (entry: unknown) => {
+  const record = typeof entry === "object" && entry !== null ? entry as { name?: unknown; model?: unknown } : {};
+  return ollamaModelName(String(record.name ?? record.model ?? ""));
+};
+
+/**
+ * Applies one successful read of Ollama's model list (from the provider check
+ * or an adapter): records every listed model, and forgets what is known about
+ * a model of this endpoint the list no longer has, so a model installed later
+ * under its name starts fresh. A read older than the last list applied for
+ * the endpoint changes nothing; returns whether it was applied.
+ */
+export function recordOllamaModelList(endpoint: string, models: readonly unknown[], read: number): boolean {
+  // A whole list older than one already applied for this endpoint is
+  // ignored, also for names it has that the newer one did not.
+  const endpointKey = familyKey(endpoint, "").split("\0")[0]!;
+  if (read <= (ollamaListReadApplied.get(endpointKey) ?? 0)) return false;
+  ollamaListReadApplied.set(endpointKey, read);
+  const listed = new Set<string>();
+  for (const entry of models) {
+    const name = entryName(entry);
+    if (name === ollamaModelName("")) continue;
+    listed.add(familyKey(endpoint, name));
+    ollamaShownOnly.delete(familyKey(endpoint, name));
+    // An installed model under the name comes before an alias of it.
+    ollamaAliasTargets.delete(familyKey(endpoint, name));
+    recordOllamaModelFamily(endpoint, name, entry, read);
+  }
+  const prefix = familyKey(endpoint, "").split("\0")[0] + "\0";
+  const known = new Set([...ollamaThinkLearned.keys(), ...ollamaModelFamilies.keys(), ...ollamaModelDigests.keys(), ...ollamaModelGenerations.keys()]);
+  for (const key of known) {
+    if (key.startsWith(prefix) && !listed.has(key) && !ollamaShownOnly.has(key)) forgetOllamaModelKey(key, read);
+  }
+  return true;
+}
+
+/** Forgets what is known about a model a read found missing, unless a newer read applied. */
+function forgetOllamaModel(endpoint: string, model: string, read: number): void {
+  forgetOllamaModelKey(familyKey(endpoint, model), read);
+}
+
+function forgetOllamaModelKey(key: string, read: number): void {
+  if (read <= (ollamaFamilyReadApplied.get(key) ?? 0)) return;
+  ollamaFamilyReadApplied.set(key, read);
+  ollamaThinkLearned.delete(key);
+  ollamaModelFamilies.delete(key);
+  ollamaModelDigests.delete(key);
+  ollamaModelRevisions.delete(key);
+  ollamaShownOnly.delete(key);
+  ollamaAliasTargets.delete(key);
+  nextGeneration(key);
+}
+
+/**
+ * Starts a read of Ollama's model list: call it before sending /api/tags and
+ * pass the number to recordOllamaModelFamily, so a read that started earlier
+ * never replaces one that started later, whichever ends first.
+ */
+export function beginOllamaModelRead(): number {
+  ollamaFamilyReadSeq += 1;
+  return ollamaFamilyReadSeq;
+}
+
+function recordFamily(key: string, show: unknown): void {
+  const data = typeof show === "object" && show !== null
+    ? show as { digest?: unknown; modified_at?: unknown; details?: { family?: unknown }; model_info?: Record<string, unknown> }
+    : {};
+  const previousRevision = ollamaModelRevisions.get(key);
+  const revision = typeof data.modified_at === "string" && data.modified_at.length > 0 ? data.modified_at : undefined;
+  if (revision !== undefined) ollamaModelRevisions.set(key, revision);
+  else ollamaModelRevisions.delete(key);
+  // Another version under this name: what Ollama's answers showed about the
+  // one before no longer applies. Without a digest (a server alias read with
+  // /api/show), a changed revision is another version.
+  const digest = typeof data.digest === "string" ? data.digest : undefined;
+  const revisionChanged = digest === undefined && previousRevision !== undefined && revision !== undefined && !sameRevision(previousRevision, revision);
+  if (ollamaModelDigests.get(key) !== digest || revisionChanged) {
+    ollamaThinkLearned.delete(key);
+    nextGeneration(key);
+  }
+  // An entry without a version leaves none recorded.
+  if (digest !== undefined) ollamaModelDigests.set(key, digest);
+  else ollamaModelDigests.delete(key);
+  const family = data.details?.family ?? data.model_info?.["general.architecture"];
+  if (typeof family === "string" && family.length > 0) ollamaModelFamilies.set(key, family);
+  else ollamaModelFamilies.delete(key);
+}
+
+/**
+ * The endpoint's Ollama version from /api/version, which loads no model. Read
+ * each time it is needed, so a server upgraded while the app runs is seen.
+ */
+async function ollamaServerVersion(endpoint: string, signal?: AbortSignal): Promise<string | undefined> {
+  const base = endpoint.trim().replace(/\/$/, "");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    const url = `${base}/api/version`;
+    const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
+    if (!response.ok || isRefusedRedirect(response, url)) return undefined;
+    const version = ((await response.json()) as { version?: unknown }).version;
+    if (typeof version !== "string" || version.length === 0) return undefined;
+    return version;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
+/** Whether a version is older than another, comparing major, minor and patch. */
+function versionBelow(version: string, than: string): boolean {
+  const parse = (value: string) => value.replace(/^v/, "").split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+  const [a, b] = [parse(version), parse(than)];
+  for (let i = 0; i < 3; i += 1) if (a[i]! !== b[i]!) return a[i]! < b[i]!;
+  return false;
+}
+
+/**
+ * The installed model a requested name resolves to, as the endpoint's Ollama
+ * reads it. Ollama 0.18 and later drop a final ":local" from every name (it
+ * only says the installed model is meant), so a lone "x:local" runs "x:latest"
+ * there; earlier versions read "local" as a tag. The version is asked only for
+ * such a name, before each send; when it cannot be read, current Ollama's
+ * reading applies.
+ */
+export async function resolveOllamaModel(endpoint: string, model: string, signal?: AbortSignal): Promise<string> {
+  const name = ollamaModelName(model);
+  if (!name.endsWith(":local")) return name;
+  const read = ++ollamaVersionReadSeq;
+  // A failed read is tried once more: an older version known for the endpoint
+  // would otherwise decide, and an upgrade since then reads the name another way.
+  const version = await ollamaServerVersion(endpoint, signal) ?? (signal?.aborted ? undefined : await ollamaServerVersion(endpoint, signal));
+  const key = ollamaEndpointKey(endpoint);
+  const applied = ollamaServerVersions.get(key);
+  // A read that started before the newest applied one is outdated: the newer
+  // one decides. The newest read applies also when it failed, so every later
+  // look at it in this request reads the name as current Ollama does until a
+  // read succeeds.
+  if (read > (applied?.read ?? 0)) {
+    ollamaServerVersions.set(key, { read, version });
+    return installedModelFor(name, version);
+  }
+  return installedModelFor(name, applied!.version);
+}
+
+/** Version reads in the order they started, and the newest one applied per endpoint. */
+let ollamaVersionReadSeq = 0;
+const ollamaServerVersions = new Map<string, { read: number; version: string | undefined }>();
+
+function ollamaEndpointKey(endpoint: string): string {
+  return endpoint.trim().replace(/\/$/, "");
+}
+
+function installedModelFor(name: string, version: string | undefined): string {
+  if (!name.endsWith(":local")) return name;
+  return version !== undefined && versionBelow(version, "0.18.0") ? name : `${name.slice(0, -":local".length)}:latest`;
+}
+
+/**
+ * The installed model a name resolves to by the newest Ollama version read
+ * for the endpoint, without a read: a newer read can apply while a request
+ * reads the model list.
+ */
+function ollamaInstalledModelNow(endpoint: string, model: string): string {
+  const name = installedModelFor(ollamaModelName(model), ollamaServerVersions.get(ollamaEndpointKey(endpoint))?.version);
+  // A server alias (Ollama 0.17) runs the model it points to: what is known
+  // is that model's, read when it is needed.
+  return ollamaAliasTargets.get(familyKey(endpoint, name)) ?? name;
+}
+
+/** Server aliases (Ollama 0.17) and the installed model each points to, per endpoint. */
+const ollamaAliasTargets = new Map<string, string>();
+
+/** The name a model lookup (/api/show) asks for: an alias's target, which /api/show knows. */
+export function ollamaLookupName(endpoint: string, model: string): string {
+  // Read the way the send is: an alias only for the name as the endpoint's
+  // version reads it, else the name as given (Ollama resolves a lone :local).
+  const name = installedModelFor(ollamaModelName(model), ollamaServerVersions.get(ollamaEndpointKey(endpoint))?.version);
+  return ollamaAliasTargets.get(familyKey(endpoint, name)) ?? model;
+}
+
+/**
+ * Reads the model's current entry from /api/tags, which loads no model, and
+ * records its family and digest before a send, so a model replaced under the
+ * same name since the provider check gets its own think value. A failed or
+ * slow read changes nothing.
+ */
+export async function refreshOllamaModelFamily(endpoint: string, model: string, timeoutMs = 1500, signal?: AbortSignal): Promise<void> {
+  const url = `${endpoint.trim().replace(/\/$/, "")}/api/tags`;
+  const seq = beginOllamaModelRead();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    if (signal?.aborted) return;
+    const response = await fetch(url, { signal: controller.signal, redirect: modelServerRedirect(url) });
+    if (!response.ok || isRefusedRedirect(response, url)) return;
+    const data = (await response.json()) as { models?: Array<{ name?: unknown; model?: unknown }> };
+    if (!Array.isArray(data.models)) return;
+    const wanted = ollamaModelName(model);
+    // Only a list read that applied decides that the name is listed: an
+    // older one may still have a model removed or replaced since. Otherwise
+    // the name is looked up below, under its own read number.
+    const applied = recordOllamaModelList(endpoint, data.models, seq);
+    const listedHere = data.models.some((candidate) => entryName(candidate) === wanted);
+    if (applied && listedHere) return;
+    const showSeq = beginOllamaModelRead();
+    // Not listed: a server alias (Ollama lists only the model it points to)
+    // is read with /api/show, which also loads no model and reports the
+    // family of the model the alias resolves to.
+    const showUrl = `${endpoint.trim().replace(/\/$/, "")}/api/show`;
+    const shown = await fetch(showUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: wanted }),
+      signal: controller.signal,
+      redirect: modelServerRedirect(showUrl),
+    }).catch(() => undefined);
+    // Only a definite "not found" means the name is gone; a timeout, a
+    // server error or an unreadable answer keeps what is known.
+    if (!shown || isRefusedRedirect(shown, showUrl)) return;
+    if (shown.status !== 404 && !shown.ok) return;
+    if (shown.ok) {
+      const details = (await shown.json().catch(() => undefined)) as unknown;
+      // Applied for the name unless a newer read has.
+      const key = familyKey(endpoint, model);
+      if (typeof details === "object" && details !== null && (ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
+        ollamaFamilyReadApplied.set(key, showSeq);
+        // /api/show has no digest: a listed model keeps its digest while the
+        // revision is the same one the list named.
+        const knownDigest = ollamaModelDigests.get(key);
+        const knownRevision = ollamaModelRevisions.get(key);
+        const shownRevision = (details as { modified_at?: unknown }).modified_at;
+        const sameModel = knownDigest !== undefined &&
+          (typeof shownRevision !== "string" || knownRevision === undefined || sameRevision(knownRevision, shownRevision));
+        recordFamily(key, sameModel ? { ...details, digest: knownDigest } : details);
+        if (!listedHere) ollamaShownOnly.add(key);
+      }
+      return;
+    }
+    // /api/show does not know server aliases (Ollama 0.17), which Chat
+    // resolves: such a name takes the listed entry of the model it points to.
+    const alias = await resolveOllamaServerAlias(endpoint, model, controller.signal);
+    if (alias.kind === "failed") return;
+    if (alias.kind === "alias") {
+      const target = alias.target;
+      // Only which model the alias points to is kept; that model's family,
+      // digest and generation are read from it right before each send.
+      const key = familyKey(endpoint, model);
+      if ((ollamaFamilyReadApplied.get(key) ?? 0) < showSeq) {
+        ollamaFamilyReadApplied.set(key, showSeq);
+        ollamaAliasTargets.set(key, ollamaModelName(target));
+        ollamaShownOnly.add(key);
+      }
+      return;
+    }
+    // The model is not installed: nothing known about it carries over to a
+    // model installed later under the name, also a reply still in flight.
+    forgetOllamaModel(endpoint, model, showSeq);
+  } catch {
+    // The send goes ahead with what is known; Ollama's answer still corrects it.
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
+/**
+ * The model a server alias points to, as Ollama 0.17 resolves it for Chat
+ * (`GET /api/experimental/aliases`, removed in 0.18): an exact alias,
+ * followed through aliases of aliases, else the longest prefix alias, case
+ * insensitive. "none" when the endpoint has no such alias or no alias
+ * support; "failed" when the read failed otherwise.
+ */
+type ServerAliasLookup = { kind: "alias"; target: string } | { kind: "none" } | { kind: "failed" };
+
+async function resolveOllamaServerAlias(endpoint: string, model: string, signal: AbortSignal): Promise<ServerAliasLookup> {
+  const url = `${endpoint.trim().replace(/\/$/, "")}/api/experimental/aliases`;
+  let entries: Array<{ alias?: unknown; target?: unknown; prefix_matching?: unknown }>;
+  try {
+    const response = await fetch(url, { signal, redirect: modelServerRedirect(url) });
+    if (isRefusedRedirect(response, url)) return { kind: "failed" };
+    // A version without aliases: the name is not one.
+    if (response.status === 404 || response.status === 405) return { kind: "none" };
+    if (!response.ok) return { kind: "failed" };
+    const data = (await response.json()) as { aliases?: unknown };
+    if (!Array.isArray(data.aliases)) return { kind: "failed" };
+    entries = data.aliases as typeof entries;
+  } catch {
+    return { kind: "failed" };
+  }
+  const aliases = entries.filter((entry): entry is { alias: string; target: string; prefix_matching?: unknown } =>
+    typeof entry.alias === "string" && typeof entry.target === "string");
+  const exact = (name: string) => aliases.find((entry) => entry.prefix_matching !== true && ollamaModelName(entry.alias) === ollamaModelName(name));
+  // Prefix aliases match the short name Ollama shows (no ":latest"), case insensitive.
+  const shortName = (name: string) => ollamaModelName(name).replace(/:latest$/, "");
+  const prefixMatch = (name: string) => aliases
+    .filter((entry) => entry.prefix_matching === true && shortName(name).startsWith(entry.alias.trim().toLowerCase()))
+    .sort((a, b) => b.alias.length - a.alias.length)[0];
+  // The first match is an exact alias, else the longest prefix alias; from
+  // there exact aliases are followed, and a cycle resolves to nothing.
+  const first = exact(model) ?? prefixMatch(model);
+  if (!first) return { kind: "none" };
+  let current = first.target;
+  const seen = new Set([ollamaModelName(model)]);
+  for (let next = exact(current); next; next = exact(current)) {
+    if (seen.has(ollamaModelName(current))) return { kind: "none" };
+    seen.add(ollamaModelName(current));
+    current = next.target;
+  }
+  return { kind: "alias", target: current };
+}
+
+/**
+ * The think value for a request: the model's family when Ollama reported it,
+ * otherwise what Ollama's answers showed, then the name.
+ */
+function ollamaThinkFor(endpoint: string, model: string): false | "low" {
+  const key = familyKey(endpoint, model);
+  const family = ollamaModelFamilies.get(key);
+  if (family !== undefined) return ollamaThinkSetting(model, family);
+  // An answer counts only for the version it was learned against, so one
+  // learned before any version was known does not pass to the first version seen.
+  const learned = ollamaThinkLearned.get(key);
+  if (learned && learned.digest === ollamaModelDigests.get(key)) return learned.value;
+  return ollamaThinkSetting(model);
+}
+
+/**
+ * Ollama's answer to a think level the model does not support, in old and
+ * current wording, or from a version whose `think` is a Boolean only and
+ * cannot read a level.
+ */
+function rejectsThinkLevel(detail: string): boolean {
+  // The quotes arrive escaped inside Ollama's JSON error body.
+  return /think value \\?"[^"\\]*\\?" is not supported for this model|\\?"[^"\\]*\\?" does not support thinking|cannot unmarshal string into Go struct field \S*\.think of type bool/i.test(detail);
+}
+
+/**
+ * Ollama's `think` value for a model. gpt-oss cannot turn reasoning off and
+ * ignores `false`, so it gets the lowest effort level; other models get
+ * `false`, which Ollama accepts for every model. The family decides when it
+ * is known; otherwise the name does.
+ */
+export function ollamaThinkSetting(model: string, family?: string): false | "low" {
+  // Ollama names the family "gptoss" or "gpt-oss".
+  if (family !== undefined) return family.toLowerCase().replace(/-/g, "") === "gptoss" ? "low" : false;
+  return /(^|\/)gpt-oss([:-]|$)/i.test(model) ? "low" : false;
+}
+
+/** An Ollama reply that had reasoning and no answer. */
+export class OllamaReasoningWithoutAnswerError extends Error {
+  override name = "OllamaReasoningWithoutAnswerError";
+}
+
+/** Whether an error is a reply with reasoning and no answer, also across wrappers that keep the name. */
+export function isReasoningWithoutAnswerError(error: unknown): boolean {
+  return error instanceof Error && error.name === "OllamaReasoningWithoutAnswerError";
+}
+
+/** Whether a reply with reasoning and no answer is the error or one of its causes. */
+export function reasoningWithoutAnswerInChain(error: unknown): boolean {
+  for (let current = error, depth = 0; current instanceof Error && depth < 8; current = current.cause, depth += 1) {
+    if (isReasoningWithoutAnswerError(current)) return true;
+  }
+  return false;
+}
+
+/** The failure for a reply that has reasoning and no answer. */
+export function reasoningWithoutAnswerMessage(model: string, doneReason: string | undefined): string {
+  return doneReason === "length"
+    ? `Ollama stopped "${model}" at the token limit while it was still reasoning, so there is no answer. ` +
+        "Raise the token limit, shorten the request, or pick a model that answers without reasoning."
+    : `Ollama returned only reasoning from "${model}" and no answer. Retry, or pick a model that answers without reasoning.`;
 }
 
 export function resolveOllamaEndpoint(endpoint?: string): string {

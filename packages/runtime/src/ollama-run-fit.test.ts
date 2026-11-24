@@ -48,6 +48,8 @@ definition:
       return new Response(JSON.stringify({ parameters: "num_ctx                        16384", model_info: { "general.architecture": "llama", "llama.context_length": 131072 } }), { status: 200 });
     }
     if (path === "/api/ps") return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    // No model list: the adapter keeps what it knows.
+    if (path === "/api/tags") return new Response("not found", { status: 404 });
     chats += 1;
     return new Response(`${JSON.stringify({ model: "m", message: { content: "ok" }, done: true })}\n`, { status: 200 });
   }) as typeof fetch;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { RunRecord, AgentSummary, GraphRequestInput } from "@openadminos/agent-sdk";
+import type { RunRecord, RunLlmApi, AgentSummary, GraphRequestInput } from "@openadminos/agent-sdk";
 import { RunService, type RunPersistedState, type RunServiceHost } from "./runs.js";
 
 function deferred() {
@@ -80,6 +80,41 @@ describe("run lifecycle", () => {
     assert.deepEqual(h.state().runs.map((r) => r.status), ["awaiting-confirmation", "failed", "failed"]);
     assert.match(h.state().runs[1]?.summary ?? "", /Review the tenant/);
     assert.equal(h.requests.length, 0);
+  });
+
+  it("checks a legacy Ollama run at phase start and again before sending", async () => {
+    const h = harness();
+    const agent = { slug: "write-test", mode: "write" } as AgentSummary;
+    const model = "writer:latest";
+    const run = { providerId: "ollama", model } as RunRecord;
+    const phase = h.service as unknown as {
+      baseRunLlm(run: RunRecord, agent: AgentSummary, provider: "ollama", model: string): Promise<RunLlmApi>;
+    };
+    let onDevice = false;
+    let reads = 0;
+    let builds = 0;
+    let calls = 0;
+    Object.assign(h.host, {
+      verifyLocalOllamaModel: async (name: string) => {
+        assert.equal(name, model);
+        reads++;
+        return onDevice;
+      },
+      buildLlm: async () => {
+        builds++;
+        return { available: true, complete: async () => { calls++; return { model, text: "Answer" }; } };
+      },
+    });
+
+    await assert.rejects(phase.baseRunLlm(run, agent, "ollama", model), /could not confirm that writer:latest still runs on this device/);
+    assert.equal(builds, 0);
+    onDevice = true;
+    const llm = await phase.baseRunLlm(run, agent, "ollama", model);
+    await llm.complete({ prompt: "Reviewed request" });
+    onDevice = false;
+    await assert.rejects(llm.complete({ prompt: "Later request" }), /could not confirm that writer:latest still runs on this device/);
+    assert.equal(reads, 4);
+    assert.equal(calls, 1);
   });
 
   it("leaves approval pending if provider discovery fails before apply", async () => {
@@ -378,6 +413,22 @@ it('refuses a run reviewed with no organization once an organization became acti
   assert.equal(h.state().runs.length, 0);
 });
 
+it('refuses an Ollama run whose reviewed destination changed and records an accepted Cloud alias', async () => {
+  const h = harness();
+  const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  Object.assign(h.host, {
+    appVersion: '0.7.2',
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['alias'], remoteModels: ['alias'], isLocal: true }],
+    providerCanRun: () => true,
+  });
+  await h.host.write({ ...h.state(), installedAgents: [agent] });
+  const options = { providerId: 'ollama' as const, model: 'alias' };
+  await assert.rejects(h.service.startRun('docs', { ...options, expectedOllamaCloud: false }), /model destination changed/);
+  assert.equal(h.state().runs.length, 0);
+  const run = await h.service.startRun('docs', { ...options, expectedOllamaCloud: true });
+  assert.equal(run.ollamaCloud, true);
+});
+
 it('admits a model fit rerun on a model on this device only after a fresh check that it runs here', async () => {
   const h = harness();
   const agent = { id: 'docs', slug: 'docs', name: 'Docs', description: 'No service calls', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
@@ -529,6 +580,20 @@ it('records a fit issue on a failed run only after confirming its model ran on t
   onDevice = true;
   await h.service.persistRunSnapshot(failed('r2'));
   assert.equal(h.state().runs.find((run) => run.id === 'r2')?.modelFit, undefined);
+});
+
+it('offers no model fit for a reply with reasoning and no answer whose text reads like a context failure', async () => {
+  const h = harness();
+  Object.assign(h.host, {
+    listProviders: async () => [{ id: 'ollama', name: 'Ollama', status: 'connected', models: ['exceed_context_size_error:latest'], defaultModel: 'exceed_context_size_error:latest', isLocal: true }],
+    verifyOnDeviceModel: async () => true,
+  });
+  const failed = { id: 'r5', agentSlug: 'docs', status: 'failed', providerId: 'ollama', model: 'exceed_context_size_error:latest', queuedAt: new Date().toISOString(), steps: [], logs: [],
+    failureCause: 'reasoning-without-answer',
+    error: 'Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give exceed_context_size_error:latest 16,384, usually because free memory ran out.' } as unknown as RunRecord;
+  await h.host.write({ ...h.state(), runs: [{ ...failed, status: 'running' }] as RunRecord[] });
+  await h.service.persistRunSnapshot(failed);
+  assert.equal(h.state().runs.find((run) => run.id === 'r5')?.modelFit, undefined);
 });
 
 it('offers nothing for a hosted provider failure that reads like a context failure', async () => {

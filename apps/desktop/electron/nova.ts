@@ -1,3 +1,5 @@
+import { formatChatDateTime, type ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
+import { activeModelProvider, hostedOllamaDestination, type HostedOllamaDestination } from "@openadminos/agent-sdk";
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
@@ -88,6 +90,7 @@ export class NovaService {
     providerId: AppState["activeProviderId"];
     model?: string;
     reasoningIsLocal: boolean;
+    ollamaDestination: HostedOllamaDestination | undefined;
     /** Where the reasoning provider was reached at start, for providers that can be pointed elsewhere. */
     endpoint?: string;
     /** The sign-in the organization was connected with at start; a reconnect replaces it. */
@@ -228,6 +231,7 @@ export class NovaService {
     ) => Promise<SendIntuneChatMessageResult>,
     private readonly request: typeof fetch = fetch,
     private readonly actions?: NovaActionHost,
+    private readonly timestampLocale?: ChatDateTimeLocale,
   ) {}
   async handle(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse> {
     if (!input || typeof input !== "object")
@@ -289,9 +293,7 @@ export class NovaService {
       if (!state.activeTenantId || state.activeTenantId !== input.tenantId)
         throw new Error("Select a tenant before starting Nova.");
       this.requireReasoningProvider(state, input.mode);
-      const provider = state.providers.find(
-        (p) => p.id === state.activeProviderId,
-      );
+      const provider = novaReasoningProvider(state);
       if (input.mode === "local" && !provider?.isLocal)
         throw new Error(
           "Choose a local agent provider before using local voice.",
@@ -308,7 +310,8 @@ export class NovaService {
       // The session belongs to the organization and provider active when it was asked for.
       const endpoint = await this.providerEndpoint(state.activeProviderId);
       const connection = tenantConnection(state, state.activeTenantId);
-      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model: selectedNovaModel(state), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}), ...(connection ? { connection } : {}) };
+      const model = selectedNovaModel(state);
+      const identity = { tenantId: state.activeTenantId, providerId: state.activeProviderId, model, ollamaDestination: hostedOllamaDestination(provider, model), reasoningIsLocal: provider?.isLocal === true, ...(endpoint ? { endpoint } : {}), ...(connection ? { connection } : {}) };
       const { settings, profile, notesUnreadable } = await this.readSessionProfile(identity.tenantId);
       if (generation !== this.generation) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       // Only the notes that fit the block are sent, recorded in the consent and watched for changes.
@@ -430,7 +433,7 @@ export class NovaService {
       state.activeTenantId !== session.tenantId ||
       state.activeProviderId !== session.providerId ||
       selectedNovaModel(state) !== session.model ||
-      state.providers.find((p) => p.id === session.providerId)?.isLocal !==
+      novaReasoningProvider(state)?.isLocal !==
         session.reasoningIsLocal
     )
       throw new Error(
@@ -566,7 +569,7 @@ export class NovaService {
         const latest = await this.state();
         if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
             latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
-            selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+            selectedNovaModel(latest) !== session.model || novaReasoningProvider(latest)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
       }
       if (command.kind === "research" && (novaDeliveryRequest(input.text) || (connectorReply && followUp)))
@@ -668,7 +671,7 @@ export class NovaService {
         const latest = await this.state();
         if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
             latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
-            selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+            selectedNovaModel(latest) !== session.model || novaReasoningProvider(latest)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
         if (failure) {
           if (intent) session.commandContext = { request: JSON.stringify(intent.kind === "send" ? { ...intent, question: undefined } : intent).slice(0, 1200), at: Date.now() };
@@ -731,7 +734,7 @@ export class NovaService {
             assertAnswerActive(signal);
             if (this.session !== session || current.activeTenantId !== session.tenantId ||
                 current.activeProviderId !== session.providerId || selectedNovaModel(current) !== session.model ||
-                current.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+                novaReasoningProvider(current)?.isLocal !== session.reasoningIsLocal)
               throw new Error("Nova’s tenant or provider changed. Start a new conversation before searching.");
             const key = await this.secrets.get("api-key");
             assertAnswerActive(signal);
@@ -749,6 +752,7 @@ export class NovaService {
                 hostedProviderConsent: {
                   tenantId: session.tenantId,
                   providerId: session.providerId,
+                  ...(session.ollamaDestination ? { ollamaDestination: session.ollamaDestination } : {}),
                   acknowledgedAt: new Date().toISOString(),
                 },
               }
@@ -788,7 +792,7 @@ export class NovaService {
         current.activeTenantId !== session.tenantId ||
         current.activeProviderId !== session.providerId ||
         selectedNovaModel(current) !== session.model ||
-        current.providers.find((p) => p.id === session.providerId)?.isLocal !==
+        novaReasoningProvider(current)?.isLocal !==
           session.reasoningIsLocal
       )
         throw new Error(
@@ -806,7 +810,7 @@ export class NovaService {
         activity({ kind: "answer", status: "failed", message: answerError });
         return {
           answerError,
-          text: boundedVoiceAnswer(`${answerError} You can retry or ask another question.`),
+          text: boundedVoiceAnswer(`${answerError} You can retry or ask another question.`, false, this.timestampLocale),
           conversationId: result.conversation.id,
         };
       }
@@ -818,7 +822,7 @@ export class NovaService {
       }
       return {
         displayText: result.assistantMessage.content,
-        text: boundedVoiceAnswer(result.assistantMessage.content, Boolean(result.assistantMessage.toolTrace?.some(trace => trace.tool === "web_search" && !trace.error && trace.webSources?.length))),
+        text: boundedVoiceAnswer(result.assistantMessage.content, Boolean(result.assistantMessage.toolTrace?.some(trace => trace.tool === "web_search" && !trace.error && trace.webSources?.length)), this.timestampLocale),
         conversationId: result.conversation.id,
       };
     }
@@ -948,9 +952,7 @@ export class NovaService {
       throw new Error(
         "Connect and select a tenant in Settings before starting Nova.",
       );
-    const provider = state.providers.find(
-      (p) => p.id === state.activeProviderId,
-    );
+    const provider = novaReasoningProvider(state);
     if (mode === "local" && !provider?.isLocal)
       throw new Error(
         "Choose a local agent provider in Settings before using local voice.",
@@ -1014,14 +1016,14 @@ export class NovaService {
   }
 }
 
-export function boundedVoiceAnswer(text: string, hasPublicSources = false): string {
+export function boundedVoiceAnswer(text: string, hasPublicSources = false, timestampLocale?: ChatDateTimeLocale): string {
   const sourceIndex = text.indexOf("\n\nPublic web sources:");
   if (sourceIndex >= 0) text = text.slice(0, sourceIndex);
   text = text.replace(/\n\nDetected matching agent:[^\n]*/g, "").trim();
-  text = text.replace(/\b(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):\d{2}(?:\.\d+)?Z\b/g, (_, year, month, day, hour, minute) => {
-    const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
-    return Number.isNaN(date.getTime()) ? "an unavailable timestamp" : date.toLocaleString("en-GB", { timeZone: "UTC", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) + " UTC";
-  });
+  text = text.replace(
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z\b|[+-]\d{2}:\d{2}\b)/g,
+    (timestamp) => formatChatDateTime(new Date(timestamp), { ...timestampLocale, year: "numeric" }) ?? "an unavailable timestamp",
+  );
   if (hasPublicSources) text += " Public source links are available in Chat.";
   if (text.length <= 2000) return text;
   return `${text.slice(0, 1900)}… The full answer and evidence are available in Chat.`;
@@ -1067,7 +1069,7 @@ function tenantConnection(state: AppState, tenantId: string): string | undefined
 
 /** Whether a session's organization, connection or reasoning provider is no longer what it started with. */
 function sessionContextDiffers(
-  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; endpoint?: string; connection?: string },
+  session: { tenantId: string; providerId: AppState["activeProviderId"]; model?: string; reasoningIsLocal: boolean; ollamaDestination?: HostedOllamaDestination | undefined; endpoint?: string; connection?: string },
   state: AppState,
   writableActiveTenantId: string | undefined,
   endpoint: string | undefined,
@@ -1079,7 +1081,8 @@ function sessionContextDiffers(
     tenantConnection(state, session.tenantId) !== session.connection ||
     state.activeProviderId !== session.providerId ||
     selectedNovaModel(state) !== session.model ||
-    state.providers.find((p) => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal ||
+    novaReasoningProvider(state)?.isLocal !== session.reasoningIsLocal ||
+    hostedOllamaDestination(novaReasoningProvider(state), session.model) !== session.ollamaDestination ||
     (endpoint ?? undefined) !== (session.endpoint ?? undefined)
   );
 }
@@ -1093,7 +1096,7 @@ export function buildNovaInstructions(
   profileBlock = "",
 ): string {
   const tenant = state.tenants.find((t) => t.id === state.activeTenantId);
-  const provider = state.providers.find((p) => p.id === state.activeProviderId);
+  const provider = novaReasoningProvider(state);
   const allowed = (capability: "webSearch" | "startAgents" | "navigation") =>
     !settings || novaCapabilityAllowed(settings.profile, settings.policy, capability);
   const sendTargets = NOVA_SEND_CONNECTORS.filter((connector) => !settings || novaConnectorSendAllowed(settings.profile, settings.policy, connector.id)).map((connector) => connector.label);
@@ -1196,6 +1199,10 @@ function assertAnswerActive(signal: AbortSignal) {
       "Nova's tenant query timed out. Preload relevant data in Cache or choose a faster reasoning model, then retry.",
     );
   signal.throwIfAborted();
+}
+
+function novaReasoningProvider(state: AppState) {
+  return activeModelProvider(state.providers.find((provider) => provider.id === state.activeProviderId), state.activeModelByProviderId);
 }
 
 function selectedNovaModel(state: AppState): string | undefined {

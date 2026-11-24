@@ -15,7 +15,7 @@ import type {
 
 import { GRAPH_CACHE_RESOURCES, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
-import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
+import { fenceTenantData, reasoningWithoutAnswerInChain, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
 import { writeMcpQuery } from "./mcp-query-writer.js";
 import { mcpSentText } from "./chat-steps.js";
@@ -108,7 +108,7 @@ export const LOCAL_FALLBACK_NOTICES: Record<AgenticFailureReason, string> = {
 /** Provider errors that mean the prompt did not fit the model's context window. */
 /** A request that never reached the model: the server is down or refused the connection. */
 const PROVIDER_UNREACHABLE = /ECONNREFUSED|ECONNRESET|ENOTFOUND|EHOSTUNREACH|fetch failed|socket hang up|isn't running|is not running|connection refused|could not connect/i;
-const CONTEXT_TOO_SMALL = /context (?:length|window|size|limit)|num_ctx|maximum context|context_length_exceeded|too many tokens|prompt is too long|exceeds? (?:the )?(?:model'?s )?(?:maximum )?context/i;
+const CONTEXT_TOO_SMALL = /context (?:length|window|size|limit)|num_ctx|maximum context|context_length_exceeded|exceed_context_size_error|too many tokens|prompt is too long|exceeds? (?:the )?(?:model'?s )?(?:maximum )?context/i;
 
 const EVIDENCE_TOOLS = new Set<string>([
   "query_cache",
@@ -480,6 +480,9 @@ export async function runAgenticChat(
       completion = await input.llm.complete(options);
     }
     } catch (caught) {
+      // A reply with reasoning and no answer has its own typed cause: the
+      // message fails with it, whatever its text (a model name) matches.
+      if (reasoningWithoutAnswerInChain(caught)) throw caught;
       // A local prompt that overflowed the context window falls back; any other error is the provider's.
       const detail = caught instanceof Error ? caught.message : String(caught);
       // The agent runtime's own prompt fit refusal (ContextTooSmallError, PR #214) is a context limit too.

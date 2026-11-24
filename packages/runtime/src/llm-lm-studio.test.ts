@@ -63,7 +63,7 @@ describe("probeLmStudioLlm reads an unexpected list as a failed check", () => {
     await withFetch(async () => jsonResponse({ data: { id: "x" } }), async () => {
       const probe = await probeLmStudioLlm();
       assert.equal(probe.status, "error");
-      assert.equal(probe.detail, "LM Studio answered with a response OpenAdminOS could not read.");
+      assert.equal(probe.detail, "LM Studio on http://127.0.0.1:1234/v1 answered with a response OpenAdminOS could not read (HTTP 200). Check that the endpoint serves the LM Studio model list, then try again.");
     });
   });
 });

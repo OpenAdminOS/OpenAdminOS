@@ -13,7 +13,7 @@ import type {
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
-import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelSizeBillions } from "../../src/shared/model-fit.js";
+import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelFitContextKey, modelSizeBillions } from "../../src/shared/model-fit.js";
 import { GEMINI_DEFAULT_MODEL } from "@openadminos/runtime";
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
@@ -58,6 +58,12 @@ function freshConsent(providerId: ProviderId, model?: string, remember?: boolean
 }
 
 describe("Model fit: classifying a failure", () => {
+  it("recognizes a Lemonade context overflow with only the server's wording", () => {
+    assert.deepEqual(classifyModelFitFailure(new Error("Lemonade error: the request exceeds the available context size"), {
+      providerId: "lemonade", isLocal: true, model: "local-model",
+    }), { reason: "context-too-small", providerId: "lemonade", model: "local-model" });
+  });
+
   it("reads the numbers from the Ollama adapter's message and from Ollama's own error", () => {
     assert.deepEqual(classifyModelFitFailure(new Error(ADAPTER_ERROR), { providerId: "ollama", model: LOCAL_MODEL, isLocal: true }), {
       reason: "context-too-small",
@@ -142,7 +148,7 @@ describe("Model fit: classifying a failure", () => {
   it("reads the LM Studio adapter's messages and the newer Ollama forms, as the runtime words them", () => {
     const local = { providerId: "lm-studio" as const, model: "qwen3-8b", isLocal: true };
     const needs = classifyModelFitFailure("LM Studio context length too small: This request needs 15,857 tokens of context, but qwen3-8b is loaded in LM Studio with a context length of 4,096. Reload the model in LM Studio with a context length to at least 17,408.", local);
-    assert.deepEqual([needs?.neededTokens, needs?.limitTokens], [15857, 4096]);
+    assert.deepEqual([needs?.neededTokens, needs?.limitTokens], [16881, 4096]);
     const loadedOnly = classifyModelFitFailure("LM Studio context length too small: This request does not fit in the 8,192 tokens of context qwen3-8b is loaded with in LM Studio.", local);
     assert.deepEqual([loadedOnly?.reason, loadedOnly?.neededTokens, loadedOnly?.limitTokens], ["context-too-small", undefined, 8192]);
     assert.equal(classifyModelFitFailure("LM Studio context length too small: This request does not fit in the context length qwen3-8b is loaded with in LM Studio.", local)?.reason, "context-too-small");
@@ -161,6 +167,13 @@ describe("Model fit: classifying a failure", () => {
     }
     const wrapped = classifyModelFitFailure(`Agent failed: Ollama could not load ${LOCAL_MODEL} with the 45,056 token context size kept from an earlier request, usually because free memory ran out.`, { providerId: "ollama", isLocal: true });
     assert.equal(wrapped?.limitTokens, 45056);
+    for (const wrapper of [
+      "The proposal could not be checked against the tenant before applying, so nothing was applied. ",
+      "Nothing was applied: ",
+    ]) {
+      const issue = classifyModelFitFailure(wrapper + "Ollama context size too small: This request did not fit in the 45,056 token context kept from an earlier request.", { providerId: "ollama", isLocal: true });
+      assert.deepEqual([issue?.reason, issue?.limitTokens], ["context-too-small", 45056]);
+    }
     const retrySize = classifyModelFitFailure("Ollama context size too small: This request did not fit in the 32,768 token context of the retry. Ollama said: x", { providerId: "ollama", isLocal: true });
     assert.equal(retrySize?.limitTokens, 32768);
     // A remote-backed model on a loopback server already sent its prompt elsewhere: no on-device offer.
@@ -175,7 +188,7 @@ describe("Model fit: classifying a failure", () => {
     const thinking = Object.assign(new Error("reasoning only"), { code: "thinking-only" });
     assert.equal(classifyModelFitFailure(thinking, { providerId: "ollama", isLocal: true })?.reason, "thinking-only");
     const llamaCpp = classifyModelFitFailure('HTTP 400 {"error":{"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":8192}}', { providerId: "lemonade", isLocal: true });
-    assert.deepEqual([llamaCpp?.neededTokens, llamaCpp?.limitTokens], [20000, 8192]);
+    assert.deepEqual([llamaCpp?.neededTokens, llamaCpp?.limitTokens], [21024, 8192]);
   });
 
   it("keeps Apple Foundation's prompt count and context size", () => {
@@ -201,10 +214,11 @@ describe("Model fit: classifying a failure", () => {
 });
 
 describe("Model fit: the choices", () => {
-  const issue = { reason: "context-too-small" as const, providerId: "ollama" as const, model: LOCAL_MODEL };
+  const issue = { reason: "context-too-small" as const, providerId: "ollama" as const, model: LOCAL_MODEL, neededTokens: 40652 };
+  const contextWindows = new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), 65536], [modelFitContextKey("ollama", LOCAL_MODEL), 49152]]);
 
   it("lists only ready hosted providers and larger local models", () => {
-    const choices = modelFitChoices({ issue, providers: [ollama, claude, codexSignedOut] });
+    const choices = modelFitChoices({ issue, contextWindows, providers: [ollama, claude, codexSignedOut] });
     assert.deepEqual(choices.hosted.map((choice) => choice.providerId), ["anthropic"]);
     assert.equal(choices.hosted[0]!.model, "claude-sonnet-5-5");
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b"]);
@@ -213,7 +227,7 @@ describe("Model fit: the choices", () => {
 
   it("offers sized local models after a context failure on a model whose size is unknown", () => {
     const apple: ProviderSummary = { id: "apple-foundation", name: "Apple Intelligence", description: "", isLocal: true, status: "connected", models: ["system-language-model"], defaultModel: "system-language-model" };
-    const choices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] });
+    const choices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "apple-foundation", model: "system-language-model", neededTokens: 40652 }, contextWindows, providers: [apple, ollama] });
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b", LOCAL_MODEL]);
     // A reasoning-only reply is about the model's size, so an unknown size still offers none.
     assert.deepEqual(modelFitChoices({ issue: { reason: "thinking-only", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] }).local, []);
@@ -223,8 +237,21 @@ describe("Model fit: the choices", () => {
     assert.equal(isOllamaCloudModel("gpt-oss:120b-cloud"), true);
     assert.equal(isOllamaCloudModel("glm-4.6:cloud"), true);
     assert.equal(isOllamaCloudModel("gpt-oss:20b"), false);
-    const choices = modelFitChoices({ issue, providers: [{ ...ollama, models: [LOCAL_MODEL, "gpt-oss:120b-cloud", "gpt-oss:20b"] }] });
+    const suffix = "gpt-oss:120b-cloud";
+    const alias = "qwen:32b";
+    const windows = new Map(contextWindows)
+      .set(modelFitContextKey("ollama", suffix), 131072)
+      .set(modelFitContextKey("ollama", alias), 131072);
+    const providers = [{ ...ollama, models: [...ollama.models, suffix, alias], remoteModels: [alias] }];
+    const choices = modelFitChoices({ issue, contextWindows: windows, providers });
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b"]);
+  });
+
+  it("requires a known request size and enough reported context for a context retry", () => {
+    const windows = new Map(contextWindows).set(modelFitContextKey("ollama", "other:30b"), 16384);
+    const providers = [{ ...ollama, models: [...ollama.models, "other:30b", "unknown:40b"] }];
+    assert.deepEqual(modelFitChoices({ issue, providers, contextWindows: windows }).local.map(({ model, contextWindow }) => [model, contextWindow]), [["gpt-oss:20b", 65536]]);
+    assert.deepEqual(modelFitChoices({ issue: { reason: issue.reason, providerId: issue.providerId, model: issue.model }, providers, contextWindows: windows }).local, []);
   });
 
   it("offers no hosted provider when the managed policy allows only local ones, and says the policy is why", () => {
@@ -341,7 +368,28 @@ describe("Model fit: the per-request override", () => {
       () => resolveChatTurnProvider({ ...base, providers: [withAlias, claude], override: { offerId: "fit_1", providerId: "ollama", model: "big-70b" }, consent: undefined }),
       /runs on another server/,
     );
-    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL }, providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
+    assert.deepEqual(modelFitChoices({ issue: { reason: "context-too-small", providerId: "ollama", model: LOCAL_MODEL, neededTokens: 40652 }, contextWindows: new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), 65536], [modelFitContextKey("ollama", "big-70b"), 65536]]), providers: [withAlias] }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
+  });
+
+  for (const [providerId, error] of [
+    ["lemonade", 'HTTP 400 {"error":{"type":"exceed_context_size_error","n_prompt_tokens":20000,"n_ctx":8192}}'],
+    ["lm-studio", "LM Studio context length too small: This request needs 20,000 tokens of context, but local-8b is loaded in LM Studio with a context length of 8,192."],
+  ] as const) {
+    it(`requires room for the answer when ${providerId} reports a prompt-only count`, () => {
+      const issue = classifyModelFitFailure(error, { providerId, model: "local-8b", isLocal: true });
+      assert.ok(issue);
+      const contextWindow = (tokens: number) => new Map([[modelFitContextKey("ollama", "gpt-oss:20b"), tokens]]);
+      assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(21023) }).local, []);
+      assert.deepEqual(modelFitChoices({ issue, providers: [ollama], contextWindows: contextWindow(21024) }).local.map((choice) => choice.model), ["gpt-oss:20b"]);
+    });
+  }
+
+  it("offers a same-size local model with enough context only for a context failure", () => {
+    const provider = { ...ollama, models: [LOCAL_MODEL, "another-8b"] };
+    const issue = { providerId: "ollama", model: LOCAL_MODEL, neededTokens: 32000 } as const;
+    const contextWindows = new Map([[modelFitContextKey("ollama", "another-8b"), 32768]]);
+    assert.deepEqual(modelFitChoices({ issue: { ...issue, reason: "context-too-small" }, providers: [provider], contextWindows }).local.map((choice) => choice.model), ["another-8b"]);
+    assert.deepEqual(modelFitChoices({ issue: { ...issue, reason: "repeated-failure" }, providers: [provider], contextWindows }).local, []);
   });
 
   it("keeps the active model as the anchor after a larger local model also failed", () => {
@@ -357,7 +405,7 @@ describe("Model fit: offers", () => {
     const offers = new ModelFitOffers();
     const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
     assert.throws(() => offers.check("fit_missing", request), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
-    const id = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     assert.throws(() => offers.check(id, { ...request, content: "other" }), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
     offers.claim(id);
     assert.throws(() => offers.claim(id), (error: Error) => error.message.endsWith(MODEL_FIT_RESEND));
@@ -367,15 +415,15 @@ describe("Model fit: offers", () => {
     let now = 0;
     const offers = new ModelFitOffers(() => now);
     const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
-    const id = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ ...request, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     offers.check(id, request);
-    now = MODEL_FIT_OFFER_TTL_MS + 1;
+    now = MODEL_FIT_OFFER_TTL_MS;
     assert.throws(() => offers.claim(id), /no longer available/);
   });
 
   it("lets only one send claim an offer", () => {
     const offers = new ModelFitOffers();
-    const id = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     const request = { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined };
     // Both sends pass the check before either claims it.
     offers.check(id, request);
@@ -387,9 +435,9 @@ describe("Model fit: offers", () => {
   it("replaces an earlier offer for the same conversation, and keeps other conversations' offers", () => {
     const offers = new ModelFitOffers();
     const base = { tenantId: undefined, content: "q", workspaceKey: undefined, anchor: { providerId: "ollama" as const, model: LOCAL_MODEL }, failed: { providerId: "ollama" as const, model: LOCAL_MODEL }, reason: "context-too-small" as const };
-    const first = offers.issue({ ...base, conversationId: "chat_1" });
-    const other = offers.issue({ ...base, conversationId: "chat_2" });
-    const second = offers.issue({ ...base, conversationId: "chat_1" });
+    const { offerId: first } = offers.issue({ ...base, conversationId: "chat_1" });
+    const { offerId: other } = offers.issue({ ...base, conversationId: "chat_2" });
+    const { offerId: second } = offers.issue({ ...base, conversationId: "chat_1" });
     assert.throws(() => offers.check(first, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined }), /no longer available/);
     offers.check(second, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined });
     offers.check(other, { conversationId: "chat_2", tenantId: undefined, content: "q", workspaceKey: undefined });
@@ -398,7 +446,7 @@ describe("Model fit: offers", () => {
   it("binds an offer to its conversation, organization and question, and lets it expire", () => {
     let now = 1_000;
     const offers = new ModelFitOffers(() => now);
-    const id = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
+    const { offerId: id } = offers.issue({ conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined, anchor: { providerId: "ollama", model: LOCAL_MODEL }, failed: { providerId: "ollama", model: LOCAL_MODEL }, reason: "context-too-small" });
     assert.equal(offers.check(id, { conversationId: "chat_1", tenantId: "tenant-1", content: "q", workspaceKey: undefined }).id, id);
     assert.throws(() => offers.check(id, { conversationId: "chat_2", tenantId: "tenant-1", content: "q", workspaceKey: undefined }), /another question/);
     assert.throws(() => offers.check(id, { conversationId: "chat_1", tenantId: undefined, content: "q", workspaceKey: undefined }), /another question/);
@@ -459,7 +507,8 @@ describe("Model fit in Chat", () => {
       const events: IntuneChatStreamEvent[] = [];
       const result = await service.streamIntuneChatMessage({ content: QUESTION }, (event) => events.push(event));
       assert.equal(result.assistantMessage.status, "failed");
-      const { offerId, ...issue } = result.assistantMessage.modelFit!;
+      const { offerId, offerExpiresAt, ...issue } = result.assistantMessage.modelFit!;
+      assert.ok(offerExpiresAt && offerExpiresAt > Date.now());
       assert.deepEqual(issue, { reason: "context-too-small", neededTokens: 40652, limitTokens: 16384, providerId: "ollama", model: LOCAL_MODEL });
       assert.match(offerId!, /^fit_/);
       assert.ok(events.some((event) => event.type === "failed"));
@@ -468,6 +517,7 @@ describe("Model fit in Chat", () => {
       assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.neededTokens, 40652);
       // The offer is in memory only and single use, so it is not stored.
       assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.offerId, undefined);
+      assert.equal(store.listMessages(result.conversation.id).at(-1)?.modelFit?.offerExpiresAt, undefined);
     });
   });
 
@@ -648,13 +698,50 @@ describe("Model fit in Chat", () => {
     const during = new AbortController();
     const stoppingGuard = guardModelFitLlm(inner, { before: async () => { during.abort(); }, dispatched: () => { dispatched += 1; } });
     await assert.rejects(stoppingGuard.complete({ prompt: "stopped during check", signal: during.signal }));
-    await assert.rejects((async () => { for await (const _chunk of stoppingGuard.stream({ prompt: "s", signal: during.signal })) { /* drain */ } })());
+    const duringStream = new AbortController();
+    const stoppingStream = guardModelFitLlm(inner, {
+      before: async () => { duringStream.abort(); },
+      dispatched: () => { dispatched += 1; },
+    });
+    await assert.rejects((async () => {
+      for await (const _chunk of stoppingStream.stream({ prompt: "stopped during stream check", signal: duringStream.signal })) { /* drain */ }
+    })(), { name: "AbortError" });
+    assert.ok(duringStream.signal.aborted);
+    assert.ok(!calls.includes("stream"));
     assert.equal(dispatched, 1);
     allowed = false;
     await assert.rejects(guarded.complete({ prompt: "b" }), /not on this device/);
     await assert.rejects((async () => { for await (const _chunk of guarded.stream({ prompt: "c" })) { /* drain */ } })(), /not on this device/);
     assert.deepEqual(calls, ["complete"]);
     assert.equal(dispatched, 1);
+  });
+
+  it("passes the same on-device check to the adapter for an internal resend", async () => {
+    const inner: RunLlmApi = {
+      available: true,
+      async complete(options) {
+        await options.beforeOllamaResend?.();
+        return { text: "ok", model: "m" };
+      },
+      async *stream(options) {
+        await options.beforeOllamaResend?.();
+        yield { delta: "ok", accumulated: "ok", done: true, model: "m" };
+      },
+    };
+    for (const method of ["complete", "stream"] as const) {
+      let checked = 0;
+      const wrapped = guardModelFitLlm(inner, {
+        before: async () => {
+          if (++checked === 2) throw new Error("Model no longer on this device.");
+        },
+        dispatched: () => undefined,
+      });
+      await assert.rejects(async () => {
+        if (method === "complete") await wrapped.complete({ prompt: "test" });
+        else for await (const _chunk of wrapped.stream({ prompt: "test" })) { /* drain */ }
+      }, /Model no longer on this device/);
+      assert.equal(checked, 2);
+    }
   });
 
   it("refuses a call that names another model than the reviewed one", async () => {
@@ -827,5 +914,50 @@ describe("Model fit in Chat", () => {
       );
       assert.deepEqual(built, []);
     });
+  });
+});
+
+it("refuses a Chat send to an Ollama Cloud alias until the hosted model is confirmed", async () => {
+  await withStore(async (store) => {
+    const built: string[] = [];
+    const host = chatHost(store, built);
+    host.listProviders = async () => [{ ...ollama, remoteModels: [LOCAL_MODEL] }];
+    const service = new IntuneChatService(host);
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION }, () => undefined),
+      /Hosted provider confirmation is required/,
+    );
+    const consent = { noTenant: true as const, providerId: "ollama" as const, model: LOCAL_MODEL, acknowledgedAt: new Date().toISOString() };
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION, hostedProviderConsent: { ...consent, remember: true, ollamaDestination: "ollama-endpoint" } }, () => undefined),
+      /Ollama destination changed or was not confirmed/,
+    );
+    await assert.rejects(
+      service.streamIntuneChatMessage({ content: QUESTION, hostedProviderConsent: consent }, () => undefined),
+      /Ollama destination changed or was not confirmed/,
+    );
+    assert.equal(built.length, 0);
+    const result = await service.streamIntuneChatMessage({
+      content: QUESTION,
+      hostedProviderConsent: { ...consent, ollamaDestination: "ollama-cloud" },
+    }, () => undefined);
+    assert.ok(built.includes("ollama"));
+    assert.equal(result.assistantMessage.modelFit, undefined);
+  });
+});
+
+it("does not dispatch a Chat request if a previously local Ollama alias cannot be verified", async () => {
+  await withStore(async (store) => {
+    const host = chatHost(store, []);
+    let calls = 0;
+    host.verifyLocalOllamaModel = async () => false;
+    host.buildLlm = async () => ({
+      available: true,
+      async complete() { calls += 1; throw new Error("Unexpected model call"); },
+      async *stream() { calls += 1; throw new Error("Unexpected model call"); },
+    });
+    const result = await new IntuneChatService(host).streamIntuneChatMessage({ content: QUESTION }, () => undefined);
+    assert.match(result.assistantMessage.error ?? "", /still runs on this device/);
+    assert.equal(calls, 0);
   });
 });

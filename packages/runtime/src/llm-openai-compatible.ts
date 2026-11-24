@@ -5,6 +5,7 @@ import type {
   LlmTokenUsage,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
+import { describeModelServerCheckFailure, modelServerHttpFailure } from "./model-server-check-failure.js";
 
 /**
  * A local model server that speaks the OpenAI chat completions API
@@ -22,8 +23,8 @@ export interface OpenAiCompatibleServer {
   timeoutEnv: string;
   /** Thrown when a request has no model to use. */
   noModelMessage: string;
-  /** Probe detail when the server refuses the connection. */
-  notRunningDetail: string;
+  /** How to start the local server when it refuses the connection. */
+  startHint: string;
   /** Probe detail when the server runs but lists no usable model. */
   noModelsDetail: string;
   /** Probe detail for an HTTP status, when the server has its own copy for it. */
@@ -53,8 +54,8 @@ export interface OpenAiCompatibleServer {
   contextOverflowMessage?: (failure: OpenAiCompatibleFailure) => Promise<string | undefined>;
   /**
    * Whether an `error` field that is a plain string fails the request.
-   * LM Studio 0.3.x sends its errors that way; Lemonade's string errors keep
-   * their earlier handling. Defaults to false.
+   * LM Studio 0.3.x sends its errors that way. Context overflow errors fail
+   * the request for either server. Defaults to false.
    */
   stringErrors?: boolean;
 }
@@ -123,7 +124,7 @@ interface ChatResponse {
     total_tokens?: number;
   };
   /** An object in the OpenAI shape; older LM Studio releases send a string. */
-  error?: { message?: string } | string;
+  error?: { message?: string; type?: string; code?: string; n_prompt_tokens?: number; n_ctx?: number } | string;
 }
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -306,6 +307,19 @@ export function createOpenAiCompatibleLlm(
         throw new Error(`${name} response had no body to stream.`);
       }
 
+      // A server can return a regular JSON error even when streaming was requested.
+      if (response.headers.get("content-type")?.includes("application/json")) {
+        try {
+          const payload = (await response.json()) as ChatResponse;
+          const detail = errorMessage(payload, server.stringErrors ?? false);
+          if (detail) throw (await contextOverflow(detail, model, opts)) ?? new Error(`${name} error: ${detail}`);
+          throw new Error(`${name} returned JSON without a stream. Try again.`);
+        } finally {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener("abort", abortFromCaller);
+        }
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
@@ -385,16 +399,24 @@ export async function probeOpenAiCompatibleLlm(
   options: OpenAiCompatibleProviderOptions = {},
 ): Promise<OpenAiCompatibleProbeResult> {
   const { name } = server;
-  const endpoint = resolveOpenAiCompatibleEndpoint(server, options.endpoint);
+  const endpointSetting = options.endpoint === undefined && process.env[server.endpointEnv] !== undefined
+    ? server.endpointEnv
+    : undefined;
+  const resolvedEndpoint = resolveOpenAiCompatibleEndpoint(server, options.endpoint);
+  const endpoint = options.endpoint === undefined ? resolvedEndpoint.replace(/\/$/, "") : resolvedEndpoint;
   const endpointTrust = classifyOpenAiCompatibleEndpoint(name, endpoint);
   const controller = new AbortController();
   const timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+  const abortFromCaller = () => controller.abort();
+  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (options.signal?.aborted) abortFromCaller();
   const url = `${endpoint.replace(/\/$/, "")}/models`;
 
+  let httpStatus: number | undefined;
   try {
     const response = await fetchLocal(url, { signal: controller.signal });
+    httpStatus = response.status;
     if (isRefusedRedirect(response, url)) {
       return { ready: false, endpoint, isLocal: endpointTrust.isLocal, models: [], status: "error", detail: redirectRefusedDetail(name, url) };
     }
@@ -405,16 +427,17 @@ export async function probeOpenAiCompatibleLlm(
         isLocal: endpointTrust.isLocal,
         models: [],
         status: "error",
-        detail:
-          server.httpStatusDetail?.(response.status) ??
-          `${name} responded with HTTP ${response.status}.`,
+        detail: modelServerHttpFailure(name, endpoint, response.status, {
+          isLocal: endpointTrust.isLocal,
+          recovery: server.httpStatusDetail?.(response.status),
+        }),
       };
     }
     const payload = (await response.json()) as ModelsResponse;
-    if (payload.data !== undefined && !Array.isArray(payload.data)) {
-      throw new TypeError("The model list is not an array.");
+    if (!Array.isArray(payload?.data) || payload.data.some((model) => typeof model?.id !== "string" || !model.id.trim())) {
+      throw new TypeError("The model list has an unexpected shape.");
     }
-    const models = (server.chatModelIds ?? allModelIds)(payload.data ?? []);
+    const models = (server.chatModelIds ?? allModelIds)(payload.data);
     return {
       ready: true,
       endpoint,
@@ -428,31 +451,25 @@ export async function probeOpenAiCompatibleLlm(
           : server.noModelsDetail,
     };
   } catch (error) {
-    // Only a refused connection means the server is not running. A timeout,
-    // a stopped check or an unreadable response is a failed check.
-    if (isConnectionRefused(error)) {
-      return {
-        ready: false,
-        endpoint,
-        isLocal: endpointTrust.isLocal,
-        models: [],
-        status: "not-running",
-        detail: server.notRunningDetail,
-      };
-    }
-    const aborted = error instanceof Error && error.name === "AbortError";
+    const { notRunning, detail } = describeModelServerCheckFailure({
+      name,
+      endpoint,
+      endpointSetting,
+      defaultPort: new URL(server.defaultEndpoint).port,
+      isLocal: endpointTrust.isLocal,
+      startHint: server.startHint,
+    }, error, { httpStatus, stopped: options.signal?.aborted });
     return {
       ready: false,
       endpoint,
       isLocal: endpointTrust.isLocal,
       models: [],
-      status: "error",
-      detail: aborted
-        ? `${name} did not respond within ${timeoutMs}ms.`
-        : `${name} answered with a response OpenAdminOS could not read.`,
+      status: notRunning ? "not-running" : "error",
+      detail,
     };
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -521,7 +538,13 @@ export function classifyOpenAiCompatibleEndpoint(
 
 function errorMessage(payload: ChatResponse, stringErrors: boolean): string | undefined {
   const { error } = payload;
-  if (typeof error === "string") return stringErrors && error.length > 0 ? error : undefined;
+  if (typeof error === "string") {
+    return (stringErrors && error.length > 0) || /exceed_context_size_error|exceeds the available context size|context size has been exceeded/i.test(error) ? error : undefined;
+  }
+  if (error?.type === "exceed_context_size_error" || error?.code === "exceed_context_size_error") {
+    const { message, type, code, n_prompt_tokens, n_ctx } = error;
+    return JSON.stringify({ type, code, n_prompt_tokens, n_ctx, message });
+  }
   return error?.message || undefined;
 }
 
