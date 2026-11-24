@@ -4,14 +4,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- The floating Nova window supports local voice setup, streamed playback and typed questions alongside screen questions.
+
 ### Added
 
 - Nova can answer questions about a screen region using on-device OCR, with an editable, byte-counted preview, per-share consent for hosted reasoning, and a question-only handoff to Chat.
 
 - Open Nova over other apps with a configurable system-wide shortcut for voice and typed questions, including public Microsoft questions without an organization.
 - Nova answers public Microsoft feature and how-to questions without a connected organization, using the local documentation index when available and explaining when it is missing, unavailable for search, or has no matching passages.
+- Nova local voice: download verified speech models from the panel and use the built-in Whisper and Kokoro runtimes. Type a question while setting up voice, hear the remainder with an installed device voice if synthesis fails, or select your own local servers in Settings.
 
 ### Changed
+
+- Nova plays on-device speech in shorter chunks, pronounces common Microsoft administration terms, and uses an installed system voice for non-English answers.
+- Nova selects Small for CPU-only transcription, labels Turbo as slow in Settings, trims quiet edges from recordings, and speeds up short recordings with Small.
 
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
 - CI, documentation, and release workflows opt out of build-tool telemetry.
@@ -21,6 +27,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Nova keeps a live session while the floating window awaits consent, recovers when its global shortcut is unavailable, and reopens the main window for answer links and conversations.
+- Nova can repair corrupt local voice models and uses more reliable language detection for short answers.
 
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
 

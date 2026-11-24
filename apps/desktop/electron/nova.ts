@@ -1,3 +1,6 @@
+import { prepareRecording } from "./nova-speech/recording.js";
+import { speechLanguage } from "./nova-speech/language.js";
+import type { LocalSpeech } from "./nova-speech/local.js";
 import { formatChatDateTime, type ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
 import { activeModelProvider, hostedOllamaDestination, type HostedOllamaDestination } from "@openadminos/agent-sdk";
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION, NOVA_PUBLIC_INTRODUCTION } from "../src/shared/nova-conversation.js";
@@ -245,10 +248,24 @@ export class NovaService {
       retrieve(question: string): Promise<readonly { text: string; title?: string }[]>;
       model(providerId: AppState["activeProviderId"], model: string | undefined, endpoint: string | undefined, isLocal: boolean): Promise<RunLlmApi>;
     },
+    private readonly speech?: LocalSpeech,
   ) {}
-  async handle(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse> {
+  async handle(input: NovaRequest, onActivity?: (activity: NovaActivity) => void, onAudio?: (wav: Uint8Array, remainingText?: string) => void): Promise<NovaResponse> {
     if (!input || typeof input !== "object")
       throw new Error("Nova request is missing.");
+    if (input.action === "speech-status" || input.action === "speech-install" ||
+        input.action === "speech-cancel" || input.action === "speech-configure") {
+      if (!this.speech) return {};
+      if (input.action !== "speech-status" && input.action !== "speech-cancel")
+        requireVoiceModeAllowed(await this.state(), "local");
+      if (input.action === "speech-install") await this.speech.install();
+      if (input.action === "speech-cancel") this.speech.cancel();
+      if (input.action === "speech-configure") {
+        this.speech.configure(input.source, input.model);
+        if (this.session?.mode === "local") this.invalidate();
+      }
+      return { speech: this.speech.status() };
+    }
     if (input.action === "status")
       return { hasKey: Boolean(await this.secrets.get("api-key")) };
     if (input.action === "configure") {
@@ -288,7 +305,7 @@ export class NovaService {
     if (input.action === "check") {
       this.requireReasoningProvider(state, input.mode);
       if (input.connectivity !== false || input.mode === "local")
-        await this.checkVoice(input.mode);
+        await this.checkVoice(input.mode, input.connectivity !== false);
       else if (!(await this.secrets.get("api-key")))
         throw new Error("Add an OpenAI API key in Nova settings.");
       return {
@@ -297,7 +314,9 @@ export class NovaService {
             ? input.connectivity === false
               ? "Voice settings are ready. Starting a session checks voice connectivity and billing."
               : "API key and GPT-Live model access checked. Starting a session also checks voice connectivity and billing."
-            : "Whisper and Kokoro are reachable. Speech output is checked when you speak.",
+            : this.speech && !this.speech.advanced
+              ? "Built-in local voice is ready."
+              : "Whisper and Kokoro are reachable. Speech output is checked when you speak.",
       };
     }
     if (input.action === "start") {
@@ -454,6 +473,7 @@ export class NovaService {
         "Nova's tenant or provider changed. Start a new conversation.",
       );
     let answerSettings: NovaSettings | undefined;
+    requireVoiceModeAllowed(state, session.mode);
     if (input.action === "answer" || input.action === "decide-action") {
       // Settings and notes read now, not at session start: a note paused,
       // edited or forgotten in the meantime stays out of the next answer.
@@ -865,10 +885,15 @@ export class NovaService {
         throw new Error(
           "Voice recording is invalid or too long. Record at most one minute.",
         );
+      if (this.speech && !this.speech.advanced) {
+        const result = await this.speech.transcribe(new Uint8Array(input.audio), session.controller.signal);
+        return { text: result.text, speechLanguage: result.language };
+      }
+      const { wav } = prepareRecording(new Uint8Array(input.audio));
       const form = new FormData();
       form.set(
         "file",
-        new Blob([new Uint8Array(input.audio)], { type: "audio/wav" }),
+        new Blob([new Uint8Array(wav)], { type: "audio/wav" }),
         "speech.wav",
       );
       form.set("response_format", "json");
@@ -904,6 +929,10 @@ export class NovaService {
         input.text.length > 5000
       )
         throw new Error("Voice response is too long.");
+      const language = this.speech ? speechLanguage(input.text, input.languageHint) : "en";
+      if (language && language !== "en") return { speechLanguage: language };
+      if (this.speech && !this.speech.advanced)
+        return { audio: Array.from(await this.speech.speak(input.text, session.controller.signal, onAudio)) };
       const response = await this.localAudioRequest(
         "Kokoro speech",
         "http://127.0.0.1:8880/v1/audio/speech",
@@ -1124,7 +1153,7 @@ export class NovaService {
         `Nova needs a connected reasoning provider. Open Settings and connect ${provider?.name || "an agent provider"}. The voice API key does not configure tenant reasoning.`,
       );
   }
-  private async checkVoice(mode: "openai" | "local") {
+  private async checkVoice(mode: "openai" | "local", full = true) {
     if (mode === "openai") {
       const key = await this.secrets.get("api-key");
       if (!key)
@@ -1152,6 +1181,7 @@ export class NovaService {
         );
       return;
     }
+    if (this.speech && !this.speech.advanced) return this.speech.check(full);
     for (const [label, url] of [
       ["Whisper", "http://127.0.0.1:8080/health"],
       ["Kokoro", "http://127.0.0.1:8880/v1/models"],

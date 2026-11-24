@@ -298,7 +298,7 @@ it("keeps the links of a local answer after its speech ends, until the next answ
   const user = userEvent.setup();
   act(() => openNovaShortcut("Morning check"));
   await user.click(await screen.findByRole("button", { name: "Start Nova" }));
-  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "speak", sessionId: "local-session" })));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "speak", sessionId: "local-session" }), undefined, expect.any(Function)));
   expect(await screen.findByRole("button", { name: "Review Retire devices" })).toBeInTheDocument();
   const audio = document.querySelector("audio")!;
   await waitFor(() => expect(audio.onended).toBeTypeOf("function"));

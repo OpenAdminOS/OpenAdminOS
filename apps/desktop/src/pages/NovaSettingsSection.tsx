@@ -1,4 +1,5 @@
 import { DEFAULT_NOVA_KEY, NOVA_KEY_FORMAT, novaKeyLabel, novaKeyProblem, parseNovaKey, recordNovaKey } from "../shared/nova-keyboard";
+import { LocalSpeechSetup } from "../voice/LocalSpeechSetup";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
@@ -62,7 +63,7 @@ const CAPABILITIES: { id: NovaCapabilityName; label: string; description: string
 
 const VOICE_MODE_LABELS: Record<NovaVoiceMode, string> = {
   openai: "OpenAI · GPT-Live-1",
-  local: "Local · whisper.cpp + Kokoro",
+  local: "Local (on this device)",
 };
 
 const inputClass =
@@ -366,6 +367,7 @@ export function NovaSettingsSection() {
             </div>
           }
         />
+        {effective.allowedVoiceModes.includes("local") && !blocked && <LocalSpeechSetup showModel />}
         <SettingRow
           id="nova-instructions"
           stacked

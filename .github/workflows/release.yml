@@ -273,12 +273,37 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Restore Whisper sidecar build
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/build/nova-speech
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/desktop/scripts/build-whisper.mjs') }}
+
+      - name: Verify Whisper build tools
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cmake --version
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $compiler = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $compiler) { throw "Visual Studio C++ x64 tools are required to build Whisper." }
+
       - name: Build AppX
         # The target is named explicitly because build.win.target is now nsis;
         # a bare --win would build the installer instead. --publish never: we
         # don't upload from electron-builder, and this AppX is only ever built
         # to validate the packaging path for the deferred Store submission.
         run: npm run dist -w @openadminos/desktop -- --win=appx --publish never
+
+      - name: Smoke test the packaged Whisper sidecar
+        shell: pwsh
+        run: |
+          $whisper = Get-ChildItem apps/desktop/release -Filter whisper-server.exe -File -Recurse |
+            Where-Object { $_.Directory.Name -eq 'nova-speech' } | Select-Object -First 1
+          if (-not $whisper) { throw "The packaged Whisper sidecar is missing." }
+          & $whisper.FullName --help
+          if ($LASTEXITCODE -ne 0) { throw "The packaged Whisper sidecar did not run ($LASTEXITCODE)." }
 
       - name: Verify AppX build output
         shell: pwsh
@@ -412,8 +437,33 @@ jobs:
           Write-Output "Using $($signtool.FullName)"
           Add-Content -Path $env:GITHUB_PATH -Value $signtool.DirectoryName
 
+      - name: Restore Whisper sidecar build
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/build/nova-speech
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/desktop/scripts/build-whisper.mjs') }}
+
+      - name: Verify Whisper build tools
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cmake --version
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $compiler = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $compiler) { throw "Visual Studio C++ x64 tools are required to build Whisper." }
+
       - name: Build signed NSIS installer
         run: npm run dist -w @openadminos/desktop -- --win --x64 --publish never
+
+      - name: Smoke test the packaged Whisper sidecar
+        shell: pwsh
+        run: |
+          $whisper = Get-ChildItem apps/desktop/release -Filter whisper-server.exe -File -Recurse |
+            Where-Object { $_.Directory.Name -eq 'nova-speech' } | Select-Object -First 1
+          if (-not $whisper) { throw "The packaged Whisper sidecar is missing." }
+          & $whisper.FullName --help
+          if ($LASTEXITCODE -ne 0) { throw "The packaged Whisper sidecar did not run ($LASTEXITCODE)." }
 
       - name: Verify Windows build output
         shell: pwsh
@@ -469,6 +519,14 @@ jobs:
             if ($actualPublisher -ne $expectedPublisher) {
               Write-Output "::error::Windows signer certificate CN mismatch. Expected CN '$expectedPublisher'. Actual CN '$actualPublisher'. Actual subject '$actualSubject'. Update win.signtoolOptions.publisherName in apps/desktop/package.json to the actual value."
               exit 1
+            }
+
+            $whisper = 'apps/desktop/release/win-unpacked/resources/native/nova-speech/whisper-server.exe'
+            if (-not (Test-Path -Path $whisper -PathType Leaf)) { throw "The packaged Whisper sidecar is missing." }
+            $whisperSignature = Get-AuthenticodeSignature -FilePath $whisper
+            if ($whisperSignature.Status -ne 'Valid' -or $whisperSignature.SignerCertificate.GetNameInfo(
+                [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -ne $expectedPublisher) {
+              throw "Whisper sidecar signing failed: $($whisperSignature.Status)."
             }
 
             # The sign hook deliberately skips the bundled MXC SDK binaries so
@@ -619,12 +677,40 @@ jobs:
       - name: Correct electron-builder macOS keychain password handling
         run: node scripts/patch-macos-signing.mjs
 
+      - name: Restore Whisper sidecar build
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/build/nova-speech
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/desktop/scripts/build-whisper.mjs') }}
+
+      - name: Verify Whisper build tools
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cmake --version
+          xcrun --find clang++
+
       - name: Build .dmg + .pkg + .zip (signed + notarized when secrets present)
         # Nightlies build .dmg + .zip only; prepare-nightly-build.mjs drops
         # the .pkg target. Arch is declared in package.json build.mac.target, so we only
         # pass --mac on the CLI; passing --arm64 here would be redundant
         # and (with some electron-builder versions) override the config.
         run: npm run dist -w @openadminos/desktop -- --mac --publish never
+
+      - name: Verify and run the packaged Whisper sidecar
+        shell: bash
+        run: |
+          set -euo pipefail
+          whisper="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Resources/native/nova-speech/whisper-server' -type f -print -quit)"
+          test -n "$whisper"
+          test -x "$whisper"
+          file "$whisper" | tee "$RUNNER_TEMP/whisper-file.txt"
+          grep -q 'arm64' "$RUNNER_TEMP/whisper-file.txt"
+          if [ -n "${CSC_LINK:-}" ]; then
+            codesign --verify --strict --verbose=2 "$whisper"
+          fi
+          "$whisper" --help
 
       - name: Verify Apple Foundation helper was packaged
         shell: bash
@@ -771,8 +857,32 @@ jobs:
             exit 1
           fi
 
+      - name: Restore Whisper sidecar build
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: apps/desktop/build/nova-speech
+          key: whisper-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/desktop/scripts/build-whisper.mjs') }}
+
+      - name: Verify Whisper build tools
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cmake --version
+          c++ --version
+
       - name: Build AppImage + deb + rpm
         run: npm run dist -w @openadminos/desktop -- --linux --x64 --publish never
+
+      - name: Smoke test the packaged Whisper sidecar
+        shell: bash
+        run: |
+          set -euo pipefail
+          whisper="apps/desktop/release/linux-unpacked/resources/native/nova-speech/whisper-server"
+          test -x "$whisper"
+          file "$whisper" | tee "$RUNNER_TEMP/whisper-file.txt"
+          grep -q 'x86-64' "$RUNNER_TEMP/whisper-file.txt"
+          "$whisper" --help
 
       - name: Verify Linux build output
         shell: bash
