@@ -1489,6 +1489,7 @@ export interface IntuneChatAgentSuggestion {
 }
 
 export interface ChatDataTable {
+  partial?: boolean;
   resource: GraphCacheResourceKind;
   filters: string;
   totalCount: number;

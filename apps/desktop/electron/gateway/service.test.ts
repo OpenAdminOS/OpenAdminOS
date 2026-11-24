@@ -368,6 +368,29 @@ describe("gateway client pairing", () => {
     }
   });
 
+  it("forwards cache paging, filters and projection through MCP", async () => {
+    const calls: unknown[] = [];
+    const { service } = makeGateway({ executeReadTool: async (tenantId, name, args) => {
+      calls.push({ tenantId, name, args });
+      return { totalCount: 216 };
+    } });
+    await service.enable({ boundTenantId: "tenant-1", port: 0 });
+    try {
+      const { token } = await service.pairClient({ name: "Cache client" });
+      const port = (await service.getStatus()).listeningPort;
+      const args = { resource: "mobileApps", offset: 50, where: { appPlatform: "Windows", availableInCompanyPortal: true }, select: ["id"] };
+      const response = await fetch(`http://127.0.0.1:${port}/`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "query_cache", arguments: args } }),
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(calls, [{ tenantId: "tenant-1", name: "query_cache", args }]);
+    } finally {
+      await service.stop();
+    }
+  });
+
   it("runs a tool call from a client that is still paired", async () => {
     const { service, queued } = makeGateway();
     await service.enable({ boundTenantId: "tenant-1", port: 0 });

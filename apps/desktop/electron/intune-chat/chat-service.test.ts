@@ -2183,16 +2183,24 @@ it("saves a complete structured list on the chat answer", async () => {
     filePath, tokenStore, userDataPath: dir, statsApiUrl: "", graphFactory: () => graph,
     llmFactory: () => { throw new Error("A structured list does not need the model"); },
   });
+  let closed = false;
   try {
     const result = await store.streamIntuneChatMessage({ content: "List all noncompliant Windows devices" }, () => {});
     const table = result.assistantMessage.dataTables?.[0];
     assert.equal(table?.totalCount, 216, result.assistantMessage.content);
     assert.equal(new Set(table?.rows.map(row => row[table.columns.indexOf("id")])).size, 216);
-    assert.match(result.assistantMessage.content, /complete list of 216 matching cached rows/);
-    const messages = await store.getIntuneChatMessages(result.conversation.id);
-    assert.deepEqual(messages.at(-1)?.dataTables, [table]);
-  } finally {
+    assert.match(result.assistantMessage.content, /Open the cached results below or export them as CSV/);
     store.close();
+    closed = true;
+    const reopened = new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    try {
+      const messages = await reopened.getIntuneChatMessages(result.conversation.id);
+      assert.deepEqual(messages.at(-1)?.dataTables, [table]);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    if (!closed) store.close();
     await rm(dir, { recursive: true, force: true });
   }
 });

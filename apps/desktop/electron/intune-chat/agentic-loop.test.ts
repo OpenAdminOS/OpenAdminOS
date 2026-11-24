@@ -12,6 +12,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { MAX_AGENTIC_ITERATIONS, partialFinalAnswer, runAgenticChat } from "./agentic-loop.js";
+import { addCacheTable, cacheMobileAppAssignments, cacheTableAnswer, chatCacheTable } from "./cache-table.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 import { executeIntuneChatTool } from "./tools.js";
@@ -1225,18 +1226,20 @@ it("attaches complete cached app lists outside the model prompt and pages every 
   const dir = await mkdtemp(join(tmpdir(), "openadminos-app-list-"));
   const store = seededStore(dir);
   try {
-    const types = [...Array(78).fill("win32LobApp"), ...Array(19).fill("winGetApp"), "windowsUniversalAppX"];
+    const types = [...Array(75).fill("win32LobApp"), ...Array(19).fill("winGetApp"), "windowsUniversalAppX", "officeSuiteApp", "microsoftStoreForBusinessApp", "windowsMobileMSI"];
     const rows = Array.from({ length: 216 }, (_, index) => ({
       id: `app-${String(index).padStart(3, "0")}`,
-      displayName: `Synthetic App ${String(index).padStart(3, "0")}`,
-      "@odata.type": `#microsoft.graph.${types[index] ?? ["iosStoreApp", "androidLobApp", "macOSPkgApp"][index % 3]}`,
+      displayName: `Synthetic App ${String(index === 9 ? 8 : index).padStart(3, "0")}`,
+      assignmentIntents: [index % 4 === 3 ? "uninstall" : ["available", "required", "availableWithoutEnrollment"][index % 4]],
+      availableInCompanyPortal: index % 4 !== 3,
+      "@odata.type": `#microsoft.graph.${types[index] ?? ["iosStoreApp", "androidLobApp", "macOSPkgApp", "macOSOfficeSuiteApp", "webApp"][index % 5]}`,
     }));
     store.replaceGraphResources({
       tenantId: tenant.id, resource: "mobileApps", label: "Apps", scopeSet: [],
-      refreshedAt: "2026-11-24T06:39:00.000Z", rows,
+      refreshedAt: "2026-11-24T06:39:00.000Z", rows: [...rows].reverse(),
     });
     const tables: import("@openadminos/agent-sdk").ChatDataTable[] = [];
-    const tools = { ...toolContext(store), attachTable: (table: (typeof tables)[number]) => tables.push(table) };
+    const tools = { ...toolContext(store), attachTable: (table: (typeof tables)[number]) => { tables.push(table); } };
     const params = { resource: "mobileApps", list: true };
     const all = await executeIntuneChatTool(tools, "count_cached", params);
     assert.equal((all.result as { totalCount: number }).totalCount, 216);
@@ -1247,6 +1250,9 @@ it("attaches complete cached app lists outside the model prompt and pages every 
       assert.equal(table.totalCount, total);
       assert.deepEqual(table.rows.map(row => row[table.columns.indexOf("id")]), rows.slice(0, total).map(row => row.id));
     }
+    const available = await executeIntuneChatTool(tools, "count_cached", { ...params, where: { appPlatform: "Windows", availableInCompanyPortal: true } });
+    assert.equal((available.result as { totalCount: number }).totalCount, 74);
+    assert.deepEqual(tables[2]!.rows.map(row => row[tables[2]!.columns.indexOf("id")]), rows.slice(0, 98).filter(row => row.availableInCompanyPortal).map(row => row.id));
     const paged: string[] = [];
     for (const offset of [0, 50, 100, 150, 200, 250]) {
       const page = (await executeIntuneChatTool(tools, "query_cache", { resource: "mobileApps", offset, limit: 50 })).result as {
@@ -1275,15 +1281,84 @@ it("attaches complete cached app lists outside the model prompt and pages every 
       tools,
     });
     assert.equal(result.ok, true);
-    assert.equal(tables[2]?.rows.length, 216);
-    assert.match(prompts.join("\n"), /complete list of 216 matching cached rows/);
-    assert.doesNotMatch(prompts.join("\n"), /Synthetic App 215/);
+    assert.equal(tables[3]?.rows.length, 216);
+    assert.match(prompts.join("\n"), /216 cached rows match/);
+    for (const index of [50, 100, 215]) assert.doesNotMatch(prompts.join("\n"), new RegExp(`Synthetic App ${String(index).padStart(3, "0")}`));
+    assert.equal((prompts.join("\n").match(/Synthetic App \d{3}/g) ?? []).length, 50);
     const conversation = store.createConversation({ id: "app-list", tenantId: tenant.id, title: "App list", now: tenant.addedAt });
     store.insertMessage({ id: "answer", conversationId: conversation.id, role: "assistant", status: "completed",
-      content: result.answer ?? "", createdAt: new Date().toISOString(), dataTables: [tables[2]!] });
-    assert.deepEqual(store.listMessages(conversation.id)[0]?.dataTables, [tables[2]]);
+      content: result.answer ?? "", createdAt: new Date().toISOString(), dataTables: [tables[3]!] });
+    assert.deepEqual(store.listMessages(conversation.id)[0]?.dataTables, [tables[3]]);
   } finally {
     store.close();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+it("handles app assignment coverage and cached table boundaries", async () => {
+  assert.deepEqual(cacheMobileAppAssignments({
+    id: "app", assignments: [{ intent: "required" }, { intent: "available" }, { intent: "available" }],
+  }), { id: "app", assignmentIntents: ["available", "required"], availableInCompanyPortal: true });
+  assert.deepEqual(cacheMobileAppAssignments({ id: "app" }), { id: "app" });
+  assert.deepEqual(cacheMobileAppAssignments({ id: "app", assignments: [{ intent: "uninstall" }] }),
+    { id: "app", assignmentIntents: ["uninstall"], availableInCompanyPortal: false });
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-table-boundaries-"));
+  const store = seededStore(dir);
+  try {
+    const rows = Array.from({ length: 10_001 }, (_, index) => ({
+      id: `app-${index}`, displayName: `App ${index} ${"x".repeat(220)}`,
+    }));
+    const seed = (total: number) => store.replaceGraphResources({
+      tenantId: tenant.id, resource: "mobileApps", label: "Apps", scopeSet: [],
+      refreshedAt: "2026-11-24T06:39:00.000Z", rows: rows.slice(0, total),
+    });
+    for (const total of [50, 51, 10_000, 10_001]) {
+      seed(total);
+      const tables: import("@openadminos/agent-sdk").ChatDataTable[] = [];
+      const notices = new Set<string>();
+      const tools = { ...toolContext(store), attachTable: (table: (typeof tables)[number]) => addCacheTable(tables, table),
+        noteTableOmission: (note: string) => { notices.add(note); } };
+      const params = { resource: "mobileApps", list: true };
+      const result = await executeIntuneChatTool(tools, "count_cached", params);
+      assert.equal((result.result as { totalCount: number }).totalCount, total);
+      assert.equal(tables[0]?.rows.length, total === 51 || total === 10_000 ? total : undefined);
+      if (total === 10_000) assert.ok(JSON.stringify(tables[0]).length > 2_000_000);
+      if (total === 10_001) {
+        const model = scriptedLlm([
+          JSON.stringify({ tool: "count_cached", params }),
+          JSON.stringify({ final: true, answer: "10,001 apps match. The complete list is attached below." }),
+        ]);
+        const response = await runAgenticChat({ ...baseInput(store, model), question: "List all apps", plannedResources: ["mobileApps"], tools });
+        assert.equal(response.ok, true);
+        const answer = cacheTableAnswer(response.answer ?? "", tables.length, notices);
+        assert.match(answer, /10,001 apps match/);
+        assert.match(answer, /10,000|10000/);
+        assert.doesNotMatch(answer, /attached below/);
+      }
+    }
+    for (const tool of ["query_cache", "count_cached"] as const) {
+      const result = await executeIntuneChatTool(toolContext(store), tool, { resource: "mobileApps", where: { availableInCompanyPortal: false } });
+      assert.match(JSON.stringify(result), /Refresh the app cache/);
+    }
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+it("bounds cached table payloads and deduplicates them per answer", () => {
+  const refreshedAt = "2026-11-24T06:39:00.000Z";
+  const oversized = Array.from({ length: 5_000 }, (_, index) => ({ id: `app-${index}`, displayName: "x".repeat(900) }));
+  assert.equal(chatCacheTable("mobileApps", "All apps", refreshedAt, oversized), undefined);
+  const table = chatCacheTable("mobileApps", "Windows apps", refreshedAt, [{ id: "app" }], true)!;
+  assert.equal(table.partial, true);
+  const tables = [table];
+  assert.equal(addCacheTable(tables, { ...table }), true);
+  assert.equal(tables.length, 1);
+  assert.equal(addCacheTable(tables, { ...table, filters: "macOS apps" }), true);
+  assert.equal(addCacheTable(tables, { ...table, filters: "Android apps" }), true);
+  assert.equal(addCacheTable(tables, { ...table, filters: "iOS apps" }), false);
+  assert.equal(tables.length, 3);
 });

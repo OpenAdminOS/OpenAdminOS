@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ChatDataTable, GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
 import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
-import { CHAT_TABLE_ROW_CAP, chatCacheTable, chatTableNote } from "./cache-table.js";
+import { CHAT_TABLE_ROW_CAP, chatCacheTable, chatTableNote, describeCacheFilters } from "./cache-table.js";
 import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite-store.js";
 
 /**
@@ -621,11 +621,11 @@ export function computeStructuredResult(input: {
   const listedFilters = query.focus ? [...query.filters.filter((filter) => !query.focus!.filters.some((focus) => focus.field === filter.field)), ...query.focus.filters] : query.filters;
   const listedTotal = query.focus && focusCount ? focusCount.total : counted.total;
   const countedFilters = [...baseFilters, ...(query.focus?.filters ?? [])];
-  const tableFilters = describeFilters(countedFilters, input.timestampLocale);
+  const tableFilters = describeCacheFilters(countedFilters);
   const dataTable = (listSet || query.focus) && listedTotal > COMPUTED_LIST_LIMIT && listedTotal <= CHAT_TABLE_ROW_CAP
     ? chatCacheTable(query.resource, query.ids ? `${tableFilters} within the previous result` : tableFilters, status.refreshedAt, store.countGraphCache({
         tenantId, resource: query.resource, filters: countedFilters, ...ids, listLimit: listedTotal,
-      }).rows ?? [])
+      }).rows ?? [], snapshot?.partial)
     : undefined;
   // The ids a follow-up narrows: the listed set, when it is small enough to keep.
   const contextIds = listedTotal <= CONTEXT_ID_LIMIT
@@ -822,7 +822,7 @@ export function computedAnswerText(result: ComputedResult): string {
 export function computedResultForModel(result: ComputedResult): Record<string, unknown> {
   return {
     authoritative: true,
-    rule: "Computed in code over every cached row. State these facts and numbers exactly, name every listed row when no complete table is attached, and do not count sample rows yourself. When a complete table is attached, tell the user it can be opened or exported below the answer. Do not give reasons that are not in these facts; where the data does not hold the answer, say so.",
+    rule: "Computed in code over every cached row. State these facts and numbers exactly, name every listed row when no complete table is attached, and do not count sample rows yourself. The host handles table and CSV notices. Do not claim a table or file is attached. Do not give reasons that are not in these facts; where the data does not hold the answer, say so.",
     resource: result.resource,
     scope: result.scopeLabel,
     total: result.total,
