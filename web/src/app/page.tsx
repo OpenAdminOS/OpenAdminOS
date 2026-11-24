@@ -89,7 +89,7 @@ const FIGURES = [
   {
     fig: "FIG 0.1",
     title: "Local by default",
-    text: "Pick a local model and tenant data, prompts, and answers stay on this machine. Choose a hosted one and the app says so first.",
+    text: "A local model processes tenant data and prompts on your computer. The app names the destination when you use a hosted model.",
     Figure: FigureLocal,
   },
   {
@@ -173,14 +173,14 @@ const DATA_ROWS = [
     hosted: "Only after diff review",
   },
   {
-    label: "Collected by OpenAdminOS",
-    local: "No tenant data, prompts, or results",
-    hosted: "No tenant data, prompts, or results",
+    label: "Desktop telemetry to OpenAdminOS",
+    local: "Public agent install counts, with a Settings opt-out",
+    hosted: "Public agent install counts, with a Settings opt-out",
   },
 ] as const;
 
 const GUARANTEES = [
-  ["01", "No tenant telemetry", "Tenant data, prompts, run results, and error reports are never collected."],
+  ["01", "No tenant telemetry", "The app sends no tenant data, prompts, run results, or crash reports to us as telemetry."],
   ["02", "No agent without a tenant", "Nothing runs until an active tenant is connected and shown in the title bar."],
   ["03", "No write without review", "No skip toggle and no trust-this-agent exception, for any agent."],
   ["04", "Open source, MIT", "Read the code that touches your tenant before you connect it."],
@@ -212,7 +212,7 @@ const COMMON_QUESTIONS = [
   {
     question: "Does OpenAdminOS send company data to the cloud?",
     answer:
-      "Not when a local provider is selected. With Ollama or another local provider, tenant data, prompts, and run results stay on the device. If an admin chooses a hosted provider such as OpenAI, Anthropic, or Azure OpenAI, the app labels that tenant context will be sent to that provider.",
+      "A local model processes your data on your computer. A hosted model receives prompts and the tenant context included in them. Public references and report delivery you configure have their own destinations. The app also makes limited requests for updates, the agent catalog, documentation, and install counts.",
   },
   {
     question: "What can agents connect to?",
@@ -516,7 +516,7 @@ export default async function HomePage() {
             <div data-reveal>
               <p className={eyebrow}>Security</p>
               <h2 className="font-display mt-4 text-balance text-[2.5rem] leading-[1.03] sm:text-[4rem]">
-                Your tenant stays on your machine.
+                Local models keep processing on your machine.
               </h2>
             </div>
             <p data-reveal className="text-lg leading-8 text-brand-muted">

@@ -18,10 +18,10 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-11-17";
+const LAST_UPDATED = "2026-11-24";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
-  "How OpenAdminOS handles data from the services you connect, such as Microsoft 365, authentication tokens, LLM prompts, registry install counts, and website analytics.";
+  "What OpenAdminOS and its service providers process when you use the desktop app, website, downloads, support, or booking.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -64,18 +64,14 @@ export default function PrivacyPage() {
           <section>
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Summary</h2>
             <p className="mt-3">
-              OpenAdminOS is a desktop app for IT administrators. It runs on
-              your computer. Data from the services you connect (today, your
-              Microsoft 365 tenant), local
-              model prompts, run history, and crash logs are not sent to{" "}
-              {LEGAL_ENTITY_NAME}, the company behind OpenAdminOS.
+              OpenAdminOS runs on your computer. A local model processes tenant data,
+              prompts, and responses on that device. A hosted model receives prompts
+              and any context included in them. The app names the destination.
             </p>
             <p className="mt-3">
-              When you choose a hosted language-model provider (Anthropic,
-              OpenAI, or Azure OpenAI) instead of a local one, prompts that
-              include tenant data are sent to that provider under their own
-              privacy policy. The app states this explicitly in the UI before
-              any prompt is sent.
+              The app also makes limited requests for updates, the agent catalog,
+              documentation, and install counts. Settings &gt; Privacy controls
+              these requests. This policy explains what we and the services we use receive.
             </p>
           </section>
 
@@ -84,195 +80,221 @@ export default function PrivacyPage() {
               Who is responsible
             </h2>
             <p className="mt-3">
-              The controller under the GDPR for this website and for the data
-              described in this policy is {LEGAL_ENTITY_NAME}{" "}
+              The controller for the processing described here is {LEGAL_ENTITY_NAME}{" "}
               (&ldquo;{LEGAL_ENTITY_SHORT_NAME}&rdquo;, &ldquo;we&rdquo;),
               represented by its managing director, {MANAGING_DIRECTOR_NAME}.
-              OpenAdminOS is our open-source product. The source is at{" "}
-              <Link
-                href="https://github.com/OpenAdminOS/OpenAdminOS"
-                target="_blank"
-                rel="noreferrer"
-                className="text-link"
-              >
-                github.com/OpenAdminOS/OpenAdminOS
-              </Link>
-              . You can reach support at{" "}
-              <Link
-                href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-link"
-              >
-                {SUPPORT_EMAIL}
-              </Link>
-              .
+              For privacy questions and requests, email{" "}
+              <Link href={`mailto:${SUPPORT_EMAIL}`} className="text-link">{SUPPORT_EMAIL}</Link>.
             </p>
-            <address className="mt-4 not-italic text-brand-muted">
+            <address className="mt-4 not-italic">
               {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
-                <span key={line} className="block">
-                  {line}
-                </span>
+                <span key={line} className="block">{line}</span>
               ))}
             </address>
+            {/* TODO(ugur): Confirm whether a data protection officer is required and publish their contact details if applicable. */}
             <p className="mt-3">
-              The full provider disclosure is available in the{" "}
-              <Link
-                href="/legal-notice"
-                className="text-link"
-              >
-                legal notice
-              </Link>
-              .
+              Data protection officer contact, if applicable: [to be confirmed].
+              The full provider disclosure is in the{" "}
+              <Link href="/legal-notice" className="text-link">legal notice</Link>.
             </p>
           </section>
 
           <section>
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
-              What the desktop app does on your computer
+              What the desktop app does
             </h2>
-            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
-              <li>
-                <span className="text-brand-ink">
-                  Microsoft 365 authentication.
-                </span>{" "}
-                When you connect a tenant, the app signs you in to Microsoft
-                using MSAL. Microsoft returns access and refresh tokens scoped
-                to the Graph permissions you consented to. Those tokens are
-                stored in your operating-system keychain (macOS Keychain,
-                Windows Credential Manager) and used only by the local app to
-                call Microsoft Graph. They are never transmitted to us.
-              </li>
-              <li>
-                <span className="text-brand-ink">Microsoft Graph data.</span>{" "}
-                Agents you run call Microsoft Graph on your behalf and process
-                the returned data (devices, users, policies, etc.) in memory
-                on your machine. Selected fields may be written to a local
-                SQLite database for run history and audit purposes. This
-                database is stored under your user profile and is never
-                uploaded anywhere.
-              </li>
-              <li>
-                <span className="text-brand-ink">
-                  Language-model prompts (local provider).
-                </span>{" "}
-                When you select a local LLM provider such as Ollama or LM
-                Studio, prompts and responses stay on your machine. We do not
-                see them.
-              </li>
-              <li>
-                <span className="text-brand-ink">
-                  Language-model prompts (hosted provider).
-                </span>{" "}
-                When you select Anthropic, OpenAI, or Azure OpenAI, prompts
-                (which may contain tenant data) are sent over TLS to that
-                provider, under their privacy policy and your account with
-                them. The app names the selected provider and marks it as
-                hosted before any prompt is sent. We do not receive a copy of
-                these prompts.
-              </li>
-              <li>
-                <span className="text-brand-ink">No tenant telemetry.</span> The
-                desktop app does not collect tenant data, prompts, run results,
-                analytics events, or error-reporting data. Crash logs stay on
-                your machine.
-              </li>
-              <li>
-                <span className="text-brand-ink">Registry install counts.</span> In
-                packaged production builds, the app can send a small registry
-                install count event when you install a public registry agent.
-                You can disable this in Settings. The event contains the agent
-                slug, app version, operating-system platform, and a yearly
-                per-agent SHA-256 hash derived from a random local install ID.
-                It does not include tenant identifiers, user identifiers,
-                prompts, run results, or Microsoft Graph data. The website
-                endpoint also uses your IP address briefly for rate limiting
-                and stores the deduplication hash for up to one year. These
-                counts are used only to publish aggregate registry stats.
-              </li>
-              <li>
-                <span className="text-brand-ink">Support issue reports.</span> If
-                you choose Report issue, review the form, and confirm public
-                submission, the app sends the report to the OpenAdminOS website
-                so the server can create a public GitHub issue. Optional
-                diagnostics are bounded and sanitized before submission. They do
-                not include tenant identifiers, prompts, Graph responses, run
-                results, raw logs, screenshots, local databases, tokens, or
-                provider credentials. The endpoint uses your IP address briefly
-                for rate limiting and stores a short-lived deduplication hash.
-              </li>
-              <li>
-                <span className="text-brand-ink">Auto-update.</span> The app can
-                check GitHub Releases for a new version and download the signed
-                installer. These checks send a standard HTTPS request to GitHub;
-                refer to{" "}
-                <Link
-                  href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-link"
-                >
-                  GitHub&rsquo;s privacy statement
-                </Link>{" "}
-                for what they log.
-              </li>
-            </ul>
+            <p className="mt-3">
+              When you connect a service such as Microsoft 365, the app signs you in and
+              uses that connection to read the data you authorize. It keeps credentials
+              in operating-system protected storage and stores chat, cached records,
+              and run history on your computer. We do not receive tenant records,
+              credentials, prompts, run results, or crash reports as telemetry.
+            </p>
+            <p className="mt-3">
+              Your setup determines where other data goes. Hosted providers receive
+              the prompts and context sent to them under their own terms. Enabled
+              public references can receive filtered words from a question, and
+              configured delivery rules or agent steps can send reports to connectors.
+            </p>
+            <p className="mt-3">
+              The app checks local model servers on your computer. It reads local CLI
+              version and sign-in status for tools such as Claude Code and Codex and
+              reads the Codex model cache and configuration for model names.
+              The CLI tools may check sign-in with their providers. OpenAdminOS
+              sends none of these discovery results to us.
+            </p>
+            <p className="mt-3">
+              The app checks GitHub Releases for updates on supported Windows and
+              macOS builds and refreshes the agent registry from GitHub or your
+              configured registry. With local Ollama available, it can download the
+              docs index from GitHub Releases and have local Ollama pull its embedding
+              model from the Ollama registry. Installing a public agent can send
+              a count to our website. Turn off these requests in Settings &gt; Privacy.
+              See the{" "}
+              <Link href="/docs/trust-model/network-calls" className="text-link">network calls reference</Link>{" "}
+              for timing, payloads, and individual controls.
+            </p>
           </section>
 
           <section>
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
-              What this website does
+              Website, app requests, and downloads
             </h2>
-            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
-              <li>
-                <span className="text-brand-ink">Hosting and logs.</span> The site
-                is deployed on Vercel. Vercel records standard server access
-                logs (IP address, user-agent, timestamps) as a normal part of
-                serving the site; see{" "}
-                <Link
-                  href="https://vercel.com/legal/privacy-policy"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-link"
-                >
-                  Vercel&rsquo;s privacy policy
-                </Link>
-                .
-              </li>
-              <li>
-                <span className="text-brand-ink">
-                  Privacy-friendly website analytics.
-                </span>{" "}
-                The public marketing website uses{" "}
-                <Link
-                  href="https://plausible.io/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-link"
-                >
-                  Plausible Analytics
-                </Link>{" "}
-                to understand aggregate page usage. We do not use Google
-                Analytics, advertising trackers, or third-party cookies.
-                Plausible is not used in the desktop app and never receives
-                tenant data, prompts, run results, tokens, provider credentials,
-                or support diagnostics from the app.
-              </li>
-              <li>
-                <span className="text-brand-ink">Booking a call.</span> The
-                demo and agent build calls are booked on Cal.com. The website
-                only links to it and loads nothing from Cal.com until you open
-                a booking page. Cal.com receives the name, email, and notes you
-                enter, and we use them only to hold the call; see{" "}
-                <Link
-                  href="https://cal.com/privacy"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-link"
-                >
-                  Cal.com&rsquo;s privacy policy
-                </Link>
-                . Calls run on Microsoft Teams and are not recorded.
-              </li>
+            <div className="mt-4 space-y-5">
+              <div>
+                <h3 className="font-medium text-brand-ink">Hosting and access logs</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis, Vercel log retention, and processor terms. */}
+                <p>
+                  Vercel hosts the website and its APIs for us. It processes access
+                  logs with IP addresses, browser or app user-agent strings, and
+                  timestamps to serve requests, troubleshoot, and protect the site.
+                  We rely on our legitimate interest in operating and securing the
+                  site (Art. 6(1)(f) GDPR, [to be confirmed]). Log retention is
+                  [to be confirmed]. Logging is part of using the site or API.
+                  See <Link href="https://vercel.com/legal/privacy-policy" className="text-link">Vercel&rsquo;s privacy policy</Link>.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-brand-ink">Rate limits and duplicate reports</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis, Upstash region, and processor terms. */}
+                <p>
+                  Upstash Redis processes short-lived keys containing the requester&rsquo;s
+                  IP address. Install count keys expire after 60 seconds. Support and
+                  agent submission rate-limit keys expire after 1 hour. A hash used to
+                  detect repeated support reports expires after 24 hours. The storage region
+                  is [to be confirmed]. We rely on our legitimate interest in preventing
+                  abuse and duplicate issues (Art. 6(1)(f) GDPR, [to be confirmed]).
+                  Rate limiting applies when you use these endpoints.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-brand-ink">Public agent install counts</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis and retention for the aggregate daily counters. */}
+                <p>
+                  Packaged production builds send the public agent slug, app version,
+                  and platform when you install a public registry agent. The app
+                  checks for duplicates on your device. Upstash Redis stores aggregate
+                  daily counters without a per-install identifier. We briefly use your
+                  IP address for rate limiting as described above. Our legitimate
+                  interest is measuring which agents are installed (Art. 6(1)(f)
+                  GDPR, [to be confirmed]). Aggregate retention is [to be confirmed].
+                  Counts are on by default. Turn them off in Settings &gt; Privacy.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-brand-ink">Marketing website analytics</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis and analytics retention for this site. */}
+                <p>
+                  Plausible Analytics measures aggregate use of our marketing
+                  pages. It receives page, referral, and engagement information
+                  and uses request IP addresses and user agents transiently for
+                  daily visitor estimates. It uses no cookies and does not store
+                  raw IP addresses or user agents. We rely on our legitimate interest
+                  in understanding which pages are used (Art. 6(1)(f) GDPR,
+                  [to be confirmed]). Plausible deletes its daily salt after 24
+                  hours. Aggregate retention is [to be confirmed]. The docs and
+                  desktop app do not load Plausible. You can block its script in
+                  your browser. See <Link href="https://plausible.io/data-policy" className="text-link">Plausible&rsquo;s data policy</Link>.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-brand-ink">GitHub downloads and registry requests</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(f) basis for OpenAdminOS distributing releases and registry data through GitHub. */}
+                <p>
+                  GitHub receives your IP address and request details when you use
+                  GitHub Releases, the apt repository on GitHub Pages, or the
+                  default agent registry. The desktop updater also sends GitHub a
+                  random UUID saved on your device in its <code>x-user-staging-id</code>{" "}
+                  header. Our legitimate interest is making releases and the catalog
+                  available and helping users find updates (Art. 6(1)(f) GDPR,
+                  [to be confirmed]). GitHub acts as an independent controller for
+                  these requests. Its own statement covers its logging, retention,
+                  and rights requests. To stop background update and registry checks,
+                  turn off automatic network requests in Settings &gt; Privacy. Downloads
+                  are optional. See <Link href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" className="text-link">GitHub&rsquo;s privacy statement</Link>.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              Support, public submissions, and bookings
+            </h2>
+            <div className="mt-4 space-y-5">
+              <div>
+                <h3 className="font-medium text-brand-ink">Support email</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(b) basis and support mailbox retention. */}
+                <p>
+                  When you email us, we use your address, message, and any attachments
+                  to handle your request. Microsoft 365 Exchange Online hosts the
+                  mailbox for us. The legal basis is handling the support you
+                  request (Art. 6(1)(b) GDPR, [to be confirmed]). Mail retention
+                  is [to be confirmed]. Email is optional. We need a return address
+                  and enough information about the problem to respond.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-brand-ink">Public GitHub issues</h3>
+                {/* TODO(ugur): Confirm Art. 6(1)(b) for support reports and Art. 6(1)(f) for agent submissions. */}
+                <p>
+                  If you submit a support report or share a community agent, our
+                  website forwards the submitted content to GitHub to open a public
+                  issue. You review the support report before submitting it.
+                  Optional diagnostics are shown in the preview and group counts into ranges.
+                  Agent submissions include the manifest, supporting details, and
+                  contact information you provide. We use reports to respond
+                  to support requests (Art. 6(1)(b) GDPR, [to be confirmed]) and
+                  rely on our legitimate interest in reviewing community contributions
+                  in public (Art. 6(1)(f) GDPR, [to be confirmed]).
+                </p>
+                <p className="mt-2">
+                  Anyone can read the issue, and issues can remain public indefinitely.
+                  Copies may persist after an edit or removal. Submitting is optional.
+                  The required form fields are needed to create the issue. Leave out
+                  private details and use email if you need to contact us privately.
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium text-brand-ink">Booking a call</h3>
+                {/* TODO(ugur): Confirm the Art. 6(1)(b) basis, Cal.com and Teams processor roles, and booking retention. */}
+                <p>
+                  Our site links to Cal.com. When you book, Cal.com receives the
+                  name, email address, selected time, and any notes you enter.
+                  We use these details to arrange and hold the call on Microsoft
+                  Teams. We do not record the calls. The legal basis is arranging
+                  the call you requested (Art. 6(1)(b) GDPR, [to be confirmed]).
+                  Booking retention is [to be confirmed]. Booking is optional.
+                  We need your email address and a time to confirm the appointment.
+                  See <Link href="https://cal.com/privacy" className="text-link">Cal.com&rsquo;s privacy policy</Link>.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              International transfers
+            </h2>
+            <p className="mt-3">
+              Some service providers may process data outside the European Economic
+              Area, including in the United States. The safeguards can include an
+              adequacy decision under the EU-US Data Privacy Framework for an
+              eligible, certified recipient, or the European Commission&rsquo;s
+              standard contractual clauses (SCCs).
+            </p>
+            <ul className="mt-3 list-disc space-y-1 pl-5">
+              {/* TODO(ugur): Confirm the transfer countries and applicable safeguard for each provider, including DPF certification or SCCs, and how to obtain copies. */}
+              <li>Vercel (hosting and access logs): [to be confirmed].</li>
+              <li>Upstash (rate limiting, deduplication, and counters): [to be confirmed].</li>
+              <li>Plausible (marketing website analytics): [to be confirmed].</li>
+              <li>Microsoft (Exchange Online and Teams): [to be confirmed].</li>
+              <li>Cal.com (bookings): [to be confirmed].</li>
+              <li>GitHub (public issues and downloads): [to be confirmed].</li>
             </ul>
+            <p className="mt-3">
+              Email {SUPPORT_EMAIL} to ask for details or a copy of the relevant safeguards.
+            </p>
           </section>
 
           <section>
@@ -280,14 +302,34 @@ export default function PrivacyPage() {
               Your rights
             </h2>
             <p className="mt-3">
-              If you are in the EU, UK, or another jurisdiction with similar
-              data-protection laws, you have the right to request a copy of
-              the personal data we hold about you, to correct it, or to have
-              it deleted. Because the desktop app does not transmit tenant
-              content to us, this in practice applies to support
-              correspondence and the limited registry install count data described
-              above. Email {SUPPORT_EMAIL} and we will respond within
-              30 days.
+              You can ask whether we process your personal data and request a copy
+              and details about the processing, including its purposes, categories
+              of data, recipients, retention, sources where relevant, and transfer
+              safeguards. You can ask us to correct or erase your data, restrict its
+              use, or provide your data in a portable format where that right
+              applies. You can object to processing based on legitimate interests.
+              We do not use the data described here to make solely automated
+              decisions that have legal or similarly significant effects on you.
+            </p>
+            <p className="mt-3">
+              Email {SUPPORT_EMAIL}. We generally cannot link app traffic to
+              you. Install counts carry no personal or installation identifier,
+              and the updater UUID goes to GitHub. An email address you used
+              to contact us, an issue URL, a booking reference, or an approximate
+              date and time can help us locate a record. We may ask for enough
+              information to verify that the record is yours. We normally respond
+              within one month.
+            </p>
+            {/* TODO(ugur): Confirm the competent supervisory authority for the controller. */}
+            <p className="mt-3">
+              You can lodge a complaint with a data protection supervisory authority,
+              including in the EU country where you live, work, or believe a
+              violation occurred. In North Rhine-Westphalia, Germany, the authority
+              is the{" "}
+              <Link href="https://www.ldi.nrw.de/kontakt/ihre-beschwerde" className="text-link">
+                Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-Westfalen
+              </Link>{" "}
+              ([to be confirmed] as the authority for our company).
             </p>
           </section>
 
@@ -296,10 +338,13 @@ export default function PrivacyPage() {
               Changes to this policy
             </h2>
             <p className="mt-3">
-              Material changes will be noted by updating the &ldquo;Last
-              updated&rdquo; date above and, where reasonable, by a notice in
-              the desktop app or on this page. The full revision history is
-              public in the project&rsquo;s GitHub repository.
+              The date at the top shows when we last updated this policy. If we
+              plan to use personal data for a new purpose, we will tell you
+              about the new purpose before we start. Earlier
+              versions are available in the{" "}
+              <Link href="https://github.com/OpenAdminOS/OpenAdminOS/commits/main/web/src/app/privacy/page.tsx" className="text-link">
+                public Git history
+              </Link>.
             </p>
           </section>
         </div>
