@@ -700,6 +700,12 @@ export function isExplicitDocsRequest(question: string): boolean {
   return codeRequest || (DOCS_REFERENCE.test(lower) && !hasTenantReference(question));
 }
 
+export function asksAboutMicrosoftRoadmap(question: string): boolean {
+  const lower = question.toLowerCase().replace(/\u2019/g, "'");
+  return /\b(?:roadmap|what(?:'s| is) coming|upcoming (?:features|releases)|what(?:'s| is) rolling out)\b/.test(lower) &&
+    /\b(?:m365|microsoft 365|office 365|intune|entra|defender|azure|tenant|release communications)\b/.test(lower);
+}
+
 export function classifyChatQuestion(
   question: string,
   input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },
@@ -707,7 +713,7 @@ export function classifyChatQuestion(
   const lower = question.trim().toLowerCase();
   const tenantReference = hasTenantReference(question);
   const planned = input.plannedResources.length > 0;
-  const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
+  const explicitDocs = input.namesSource || asksAboutMicrosoftRoadmap(question) || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
   if (explicitDocs) return tenantReference ? "mixed" : "docs";
   if (WEAK_DOCS.test(lower) || GENERAL_QUESTION_START.test(lower)) {
     if (tenantReference) return HOW_TO_OR_GUIDANCE.test(lower) ? "mixed" : "tenant";

@@ -13,13 +13,13 @@ import type {
   TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { GRAPH_CACHE_RESOURCES, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
+import { GRAPH_CACHE_RESOURCES, asksAboutMicrosoftRoadmap, asksHowTo, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, reasoningWithoutAnswerInChain, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
 import { writeMcpQuery } from "./mcp-query-writer.js";
 import { mcpSentText } from "./chat-steps.js";
-import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
+import { CitationRegistry, LEARN_SERVER_ID, RELEASE_COMMUNICATIONS_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
 import { isSplashtopReadTool, SPLASHTOP_READ_TOOLS } from "../splashtop/reads.js";
 import {
   MCP_TOOL_RULES,
@@ -348,6 +348,8 @@ export async function runAgenticChat(
   input: RunAgenticChatInput,
 ): Promise<RunAgenticChatResult> {
   const compact = input.budget === "compact";
+  const roadmapQuestion = !input.voice && asksAboutMicrosoftRoadmap(input.adminQuestion ?? input.question);
+  const roadmapServer = roadmapQuestion ? input.tools.mcp?.servers?.find((server) => server.id === RELEASE_COMMUNICATIONS_SERVER_ID) : undefined;
   const limits = compact ? COMPACT_LOOP_LIMITS : { iterations: MAX_AGENTIC_ITERATIONS, malformed: MAX_MALFORMED_RETRIES, unfinished: MAX_UNFINISHED_RETRIES, noEvidence: MAX_NO_EVIDENCE_RETRIES, promiseNudges: MAX_PROMISE_NUDGES, attempts: Number.POSITIVE_INFINITY };
   /** A local model's notice says what happened; a hosted model keeps the established wording. */
   const noticeFor = (failure: AgenticFailureReason, hosted: string) => (compact ? LOCAL_FALLBACK_NOTICES[failure] : hosted);
@@ -566,11 +568,14 @@ export async function runAgenticChat(
       const decided = action.questionKind
         ? resolveQuestionKind(action.questionKind, input.classify.tenantReference)
         : { kind: input.questionKind ?? "tenant", vetoed: false };
-      questionKind = decided.kind;
+      const roadmapVeto = roadmapQuestion && decided.kind === "tenant";
+      questionKind = roadmapVeto
+        ? input.questionKind === "docs" && !input.classify.tenantReference ? "docs" : "mixed"
+        : decided.kind;
       // A server whose tool this reply requests is the model's choice as much as one it lists in "sources".
       const requested = action.kind === "tool" ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool)?.serverId : undefined;
       const declaredIds = [...new Set([...action.sources, ...(requested ? [requested] : [])])];
-      const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", declaredIds);
+      const plan = input.classify.onKind(questionKind, !action.questionKind ? "fallback" : roadmapVeto ? "roadmap" : decided.vetoed ? "veto" : "model", declaredIds);
       required = new Set(plan.requiredServerIds);
       classification = plan.detail;
       // A tenant question gets no local docs index; docs and mixed load it unless a server leads:
@@ -579,7 +584,8 @@ export async function runAgenticChat(
       declared = new Set(declaredIds.filter((id) => input.tools.mcp?.servers?.some((server) => server.id === id)));
       const serverInPlay = plan.serversFirst || declared.size > 0;
       const loadIndex = !serverInPlay && fallbackPending && input.documentationFallback;
-      const tenantData = questionKind !== "docs";
+      // Public roadmap evidence comes first. Refresh only if the model actually asks for tenant data.
+      const tenantData = questionKind !== "docs" && !roadmapQuestion;
       // No server is in play for this question, so the withheld local index is loaded now.
       indexLoad = loadIndex
         ? async () => {
@@ -768,6 +774,11 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: mcpResults.length > 0
         ? `No model call is left for another lookup, so ${mcpTool.serverName} was not asked again. Answer now from the results above; if they do not cover the question, say what was not consulted.`
         : `No model call is left for a lookup, so ${mcpTool.serverName} was not asked. Answer now from what is in this prompt, citing any passages it holds by their numbers, and say that ${mcpTool.serverName} was not consulted.` });
+      continue;
+    }
+    if (roadmapServer && !attemptedServers.has(roadmapServer.id) && mcpTool?.serverId !== roadmapServer.id) {
+      await settleModelStep({ kind: "repair", reason: "roadmap-first" });
+      turns.push({ role: "repair", content: `This question needs the public roadmap first. Call a tool from ${roadmapServer.name} before checking tenant data or another source.` });
       continue;
     }
     await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
