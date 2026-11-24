@@ -7,11 +7,13 @@ export interface SophosConnectionRecord {
   host: string;
   connectedAt: string;
   lastCheckedAt: string;
+  issue?: "credentials" | "forbidden" | "rate-limit";
 }
 
 export interface SophosConnectionSummary extends SophosConnectionRecord {
   organizationId: string;
   region: string;
+  unreadable?: true;
 }
 
 export interface ConnectSophosInput {

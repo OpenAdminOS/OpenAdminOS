@@ -1252,7 +1252,7 @@ export class RunService {
    * the typed confirmation gate; it applies only through the Splashtop
    * connection of the organization that holds `tenantId`.
    */
-  async startSophosChangeRun(tenantId: string, sophos: NonNullable<RunRecord["sophos"]>, plan: NonNullable<RunRecord["plan"]>): Promise<RunRecord> {
+  async startSophosChangeRun(tenantId: string, sophos: NonNullable<RunRecord["sophos"]>, plan: NonNullable<RunRecord["plan"]>, verifyBinding: (state: RunPersistedState) => void): Promise<RunRecord> {
     const run: RunRecord = {
       id: `run_${randomUUID()}`,
       agentSlug: "sophos-change",
@@ -1271,6 +1271,8 @@ export class RunService {
     await this.host.serialize(async () => {
       this.assertTenantOpen(tenantId);
       const persisted = await this.host.read();
+      verifyBinding(persisted);
+      if (persisted.activeTenantId !== tenantId) throw new Error("Select the original organization and prepare the Sophos Central plan again.");
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
     });

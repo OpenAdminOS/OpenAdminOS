@@ -1350,3 +1350,18 @@ describe("chat tool use status", () => {
     assert.match(chatToolUseStatus({ mode: "always-deterministic", provider: undefined, providerId: "ollama", model: "llama3.1:8b" }).notice!, /deterministic retrieval/);
   });
 });
+
+it("Chat keeps MCP tools when Sophos Central context fails", async () => {
+  await withStore(async (store) => {
+    const mcp = mcpContext([docsTool]);
+    const service = new IntuneChatService({
+      sophosChatContext: async () => { throw new Error("Fixture context unavailable"); },
+      mcpChatContext: async () => mcp,
+      requireIntelligenceStore: () => store,
+    } as unknown as ChatServiceHost);
+    const context = await (service as unknown as {
+      mcpToolsFor(tenant: TenantRecord, conversationId: string): Promise<unknown>;
+    }).mcpToolsFor(tenant, "fixture-conversation");
+    assert.deepEqual(context, { mcp });
+  });
+});

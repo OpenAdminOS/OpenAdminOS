@@ -341,7 +341,7 @@ import { mcpChatServerOf, mcpChatToolName, mcpPrivateTermsForTenant, type McpCha
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
 import type { ConnectSophosInput, PrepareSophosChangeInput } from "@openadminos/agent-sdk";
-import { listSophosTargets, prepareSophosPlan } from "./sophos/plans.js";
+import { listSophosTargets, prepareSophosPlan, recheckSophosTarget, verifySophosAcceptance } from "./sophos/plans.js";
 import { isSophosId, isSophosRegionHost } from "@openadminos/agent-sdk";
 import { readSophos } from "./sophos/reads.js";
 import { SophosService } from "./sophos/service.js";
@@ -2898,8 +2898,14 @@ export class AppStateStore {
 
   listSophosTargets(organizationId: string, search: string) {
     return this.localResetGatedWork(async () => {
-      const { record, api } = await this.sophos.binding(await this.read(), organizationId);
-      return listSophosTargets(api, record, search);
+      const state = await this.read();
+      const record = organizationForTenant(state.organizations ?? [], state.activeTenantId)?.connections.sophos;
+      if (!record) throw new Error("Connect Sophos Central for this organization in Connections.");
+      this.sophos.requireBinding(state, organizationId, record.connectionId);
+      return this.sophos.check(organizationId, record.connectionId, async () => {
+        const { api } = await this.sophos.binding(state, organizationId);
+        return listSophosTargets(api, record, search);
+      });
     });
   }
 
@@ -2908,15 +2914,20 @@ export class AppStateStore {
       const state = await this.read();
       const tenantId = state.activeTenantId;
       if (!tenantId) throw new OrganizationBoundaryError("Select the organization before preparing a Sophos Central change.");
-      const { record, api } = await this.sophos.binding(state, input.organizationId);
-      const plan = await prepareSophosPlan(api, record, input);
+      const record = organizationForTenant(state.organizations ?? [], tenantId)?.connections.sophos;
+      if (!record) throw new Error("Connect Sophos Central for this organization in Connections.");
+      this.sophos.requireBinding(state, input.organizationId, record.connectionId);
+      const plan = await this.sophos.check(input.organizationId, record.connectionId, async () => {
+        const { api } = await this.sophos.binding(state, input.organizationId);
+        return prepareSophosPlan(api, record, input);
+      });
       return this.runService.startSophosChangeRun(tenantId, {
         organizationId: input.organizationId,
         connectionId: record.connectionId,
         host: record.host,
         kind: input.kind,
         ...(input.kind !== "scan" && typeof input.comment === "string" ? { comment: input.comment.trim() } : {}),
-      }, plan);
+      }, plan, (current) => this.sophos.requireBinding(current, input.organizationId, record.connectionId));
     });
   }
 
@@ -2934,14 +2945,13 @@ export class AppStateStore {
       if (record.connectionId !== plan.connectionId || record.host !== plan.host) {
         throw new Error("The Sophos Central connection changed. Prepare the plan again in Connections.");
       }
+      const before = action.metadata?.before as { isolation?: unknown } | undefined;
+      await this.sophos.check(plan.organizationId, record.connectionId, () =>
+        recheckSophosTarget(api, record, plan.kind, action.id, before?.isolation, signal), true);
+      this.sophos.requireBinding(await this.read(), plan.organizationId, record.connectionId);
       signal.throwIfAborted();
       const result = await api.change(record, plan.kind, [action.id], plan.comment, signal);
-      if (Array.isArray(result.errors) && result.errors.some((entry) => entry?.errorCode === "permissionDenied")) {
-        throw new Error("Sophos Central refused the change. Use a credential with the Service Principal Management role.");
-      }
-      if (!Array.isArray(result.items) || !result.items.some((entry) => isSophosId(entry?.id) && entry.id.toLowerCase() === action.id)) {
-        throw new Error("Sophos Central did not accept the endpoint request. Check its status in Sophos Central before trying again.");
-      }
+      verifySophosAcceptance(result, plan.kind, action.id);
     }));
   }
 
@@ -3093,12 +3103,13 @@ export class AppStateStore {
     return {
       host: started.host,
       read: async (tool, params, signal) => this.localResetGatedWork(() => this.serialize(async () => {
-        const current = await this.sophos.binding(await this.read(), organization.id);
-        signal?.throwIfAborted();
-        if (current.record.connectionId !== started.connectionId) {
-          throw new Error("The Sophos Central connection changed. Start a new answer after reconnecting in Connections.");
-        }
-        return readSophos(current.api, current.record, tool, params, signal);
+        const currentState = await this.read();
+        this.sophos.requireBinding(currentState, organization.id, started.connectionId);
+        return this.sophos.check(organization.id, started.connectionId, async () => {
+          const current = await this.sophos.binding(currentState, organization.id);
+          signal?.throwIfAborted();
+          return readSophos(current.api, current.record, tool, params, signal);
+        }, true);
       })),
     };
   }

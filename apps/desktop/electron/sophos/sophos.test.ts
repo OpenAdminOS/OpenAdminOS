@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SophosApi } from "./api.js";
-import { prepareSophosPlan } from "./plans.js";
+import { listSophosTargets, prepareSophosPlan, recheckSophosTarget, verifySophosAcceptance } from "./plans.js";
 import { readSophos } from "./reads.js";
 
 const id = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
@@ -47,11 +47,11 @@ test("Sophos uses a form credential exchange, refreshes before expiry and pins r
 });
 
 test("Sophos refuses partner and organization identities and unexpected regions", async () => {
-  for (const idType of ["partner", "organization"]) {
+  for (const idType of ["partner", "distributor", "organization"]) {
     const api = new SophosApi(credentials, {
       fetch: async (url) => Response.json(String(url).includes("whoami") ? { ...whoami, idType } : token),
     });
-    await assert.rejects(api.identify(), /Partner and organization credentials/);
+    await assert.rejects(api.identify(), /Partner, distributor and organization credentials/);
   }
   for (const dataRegion of ["https://api-eu01.central.sophos.com.evil.test", "http://api-eu01.central.sophos.com", "https://api-eu01.central.sophos.com:8443", "https://api-eu01.central.sophos.com/path", "https://api-eu01.central.sophos.com\n"]) {
     const api = new SophosApi(credentials, {
@@ -83,7 +83,7 @@ test("Sophos uses key, cursor and numbered paging and sends filters only to the 
 });
 
 test("Sophos returns designed errors and bounds retries without echoing the response", async () => {
-  for (const [status, expected, calls] of [[401, /expired/, 1], [403, /Read-Only/, 1], [429, /rate limiting/, 4], [503, /temporarily unavailable/, 4], [307, /redirected/, 1]] as const) {
+  for (const [status, expected, calls] of [[401, /expired/, 2], [403, /Read-Only/, 1], [429, /rate limiting/, 4], [503, /temporarily unavailable/, 4], [307, /redirected/, 1]] as const) {
     let requests = 0;
     const api = new SophosApi(credentials, { wait: async () => {}, fetch: async (url) => {
       if (String(url).includes("id.sophos.com")) return Response.json(token);
@@ -100,9 +100,11 @@ test("Sophos prepares exact endpoint targets with typed confirmation without mak
     const target = new URL(String(url));
     if (target.hostname === "id.sophos.com") return Response.json(token);
     assert.equal(init?.method, undefined);
-    assert.equal(target.searchParams.get("ids"), id);
+    assert.equal(target.searchParams.get("view"), "full");
+    if (!target.searchParams.has("search")) assert.equal(target.searchParams.get("ids"), id);
     return Response.json({ items: [{ id, hostname: "LAB-01", isolation: { status: "notIsolated" } }] });
   } });
+  await listSophosTargets(api, identity, "LAB");
   const plan = await prepareSophosPlan(api, identity, { organizationId: "lab", kind: "isolate", targetIds: [id], comment: "Investigate" });
   assert.equal(plan.confirmationPhrase, "ISOLATE 1 DEVICE");
   assert.equal(plan.actions[0]?.id, id);
@@ -111,15 +113,16 @@ test("Sophos prepares exact endpoint targets with typed confirmation without mak
 });
 
 test("Sophos change denials identify Management and uncertain writes are not retried", async () => {
-  for (const [status, message] of [[403, /Service Principal Management/], [503, /did not confirm/]] as const) {
+  for (const [status, message] of [[403, /Service Principal Management/], [409, /Wait for the in-progress isolation/], [503, /did not confirm/]] as const) {
     let writes = 0;
+    const isolation = status === 409;
     const api = new SophosApi(credentials, { fetch: async (url, init) => {
       if (String(url).includes("id.sophos.com")) return Response.json(token);
       writes++;
-      assert.deepEqual(JSON.parse(String(init?.body)), { ids: [id] });
+      assert.deepEqual(JSON.parse(String(init?.body)), isolation ? { ids: [id], enabled: true, comment: "Investigate" } : { ids: [id] });
       return new Response(null, { status });
     } });
-    await assert.rejects(api.change(identity, "scan", [id]), message);
+    await assert.rejects(api.change(identity, isolation ? "isolate" : "scan", [id], "Investigate"), message);
     assert.equal(writes, 1);
   }
 });
@@ -136,4 +139,68 @@ test("Sophos times out with a recovery message", async () => {
     });
   } });
   await assert.rejects(api.read(identity, "endpoints"), /did not answer in time/);
+});
+
+test("Sophos distinguishes endpoint errors and verifies action acceptance", () => {
+  for (const [errorCode, message] of [
+    ["notFound", /could not find/],
+    ["notSupported", /does not support/],
+    ["conflict", /conflicting request/],
+    ["permissionDenied", /Service Principal Management/],
+    ["internalError", /could not process/],
+  ] as const) {
+    assert.throws(() => verifySophosAcceptance({ errors: [{ id, errorCode }] }, "isolate", id), message);
+  }
+  for (const [kind, accepted, rejected, message] of [
+    ["isolate", { isolation: { enabled: true } }, { isolation: { enabled: false } }, /isolation request/],
+    ["release", { isolation: { enabled: false } }, { isolation: { enabled: true } }, /release from isolation request/],
+    ["scan", { status: "requested" }, { status: "completed" }, /scan request/],
+  ] as const) {
+    verifySophosAcceptance({ items: [{ id, ...accepted }] }, kind, id);
+    assert.throws(() => verifySophosAcceptance({ items: [{ id, ...rejected }] }, kind, id), message);
+  }
+});
+
+test("Sophos honours Retry-After and refreshes a rejected read token once", async () => {
+  const waits: number[] = [];
+  let tokens = 0;
+  let reads = 0;
+  const api = new SophosApi(credentials, { wait: async (ms) => { waits.push(ms); }, fetch: async (url, init) => {
+    if (new URL(String(url)).hostname === "id.sophos.com") return Response.json({ ...token, access_token: `token-${++tokens}` });
+    reads++;
+    if (reads === 1) return new Response(null, { status: 429, headers: { "Retry-After": "2" } });
+    if (reads === 2) return new Response(null, { status: 401 });
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer token-2");
+    return Response.json({ items: [] });
+  } });
+  await api.read(identity, "endpoints");
+  assert.deepEqual(waits, [2_000]);
+  assert.equal(tokens, 2);
+});
+
+test("Sophos reads health checks, exact alerts, firewalls and SIEM alerts", async () => {
+  const paths: string[] = [];
+  const api = new SophosApi(credentials, { fetch: async (url) => {
+    const target = new URL(String(url));
+    if (target.hostname === "id.sophos.com") return Response.json(token);
+    paths.push(target.pathname);
+    return Response.json({ id, items: [], has_more: true, next_cursor: "next-alert" });
+  } });
+  await readSophos(api, identity, "sophos_get_health_check", {});
+  await readSophos(api, identity, "sophos_get_alert", { id });
+  await readSophos(api, identity, "sophos_list_firewalls", {});
+  assert.equal((await readSophos(api, identity, "sophos_list_siem_alerts", {})).page?.next, "next-alert");
+  assert.deepEqual(paths, [
+    "/account-health-check/v1/health-check", `/common/v1/alerts/${id}`, "/firewall/v1/firewalls", "/siem/v1/alerts",
+  ]);
+});
+
+test("Sophos refuses to scan an endpoint that disappeared after planning", async () => {
+  const api = new SophosApi(credentials, { fetch: async (url) => {
+    const target = new URL(String(url));
+    if (target.hostname === "id.sophos.com") return Response.json(token);
+    assert.equal(target.searchParams.get("view"), "full");
+    return Response.json({ items: [] });
+  } });
+  await assert.rejects(recheckSophosTarget(api, identity, "scan", id, undefined, new AbortController().signal), /could not find this endpoint/);
 });

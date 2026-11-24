@@ -4027,7 +4027,10 @@ export class IntuneChatService {
       console.warn("[intune-chat] Splashtop is not offered for this answer:", error instanceof Error ? error.message : error);
       return undefined;
     });
-    const sophos = await this.host.sophosChatContext?.(tenant);
+    const sophos = await this.host.sophosChatContext?.(tenant).catch((error: unknown) => {
+      console.warn("[intune-chat] Sophos Central is not offered for this answer:", error instanceof Error ? error.message : error);
+      return undefined;
+    });
     const vendorTools = {
       ...(splashtop && splashtop.tools.length > 0 ? { splashtop } : {}),
       ...(sophos ? { sophos } : {}),

@@ -10,7 +10,7 @@ export const SOPHOS_READ_TOOLS = {
   sophos_list_alerts: `List Sophos Central alerts. Optional filters: ${alertFilters.join(", ")}. Pass the prior result’s page.next as next.`,
   sophos_get_alert: "Read one Sophos Central alert. Requires id from an alert result.",
   sophos_list_events: "Read Sophos SIEM events from the last 24 hours only. Pass the prior result’s page.next as next. Always say the events cover the last 24 hours.",
-  sophos_list_siem_alerts: "Read Sophos SIEM alerts from the last 24 hours only. Pass the prior result’s page.next as next.",
+  sophos_list_siem_alerts: "Read Sophos SIEM alerts from the last 24 hours only. Pass the prior result’s page.next as next. Always say the alerts cover the last 24 hours.",
   sophos_list_firewalls: "List Sophos firewalls. Pass the prior result’s page.next as next. Firewall traffic logs are unavailable through this API.",
   sophos_list_firewall_groups: "List Sophos firewall groups. Pass the prior result’s page.next as next. Firewall traffic logs are unavailable through this API.",
   sophos_get_health_check: "Read the Sophos account health check scores for protection, policy, exclusions and tamper protection.",

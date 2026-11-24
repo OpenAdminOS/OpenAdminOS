@@ -105,18 +105,26 @@ export class SophosApi {
         throw new SophosApiError("refused", "Sophos Central redirected the request. Test the connection in Connections.");
       }
       if (status === 401 || (operation === "token" && status === 400)) {
-        this.token = undefined;
         throw new SophosApiError("credentials", "The Sophos Central credentials may have expired, been removed, or been entered incorrectly. Create or verify the tenant credentials and reconnect.");
       }
       if (status === 403) {
         const role = operation === "write" ? "Service Principal Management" : "Service Principal Read-Only";
         throw new SophosApiError("forbidden", `Sophos Central refused the request. Check that the credential has the ${role} role and reconnect.`);
       }
+      if (status === 409 && operation === "write" && url instanceof URL && url.pathname.endsWith("/isolation")) {
+        throw new SophosApiError("refused", "Wait for the in-progress isolation or release to finish, then check the endpoint in Sophos Central.");
+      }
       if (status === 429 || status >= 500) {
         // A failed response to a write can leave its outcome unknown.
         if (attempt < 3 && (operation !== "write" || status === 429)) {
           const base = Math.min(30_000, 1_000 * 2 ** attempt);
-          const wait = Math.floor(base * Math.random());
+          const retryAfter = status === 429 ? response.headers.get("Retry-After") : null;
+          const now = (this.options.now ?? Date.now)();
+          const retryMs = retryAfter === null ? 0 : /^\d+$/.test(retryAfter)
+            ? Number(retryAfter) * 1_000 : Date.parse(retryAfter) - now;
+          // Surface long cooldowns instead of blocking an operation for their duration.
+          if (retryMs > 30_000) throw new SophosApiError("rate-limit", "Sophos Central is rate limiting requests. Wait for its cooldown before trying again.");
+          const wait = Math.max(Number.isFinite(retryMs) ? retryMs : 0, 100 + Math.floor((base - 100) * Math.random()));
           if (this.options.wait) await this.options.wait(wait);
           else await delay(wait, undefined, init.signal ? { signal: init.signal } : undefined);
           continue;
@@ -142,11 +150,11 @@ export class SophosApi {
       }),
     }, "token");
     const { access_token, expires_in, token_type } = result;
-    if (typeof access_token !== "string" || !/^[A-Za-z0-9._~+/-]+=*$/.test(access_token) ||
+    if (typeof access_token !== "string" || access_token.length > 16_384 || !/^[A-Za-z0-9._~+/-]+=*$/.test(access_token) ||
         typeof expires_in !== "number" || !Number.isFinite(expires_in) || expires_in <= 0 ||
         typeof token_type !== "string" || token_type.toLowerCase() !== "bearer") throw invalidResponse();
     const now = (this.options.now ?? Date.now)();
-    this.token = { value: access_token, refreshAt: now + Math.min(expires_in * 900, expires_in * 1_000 - 1) };
+    this.token = { value: access_token, refreshAt: now + Math.min(3_600_000, expires_in * 900) };
     return access_token;
   }
 
@@ -156,12 +164,32 @@ export class SophosApi {
     return this.refreshing;
   }
 
-  async identify(): Promise<SophosIdentity> {
-    const result = await this.request(WHOAMI_URL, {
-      headers: { Authorization: `Bearer ${await this.bearer()}` },
+  private async authenticatedRead(url: string | URL, init: RequestInit = {}) {
+    const attempt = (token: string) => this.request(url, {
+      ...init, headers: { ...init.headers, Authorization: `Bearer ${token}` },
     }, "read");
+    const token = await this.bearer();
+    try {
+      return await attempt(token);
+    } catch (error) {
+      if (!(error instanceof SophosApiError) || error.code !== "credentials") throw error;
+      if (this.token?.value === token) this.token = undefined;
+      const refreshed = await this.bearer();
+      try {
+        return await attempt(refreshed);
+      } catch (retryError) {
+        if (retryError instanceof SophosApiError && retryError.code === "credentials" && this.token?.value === refreshed) {
+          this.token = undefined;
+        }
+        throw retryError;
+      }
+    }
+  }
+
+  async identify(): Promise<SophosIdentity> {
+    const result = await this.authenticatedRead(WHOAMI_URL);
     if (result.idType !== "tenant") {
-      throw new SophosApiError("refused", "Partner and organization credentials are not supported yet. Create a tenant credential in Sophos Central and try again.");
+      throw new SophosApiError("refused", "Partner, distributor and organization credentials are not supported yet. Create a tenant credential in Sophos Central and try again.");
     }
     const region = (result.apiHosts as { dataRegion?: unknown } | undefined)?.dataRegion;
     const host = typeof region === "string" ? /^https:\/\/([^/]+)\/?$/.exec(region)?.[1] : undefined;
@@ -180,13 +208,12 @@ export class SophosApi {
     const url = new URL(path, `https://${identity.host}`);
     url.search = query.toString();
     const headers = {
-      Authorization: `Bearer ${await this.bearer()}`,
       "X-Tenant-ID": identity.tenantId,
     };
     const cancellation = signal ? { signal } : {};
     return body
-      ? this.request(url, { ...cancellation, method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) }, "write")
-      : this.request(url, { ...cancellation, headers }, "read");
+      ? this.request(url, { ...cancellation, method: "POST", headers: { ...headers, Authorization: `Bearer ${await this.bearer()}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }, "write")
+      : this.authenticatedRead(url, { ...cancellation, headers });
   }
 
   read(identity: SophosIdentity, resource: SophosResource, query = new URLSearchParams(), signal?: AbortSignal) {

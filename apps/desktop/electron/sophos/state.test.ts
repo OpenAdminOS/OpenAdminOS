@@ -27,13 +27,16 @@ test("Sophos tools and confirmed writes stay in their organization and records n
   const filePath = join(directory, "state.json");
   await writeFile(filePath, JSON.stringify({ tenants: [tenant, other], activeTenantId: tenant.id, runs: [], installedAgents: [] }));
   const writes: unknown[] = [];
+  let isolation = "notIsolated";
+  let expired = false;
+  let blockedRead: { started: () => void; resume: Promise<void> } | undefined;
   const store = new AppStateStore({
     filePath,
     tokenStore: { read: async () => "", write: async () => undefined },
     statsApiUrl: "",
     sophosFetch: async (url, init) => {
       const target = new URL(String(url));
-      if (target.hostname === "id.sophos.com") return Response.json({ access_token: "test-sophos-token", expires_in: 3600, token_type: "bearer" });
+      if (target.hostname === "id.sophos.com") return expired ? new Response(null, { status: 401 }) : Response.json({ access_token: "test-sophos-token", expires_in: 3600, token_type: "bearer" });
       if (target.pathname.startsWith("/whoami/")) {
         return Response.json({ id: endpointId, idType: "tenant", apiHosts: { dataRegion: "https://api-eu01.central.sophos.com" } });
       }
@@ -42,7 +45,11 @@ test("Sophos tools and confirmed writes stay in their organization and records n
         return Response.json({ items: [{ id: endpointId, isolation: { enabled: true } }] }, { status: 202 });
       }
       assert.equal(target.pathname, "/endpoint/v1/endpoints");
-      return Response.json({ items: [{ id: endpointId, hostname: "LAB-01", isolation: { status: "notIsolated" } }] });
+      if (blockedRead) {
+        blockedRead.started();
+        await blockedRead.resume;
+      }
+      return Response.json({ items: [{ id: endpointId, hostname: "LAB-01", isolation: { status: isolation } }] });
     },
   });
   const context = (which: TenantRecord) => (store as unknown as {
@@ -74,9 +81,44 @@ test("Sophos tools and confirmed writes stay in their organization and records n
     assert.equal(done?.status, "completed", done?.error);
     assert.match(done.summary ?? "", /accepted/);
     assert.deepEqual(writes, [{ enabled: true, ids: [endpointId], comment: "Investigate" }]);
+    for (const [live, message] of [
+      ["isolating", /isolation status changed since the plan/],
+      ["isolated", /already has the requested isolation state/],
+    ] as const) {
+      isolation = "notIsolated";
+      const stale = await store.prepareSophosChange({ organizationId, kind: "isolate", targetIds: [endpointId], comment: "Investigate" });
+      isolation = live;
+      await store.confirmRun(stale.id, "ISOLATE 1 DEVICE", { activeOrganizationOnly: true });
+      for (let attempt = 0; attempt < 200 && (await store.getRun(stale.id))?.status === "running"; attempt++) await delay(10);
+      const refused = await store.getRun(stale.id);
+      assert.equal(refused?.status, "failed");
+      assert.match(refused.error ?? "", message);
+      assert.equal(writes.length, 1);
+    }
+    expired = true;
+    await assert.rejects(store.testSophos(organizationId), /expired/);
+    assert.equal((await store.getAppState()).sophosConnections?.[0]?.issue, "credentials");
+    expired = false;
+    assert.equal((await store.testSophos(organizationId)).issue, undefined);
+    isolation = "notIsolated";
+    for (const read of [
+      () => store.listSophosTargets(organizationId, ""),
+      () => store.prepareSophosChange({ organizationId, kind: "isolate", targetIds: [endpointId], comment: "Investigate" }),
+    ]) {
+      const started = Promise.withResolvers<void>();
+      const resume = Promise.withResolvers<void>();
+      blockedRead = { started: started.resolve, resume: resume.promise };
+      const pending = read();
+      await started.promise;
+      await store.disconnectSophos(organizationId);
+      resume.resolve();
+      await assert.rejects(pending, /connection changed/);
+      blockedRead = undefined;
+      await store.connectSophos({ organizationId, ...credential });
+    }
     await store.disconnectSophos(organizationId);
     assert.equal(await context(tenant), undefined);
-    await assert.rejects(started.read("sophos_list_endpoints", {}), /Connect Sophos Central/);
+    await assert.rejects(started.read("sophos_list_endpoints", {}), /connection changed/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -109,6 +151,45 @@ test("Sophos refuses credential use after the data folder is sealed and sweeps o
     assert.deepEqual(await readdir(secrets), []);
   } finally {
     unsealDataFolder();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("An unreadable Sophos connection can be disconnected and its secret removed", async () => {
+  const { createHash } = await import("node:crypto");
+  const { mkdir, readdir } = await import("node:fs/promises");
+  const { SophosService } = await import("./service.js");
+  const root = await mkdtemp(join(tmpdir(), "openadminos-sophos-unreadable-"));
+  try {
+    const secrets = join(root, "sophos");
+    await mkdir(secrets);
+    const filename = createHash("sha256").update(organizationId).digest("hex") + ".bin";
+    await writeFile(join(secrets, filename), "fixture ciphertext");
+    let state: { tenants: TenantRecord[]; activeTenantId: string; organizations: import("@openadminos/agent-sdk").OrganizationRecord[] } = {
+      tenants: [tenant],
+      activeTenantId: tenant.id,
+      organizations: [{
+        id: organizationId, name: tenant.displayName, createdAt: tenant.addedAt,
+        connections: { microsoft365: { tenantId: tenant.id }, sophos: {
+          tenantId: "invalid", host: "invalid", connectedAt: tenant.addedAt, lastCheckedAt: tenant.addedAt, connectionId: "fixture",
+        } },
+      }],
+    };
+    const service = new SophosService({
+      secretsRoot: root,
+      read: async () => state,
+      serialize: (work) => work(),
+      write: async (updated) => { state = updated; },
+      changed: () => {},
+      clock: () => new Date(),
+    });
+    assert.equal(service.summaries(state)[0]?.unreadable, true);
+    await service.sweep();
+    assert.deepEqual(await readdir(secrets), [filename]);
+    await service.disconnect(organizationId);
+    assert.deepEqual(service.summaries(state), []);
+    assert.deepEqual(await readdir(secrets), []);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
