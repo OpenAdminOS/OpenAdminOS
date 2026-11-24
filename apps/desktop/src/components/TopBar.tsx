@@ -12,8 +12,7 @@ export function TopBar() {
   const { collapsed, toggleSidebar, setTitleTarget, setActionsTarget } = useShellChrome();
   const { boundary } = useDataBoundary();
   const { state } = useAppState();
-  // The chip is one short line at every width: where prompts go and how
-  // many references receive words from questions, never cut off.
+  // The chip keeps the destination and reference count on one line at narrow widths.
   const referenceCount = boundary.kind !== "none" && boundary.toolHosts ? chatToolHosts(state).length : 0;
   const sophosHost = boundary.kind !== "none" && boundary.toolHosts ? sophosToolHost(state) : undefined;
   const draggable = platform === "macos" || platform === "windows";
@@ -80,7 +79,12 @@ export function TopBar() {
               }`}
             >
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
-              <span className="truncate">{boundary.label}</span>
+              <span className="truncate">
+                {boundary.label}
+                {boundary.kind === "local" && boundary.note ? (
+                  <span className="hidden text-[var(--color-text-muted)] min-[1100px]:inline"> · {boundary.note}</span>
+                ) : null}
+              </span>
               {sophosHost ? <span className="truncate text-[var(--color-text-muted)]">{sophosHost}</span> : null}
               {/* One short line at every width: the model and the host list are in the name and tooltip. */}
               {referenceCount > 0 ? (

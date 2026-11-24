@@ -280,7 +280,7 @@
       "generationSpeed": "15.7 tokens/s",
       "runsOn": "your machine",
       "marginalCost": "none after download",
-      "tenantData": "never leaves the device"
+      "tenantData": "processed on your device"
     },
     {
       "id": "claude-opus-5",

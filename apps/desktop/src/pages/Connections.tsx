@@ -167,13 +167,13 @@ function listText(values: readonly string[]): string {
   return `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`;
 }
 
-/** The map's text alternative: the same facts as one paragraph. */
 /** Where a hosted model's location depends on, plus who sees the prompt for a Copilot Fusion tier. */
 function hostedDetail(provider: Parameters<typeof providerDataLocationDetail>[0], modelNote: string | undefined): { locationDetail?: string } {
   const detail = [providerDataLocationDetail(provider), modelNote ? `${modelNote}.` : undefined].filter(Boolean).join(" ");
   return detail ? { locationDetail: detail } : {};
 }
 
+/** The map's text alternative: the same facts as one paragraph. */
 export function reachDescription(model: ReachModel): string {
   const who = model.organizationName ?? "No organization";
   const services = model.services.length > 0
@@ -199,7 +199,7 @@ export function reachDescription(model: ReachModel): string {
   const voice = model.voice
     ? ` ${novaVoiceSentence(Boolean(model.organizationName))}${model.voice.model ? ` The voice model is ${model.voice.model}.` : ""}`
     : "";
-  return `${services} ${device} ${words}${sophos} ${reports}${voice}`;
+  return `${services} ${device} ${words}${sophos} ${reports}${voice} ${CONNECTIONS_COPY.appTrafficDetails}`;
 }
 
 /** Below this content width the map stacks and draws no connectors. */
@@ -406,7 +406,7 @@ function ReachRow({
   title: string;
   titleHint?: string;
   /** A second line, such as the documented default for a data location. */
-  detail?: string;
+  detail?: ReactNode;
   state?: ReactNode;
 }) {
   return (
@@ -416,6 +416,25 @@ function ReachRow({
       {state ?? <span />}
       {detail ? <span className="reach-row-detail">{detail}</span> : null}
     </li>
+  );
+}
+
+function NetworkCallsLink() {
+  const href = "https://openadminos.com/docs/trust-model/network-calls";
+  return (
+    <a
+      className="text-[var(--color-accent)] underline underline-offset-2"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => {
+        if (!window.openAdminOS?.openExternal) return;
+        event.preventDefault();
+        void window.openAdminOS.openExternal(href);
+      }}
+    >
+      {CONNECTIONS_COPY.networkCallsLink}
+    </a>
   );
 }
 
@@ -478,9 +497,9 @@ function ReachMap({ model }: { model: ReachModel }) {
           <div className="reach-hub-note">{CONNECTIONS_COPY.map.deviceStays}</div>
         </div>
       </div>
-      <div className="reach-zone" data-zone="out" aria-hidden="true">
+      <div className="reach-zone" data-zone="out">
         <h3>{CONNECTIONS_COPY.map.leaves}</h3>
-        <div className="reach-group">
+        <div className="reach-group" aria-hidden="true">
           <h4>{model.organizationName ? CONNECTIONS_COPY.map.prompts : CONNECTIONS_COPY.map.promptsNoOrganization}</h4>
           <ul className="reach-rows">
             {hosted ? (
@@ -503,7 +522,7 @@ function ReachMap({ model }: { model: ReachModel }) {
           </ul>
         </div>
         {model.voice ? (
-          <div className="reach-group">
+          <div className="reach-group" aria-hidden="true">
             <h4>{CONNECTIONS_COPY.map.voice}</h4>
             <ul className="reach-rows">
               <ReachRow
@@ -516,14 +535,14 @@ function ReachMap({ model }: { model: ReachModel }) {
           </div>
         ) : null}
         {model.sophosHost && (
-          <div className="reach-group">
+          <div className="reach-group" aria-hidden="true">
             <h4>Sophos Central requests</h4>
             <ul className="reach-rows">
               <ReachRow linkId="sophos" mark={<ReferenceMark name="Sophos Central" />} title={model.sophosHost} />
             </ul>
           </div>
         )}
-        <div className="reach-group">
+        <div className="reach-group" aria-hidden="true">
           <h4>{CONNECTIONS_COPY.map.questionWords}</h4>
           <ul className="reach-rows">
             {model.referenceHosts.length === 0 ? (
@@ -535,7 +554,7 @@ function ReachMap({ model }: { model: ReachModel }) {
             )}
           </ul>
         </div>
-        <div className="reach-group">
+        <div className="reach-group" aria-hidden="true">
           <h4>{CONNECTIONS_COPY.map.reports}</h4>
           <ul className="reach-rows" aria-busy={model.reportDestinationsState === "loading" || undefined}>
             {model.reportDestinations === null ? (
@@ -551,6 +570,15 @@ function ReachMap({ model }: { model: ReachModel }) {
                 <ReachRow key={name} linkId={`report:${name}`} mark={<ReferenceMark name={name} />} title={name} />
               ))
             )}
+          </ul>
+        </div>
+        <div className="reach-group">
+          <ul className="reach-rows">
+            <ReachRow
+              mark={<ReferenceMark name={CONNECTIONS_COPY.appTraffic} />}
+              title={CONNECTIONS_COPY.appTraffic}
+              detail={<>{CONNECTIONS_COPY.appTrafficDetails} <NetworkCallsLink /></>}
+            />
           </ul>
         </div>
       </div>
@@ -1228,6 +1256,15 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
         <SectionHeading id="connections-leaves-now" title={CONNECTIONS_COPY.leavesNowHeading} />
         <ul className="conn-rows">
           <li className="conn-row">
+            <ReferenceMark name={CONNECTIONS_COPY.appTraffic} size="lg" />
+            <div className="min-w-0">
+              <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.appTraffic}</div>
+              <div className="text-sm text-[var(--color-text-muted)]">
+                {CONNECTIONS_COPY.appTrafficDetails} <NetworkCallsLink />
+              </div>
+            </div>
+          </li>
+          <li className="conn-row">
             {hosted && model.model.providerId ? <ProviderMark provider={model.model.providerId} size="lg" /> : hosted ? <ReferenceMark name={prompts.split(" ")[0] ?? ""} size="lg" /> : <ReferenceMark name="" size="lg" off />}
             <div className="min-w-0">
               <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.promptsNoOrganization}</div>
@@ -1299,7 +1336,7 @@ type ConnectionsView = "connections" | "organizations";
 
 /**
  * Connections: one page per organization. The reach map at the top shows
- * the services read into this device and everything that leaves it; the
+ * the services read into this device, destinations for Chat and runs, and app traffic. The
  * lists below are the same data, with the actions that change it. The
  * Organizations tab lists every organization and saved app registration on
  * this device. Replaces Settings, Tenants and Settings, Connectors.

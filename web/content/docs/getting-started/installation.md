@@ -15,7 +15,7 @@ Managed deployments can use the signed Apple Silicon `.pkg` from the same releas
 
 ## Windows
 
-Download `OpenAdminOS-<version>-win-x64.exe` from the [latest GitHub release](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) and run it. The installer is per-user, so it does not require local administrator rights, and it lets you change the install directory. Auto-update is handled by electron-updater from GitHub Releases.
+Download `OpenAdminOS-<version>-win-x64.exe` from the [latest GitHub release](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) and run it. The installer is per-user, so it does not require local administrator rights, and it lets you change the install directory.
 
 The installer is code signed. Before running it, right-click the file, open **Properties → Digital Signatures**, and confirm the signer is `Ugurlabs UG (haftungsbeschränkt)`.
 
@@ -52,6 +52,10 @@ refresh tokens are stored through Electron `safeStorage`. On Debian or Ubuntu,
 install `gnome-keyring` if your desktop session does not already provide Secret
 Service. KDE users can use KWallet. OpenAdminOS refuses Electron's unprotected
 `basic_text` fallback for tenant tokens.
+
+## Update checks
+
+Packaged Windows and macOS builds check GitHub Releases 15 seconds after launch and every 4 hours. An available update downloads in the background from GitHub. It installs when you restart or quit the app. To pause automatic update checks, turn off **Automatic network requests** in **Settings > Privacy**. You can still use **Check for updates**. Microsoft Store builds update through the Store. On Linux, the signed apt repository provides updates through your package manager. Update direct AppImage, `.rpm`, and standalone `.deb` installs by downloading and installing a newer package. See [Network calls](../trust/network-calls.md) for request details and controls.
 
 ## Nightly builds
 

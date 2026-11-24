@@ -32,7 +32,7 @@ import type {
 import { partIdsFor, requestedScopes } from "../shared/openAdminOS";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
 
-const LOCAL_NO_TENANT = "Local model. No organization. Nothing leaves this device.";
+const LOCAL_NO_TENANT = "Local model. No organization. Questions and answers stay on this device.";
 
 function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
@@ -1317,7 +1317,7 @@ describe("IntuneChat trust presentation", () => {
     await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("Ollama");
     expect(screen.queryByText("Local provider")).not.toBeInTheDocument();
-    expect(screen.getByText("Local model. Tenant data stays on this device.")).toBeInTheDocument();
+    expect(screen.getByText("Local model. Tenant data and prompts stay on this device.")).toBeInTheDocument();
   });
 
   it("names the MCP hosts in the local boundary footnote when MCP servers are on", async () => {
@@ -1336,7 +1336,7 @@ describe("IntuneChat trust presentation", () => {
     expect(screen.getByText(/^Local model\. Graph and cache data stay on this device\./)).toHaveTextContent(
       "Local model. Graph and cache data stay on this device. MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.",
     );
-    expect(screen.queryByText(/Tenant data stays on this device/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tenant data and prompts stay on this device/)).not.toBeInTheDocument();
   });
 
   it("activates the provider when picking another provider's model", async () => {

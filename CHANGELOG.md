@@ -6,10 +6,13 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Document when the app contacts external services, what it sends, and how to pause automatic requests.
 - Settings > Privacy controls automatic app update checks, registry refreshes, documentation index and embedding model downloads, and registry install counts. IT can lock automatic requests and install counts with policy.json.
 
 ### Changed
 
+- Clarify local model data handling and disclose app traffic in Connections, including in its screen-reader description.
+- Update the website privacy notice with the services involved, what they process, how long they keep it, and the safeguards for international transfers.
 - The website stores install counts and abuse limits in an EU-hosted database without storing raw IP addresses.
 
 - Public registry install counts send only the agent slug, app version, and platform. OpenAdminOS records one attempt per agent and UTC year on the device, including failed requests. About shows counts as paused when automatic requests are off and the count preference is on.

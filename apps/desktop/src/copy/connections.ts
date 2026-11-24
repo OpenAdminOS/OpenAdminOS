@@ -83,11 +83,14 @@ export const ORGANIZATION_COPY = {
 export const CONNECTIONS_COPY = {
   pageTitle: "Connections",
   title: (name: string) => `${name} connections`,
-  lede: "What Chat and agents can read for this organization, and everything that leaves this device.",
-  ledeNone: "What Chat and agents can read, and everything that leaves this device.",
+  lede: "What Chat and agents can read for this organization, where they send data, and which services the app contacts.",
+  ledeNone: "What Chat and agents can read, where they send data, and which services the app contacts.",
   emptyTitle: "No organization connected",
   emptyBody:
     "Chat answers from the model and public references. Connect Microsoft 365 to read Intune, Entra and Defender for an organization.",
+  appTraffic: "App traffic",
+  appTrafficDetails: "Update checks and registry refreshes can reach GitHub, docs index requests can reach GitHub and the Ollama registry through local Ollama, and install counts can reach openadminos.com.",
+  networkCallsLink: "Network calls and controls",
   leavesNowHeading: "Leaves this device now",
   reportsNowHeading: "Run reports and agent messages",
   changeModel: "Change model",

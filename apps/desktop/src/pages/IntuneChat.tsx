@@ -1307,7 +1307,7 @@ function IntuneChatContent() {
   };
 
   // A model fit choice runs this one request on the chosen provider. A
-  // local one sends at once, since nothing leaves the device; a hosted one
+  // local one starts model processing on this device. A hosted one
   // opens the accept step first and sends only from its Send button.
   const chooseModelFit = async (offer: ModelFitOffer, choice: ModelFitChoice) => {
     if (checkModelFitExpiry(offer)) return;

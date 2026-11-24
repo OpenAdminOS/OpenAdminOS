@@ -59,7 +59,6 @@ export async function POST(req: Request) {
   }
 
   const { title, body: issueBody, dedupInput } = parsed.payload;
-  // TODO(ugur): Is previewDigest the right name for the reviewed-content check on this endpoint?
   if ("previewDigest" in body && body.previewDigest !== supportIssuePreviewDigest(title, issueBody)) {
     return jsonError(409, "The server formatted the report differently. Update OpenAdminOS and review the report again.");
   }

@@ -216,7 +216,7 @@ describe("first-launch model scan screen", () => {
     expect(radio("Ollama")).toBeChecked();
   });
 
-  it("names a ready local model large, says nothing leaves the device and opens Chat", async () => {
+  it("names a ready local model large, says prompts and responses stay on this device and opens Chat", async () => {
     const user = userEvent.setup();
     const local = [probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Running, 2 models", models: ["openadminos/openadmin-8b:latest"], hasOpenAdmin8B: true })];
     const { bridge, finish } = scanBridge({ kind: "local-selected", providerId: "ollama", model: "openadminos/openadmin-8b:latest" }, local);
@@ -225,7 +225,7 @@ describe("first-launch model scan screen", () => {
     await finish();
 
     expect(await screen.findByRole("heading", { name: "OpenAdmin 8B is ready on this device" })).toBeInTheDocument();
-    expect(screen.getAllByText(MODEL_SCAN_COPY.nothingLeaves).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(MODEL_SCAN_COPY.localPrompts).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.openChat }));
     await waitFor(() => expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce());
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
@@ -422,7 +422,7 @@ describe("first-launch model scan screen", () => {
     expect(radio("Codex")).toBeEnabled();
   });
 
-  it("does not claim nothing leaves when a public reference is enabled (round 2, item 9)", async () => {
+  it("shows where question words can go when a public reference is enabled (round 2, item 9)", async () => {
     const local = [probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Running, 1 model", models: ["openadminos/openadmin-8b:latest"], hasOpenAdmin8B: true })];
     const withReference = createMockAppState({ mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }) });
     const { bridge, finish } = scanBridge({ kind: "local-ready", providerId: "ollama", model: "openadminos/openadmin-8b:latest" }, local, withReference);
@@ -430,7 +430,7 @@ describe("first-launch model scan screen", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.scanAgain }));
     await finish();
     await screen.findByRole("heading", { level: 1, name: "OpenAdmin 8B is ready on this device" });
-    expect(screen.queryByText(MODEL_SCAN_COPY.nothingLeaves)).not.toBeInTheDocument();
+    expect(screen.queryByText(MODEL_SCAN_COPY.localPrompts)).not.toBeInTheDocument();
     expect(screen.getAllByText("Runs on this device. Your references get tool queries to learn.microsoft.com.").length).toBeGreaterThan(0);
   });
 

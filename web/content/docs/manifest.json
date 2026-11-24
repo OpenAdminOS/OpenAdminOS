@@ -200,6 +200,13 @@
           "children": []
         },
         {
+          "title": "Network calls",
+          "source": "trust/network-calls.md",
+          "route": "trust-model/network-calls",
+          "path": "trust-model/network-calls",
+          "children": []
+        },
+        {
           "title": "Authentication and permissions",
           "source": "trust/authentication.md",
           "route": "trust-model/authentication",
@@ -531,6 +538,10 @@
     {
       "source": "trust/local-first",
       "destination": "trust-model/local-first"
+    },
+    {
+      "source": "trust/network-calls",
+      "destination": "trust-model/network-calls"
     },
     {
       "source": "trust/authentication",

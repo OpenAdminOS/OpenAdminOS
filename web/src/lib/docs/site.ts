@@ -235,6 +235,18 @@ function docsRenderer(source: string, base: DocsBase): RendererObject {
     },
 
     table(this: Renderer, token: Tokens.Table) {
+      if (source === "trust/network-calls.md") {
+        const labels = token.header.map((cell) => escapeHtml(inlineText(cell.tokens)));
+        const headers = labels.map((label) => `<th scope="col" role="columnheader">${label}</th>`).join("");
+        const rows = token.rows.map((row) => {
+          const [activity, ...details] = row;
+          const cells = details.map((cell, index) =>
+            `<td role="cell"><span class="docs-table-label" aria-hidden="true">${labels[index + 1]}</span><span>${this.parser.parseInline(cell.tokens)}</span></td>`,
+          ).join("");
+          return `<tr role="row"><th scope="row" role="rowheader">${this.parser.parseInline(activity!.tokens)}</th>${cells}</tr>`;
+        }).join("");
+        return `<div class="docs-table docs-table-network"><table role="table"><thead role="rowgroup"><tr role="row">${headers}</tr></thead><tbody role="rowgroup">${rows}</tbody></table></div>\n`;
+      }
       return `<div class="docs-table">${Renderer.prototype.table.call(this, token)}</div>\n`;
     },
   };
