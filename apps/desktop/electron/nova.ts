@@ -203,7 +203,7 @@ export class NovaService {
    * the fresh state and settings with no wait after its last read, so the
    * caller records the consent and sends at once, from that snapshot.
    */
-  private async confirmStartCurrent(session: NonNullable<NovaService["session"]>): Promise<{ state: AppState; settings?: NovaSettings }> {
+  private async confirmStartCurrent(session: NonNullable<NovaService["session"]>, duringAnswer = false): Promise<{ state: AppState; settings?: NovaSettings }> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       session.controller.signal.throwIfAborted();
       const changes = this.profileChanges;
@@ -216,11 +216,11 @@ export class NovaService {
       session.controller.signal.throwIfAborted();
       if (session !== this.session) throw new Error("Nova was stopped or this question was replaced. Start a new conversation.");
       if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) {
-        this.invalidate();
-        throw new Error(NOVA_SESSION_CONTEXT_CHANGED);
+        if (duringAnswer) this.invalidate();
+        throw new Error(duringAnswer ? NOVA_SESSION_CONTEXT_CHANGED : "Nova's tenant or provider changed. Start a new conversation.");
       }
       if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) {
-        this.invalidate();
+        if (duringAnswer) this.invalidate();
         throw new Error(NOVA_SESSION_PROFILE_CHANGED);
       }
       // Nothing was announced during the read: what was read is current.
@@ -1011,10 +1011,10 @@ export class NovaService {
       const requestWithHistory = JSON.stringify({ question, history: transcript });
       const request = Buffer.byteLength(requestWithHistory) <= Math.max(Buffer.byteLength(bareRequest), requestBudget / 2)
         ? requestWithHistory : bareRequest;
-      await this.confirmStartCurrent(session);
+      await this.confirmStartCurrent(session, true);
       signal.throwIfAborted();
       const classification = await complete(llm, { system: classify, prompt: request, maxTokens: 12, temperature: 0 });
-      await this.confirmStartCurrent(session);
+      await this.confirmStartCurrent(session, true);
       signal.throwIfAborted();
       if (!/^PUBLIC[.!]?$/i.test(classification.text.trim())) return needsOrganization;
       let retrievalFailed = false;
@@ -1028,11 +1028,11 @@ export class NovaService {
         limit - Buffer.byteLength(system + prompt));
       const answerPrompt = prompt + evidence;
       assertVoicePromptBudget(system, answerPrompt, limit);
-      await this.confirmStartCurrent(session);
+      await this.confirmStartCurrent(session, true);
       signal.throwIfAborted();
       onActivity?.({ kind: "reasoning", status: "running", message: "Preparing answer" });
       const answer = await complete(llm, { system, prompt: answerPrompt, maxTokens: 600, temperature: 0 });
-      await this.confirmStartCurrent(session);
+      await this.confirmStartCurrent(session, true);
       signal.throwIfAborted();
       const text = boundedVoiceAnswer(answer.text);
       if (!text) {
@@ -1054,7 +1054,7 @@ export class NovaService {
       };
     } catch (error) {
       if (scopeSignal.aborted || session !== this.session) throw error;
-      await this.confirmStartCurrent(session);
+      await this.confirmStartCurrent(session, true);
       scopeSignal.throwIfAborted();
       const text = deadline.aborted ? "Nova's investigation timed out. Retry or choose a faster reasoning model."
         : providerFailed ? "Nova could not answer. Check the reasoning provider in Settings and try again."

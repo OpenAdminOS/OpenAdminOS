@@ -332,8 +332,8 @@ export const REGISTER = [
     id: "nova-hosted-start-skips-context-check",
     path: "apps/desktop/electron/nova.ts",
     find: `      if (sessionContextDiffers(session, latest, activeTenantId, endpoint)) {
-        this.invalidate();
-        throw new Error(NOVA_SESSION_CONTEXT_CHANGED);
+        if (duringAnswer) this.invalidate();
+        throw new Error(duringAnswer ? NOVA_SESSION_CONTEXT_CHANGED : "Nova's tenant or provider changed. Start a new conversation.");
       }`,
     replace: "",
     tests: ["apps/desktop/electron/nova-notes-followups.test.ts"],
