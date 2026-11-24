@@ -85,6 +85,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Model checks for Ollama, LM Studio and Lemonade show why the endpoint could not be checked and how to retry after fixing it. Recovery names an environment variable only when it supplied the address.
 - Stable and nightly releases now stop if an installer, Linux package, or update manifest is missing or damaged.
 - Manual apt backfills now verify the downloaded Debian package against the stable release manifest before updating the repository.
 - Chat labels timestamps for cache data made stale by a write as "Before the last write (stale)".
