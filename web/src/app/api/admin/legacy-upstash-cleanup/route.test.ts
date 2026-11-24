@@ -42,6 +42,7 @@ const pages: Record<string, [string, string[]]> = {
     "oa:installs:day:2026-11-24:sample-agent",
     "oa:pending:installs:sample-agent",
     "oa:slugs",
+    "oa:private-website-key",
     "private-unprefixed-key",
   ]],
 };
@@ -51,11 +52,11 @@ const counts = {
   "oa:dedup:support-issue:*": 1,
   "oa:dedup:*": 1,
   "oa:rate:*": 1,
-  "other:another-project": 1,
+  other: 2,
   "oa:installs7d:*": 1,
   "oa:installs:day:*": 1,
-  "oa:slugs": 1,
-  "other:(unprefixed)": 1,
+  "oa:cache": 1,
+  "oa:other": 1,
 };
 
 for (const apply of [false, true]) {
@@ -91,10 +92,10 @@ for (const apply of [false, true]) {
       deleted: apply ? websiteCounts : {},
     });
     assert.deepEqual(scanCursors, ["0", "24"]);
-    assert.equal(deletedKeys.length, apply ? 7 : 0);
+    assert.equal(deletedKeys.length, apply ? 8 : 0);
     assert.equal(new Set(deletedKeys).size, deletedKeys.length);
     for (const sensitive of ["sample-agent", "report-hash", "legacy-install-id", "192.0.2.1",
-      "preserve-me", "private-unprefixed-key"]) {
+      "another-project", "preserve-me", "private-unprefixed-key", "oa:slugs", "private-website-key"]) {
       assert.equal(result.includes(sensitive), false);
     }
   });

@@ -129,9 +129,8 @@ function parseScan(value: unknown): [string, string[]] {
 }
 
 function groupKey(key: string): string {
-  if (key === "oa:slugs") return key;
+  if (!key.startsWith("oa:")) return "other";
+  if (key === "oa:slugs") return "oa:cache";
   const prefix = GROUP_PREFIXES.find((prefix) => key.startsWith(prefix));
-  if (prefix) return `${prefix}*`;
-  const separator = key.indexOf(":");
-  return separator > 0 ? `other:${key.slice(0, separator)}` : "other:(unprefixed)";
+  return prefix ? `${prefix}*` : "oa:other";
 }
