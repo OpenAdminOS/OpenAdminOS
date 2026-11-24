@@ -1,6 +1,10 @@
 import { Octokit } from "@octokit/rest";
 
+import type { InstallSnapshot } from "./store";
+
 const STATS_PATH = "stats/agents.json";
+const FLUSH_TRAILER = "OpenAdminOS-Install-Counts: ";
+const FLUSH_HISTORY_LIMIT = 100;
 
 let cachedOctokit: Octokit | null = null;
 
@@ -37,23 +41,36 @@ export interface AgentStatsFile {
 
 interface StatsFetchResult {
   file: AgentStatsFile;
-  /** GitHub blob SHA of the current file — required to PUT an update. */
   sha: string;
+  lastFlush: InstallSnapshot[];
 }
 
-/**
- * Read the current `stats/agents.json`. Throws if the file doesn't
- * exist or doesn't parse — both are signs of repo drift that we want
- * to alert on rather than silently overwrite.
- */
 export async function fetchStats(): Promise<StatsFetchResult> {
   const octokit = getOctokit();
   const { owner, repo, branch } = repoConfig();
+
+  // Check one page of stats-file commits. Legacy and rolling-window-only commits can sit above a receipt.
+  const { data: commits } = await octokit.repos.listCommits({
+    owner, repo, sha: branch, path: STATS_PATH, per_page: FLUSH_HISTORY_LIMIT,
+  });
+  const ref = commits[0]?.sha;
+  if (!ref) throw new Error(`No commit found for ${STATS_PATH}.`);
+
+  let lastFlush: InstallSnapshot[] = [];
+  for (const { commit: { message } } of commits) {
+    const trailer = message.split("\n").find((line) => line.startsWith(FLUSH_TRAILER));
+    if (trailer) {
+      lastFlush = JSON.parse(trailer.slice(FLUSH_TRAILER.length)) as InstallSnapshot[];
+      break;
+    }
+  }
+
+  // Pin the file read to the latest commit in that same history.
   const response = await octokit.repos.getContent({
     owner,
     repo,
     path: STATS_PATH,
-    ref: branch,
+    ref,
   });
   if (Array.isArray(response.data) || response.data.type !== "file") {
     throw new Error(`Expected ${STATS_PATH} to be a file, got: ${JSON.stringify(response.data)}`);
@@ -69,35 +86,30 @@ export async function fetchStats(): Promise<StatsFetchResult> {
   if (!parsed || typeof parsed !== "object" || !parsed.agents) {
     throw new Error(`${STATS_PATH} has no \`agents\` object.`);
   }
-  return { file: parsed, sha: response.data.sha };
+  return { file: parsed, sha: response.data.sha, lastFlush };
 }
 
-/**
- * Commit a new version of `stats/agents.json`. Idempotent w.r.t. the
- * SHA — if `main` moved since `fetchStats` returned, the PUT 409s and
- * the caller should re-fetch and retry.
- */
+/** Use the blob SHA to prevent overwriting a concurrent stats update. */
 export async function commitStats(input: {
   file: AgentStatsFile;
   sha: string;
   commitMessage: string;
+  snapshot: InstallSnapshot[];
 }): Promise<void> {
   const octokit = getOctokit();
   const { owner, repo, branch } = repoConfig();
   const content = Buffer.from(`${JSON.stringify(input.file, null, 2)}\n`, "utf8").toString(
     "base64",
   );
-  // No author / committer override — let GitHub attribute the commit to
-  // the PAT owner. Vercel's deployment-authorization check rejects any
-  // commit whose author email doesn't map to a GitHub account, so the
-  // previous `stats-bot@openadminos.com` placeholder caused production
-  // redeploys to bounce.
+  const message = input.snapshot.length
+    ? `${input.commitMessage}\n\n${FLUSH_TRAILER}${JSON.stringify(input.snapshot)}`
+    : input.commitMessage;
   await octokit.repos.createOrUpdateFileContents({
     owner,
     repo,
     path: STATS_PATH,
     branch,
-    message: input.commitMessage,
+    message,
     content,
     sha: input.sha,
   });

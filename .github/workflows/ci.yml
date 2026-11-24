@@ -3,11 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'web/**'
   pull_request:
-    paths-ignore:
-      - 'web/**'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -53,7 +49,9 @@ jobs:
           key: msgraph-skill-${{ env.OPENAGENTS_QA_SKILL_REF }}
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix web ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run typecheck

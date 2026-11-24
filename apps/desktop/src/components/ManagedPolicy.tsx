@@ -97,6 +97,9 @@ function valueText(policy: ManagedPolicyStatus, key: ManagedPolicySettingKey, re
     }
     case "skipFirstRunScan":
       return values.skipFirstRunScan ? POLICY_COPY.yes : POLICY_COPY.no;
+    case "automaticNetworkRequests":
+    case "registryInstallCounts":
+      return values[key] === "off" ? "Off" : "On";
     case "novaVoiceModes":
       return values.novaVoiceModes?.length ? values.novaVoiceModes.map(POLICY_COPY.novaVoiceMode).join(", ") : POLICY_COPY.none;
     case "novaInstructions":

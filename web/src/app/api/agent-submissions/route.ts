@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { load as parseYaml } from "js-yaml";
 
-import { getRedis, keys } from "~/lib/stats/redis";
+import { statsUnavailable } from "~/lib/stats/responses";
+import { getStatsStore, StatsStorageError } from "~/lib/stats/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +67,9 @@ interface ServerSkill {
 }
 
 export async function POST(req: Request) {
+  const store = getStatsStore();
+  if (!store) return statsUnavailable(false);
+
   const raw = await req.text();
   if (Buffer.byteLength(raw, "utf8") > MAX_BODY_BYTES) {
     return jsonError(413, "Submission is too large.");
@@ -84,8 +88,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const rateLimited = await applySubmissionRateLimit(clientIp(req));
-    if (rateLimited) {
+    const allowed = await store.rateLimitHit("agent-submit", req, SUBMISSION_RATE_WINDOW_SECONDS, SUBMISSION_RATE_MAX_PER_WINDOW);
+    if (!allowed) {
       return NextResponse.json(
         { error: "Rate limited. Try again later." },
         {
@@ -102,6 +106,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[agent-submissions] failed:", message);
+    if (error instanceof StatsStorageError) return statsUnavailable(true);
     return jsonError(500, "Failed to create GitHub issue.");
   }
 }
@@ -236,17 +241,6 @@ async function findExistingSubmissionIssue(
     per_page: 100,
   });
   return response.data.find((issue) => issue.title === input.title);
-}
-
-async function applySubmissionRateLimit(ip: string): Promise<boolean> {
-  const redis = getRedis();
-  const bucket = Math.floor(Date.now() / 1000 / SUBMISSION_RATE_WINDOW_SECONDS);
-  const rateKey = keys.agentSubmissionRate(ip, bucket);
-  const count = await redis.incr(rateKey);
-  if (count === 1) {
-    await redis.expire(rateKey, SUBMISSION_RATE_WINDOW_SECONDS);
-  }
-  return count > SUBMISSION_RATE_MAX_PER_WINDOW;
 }
 
 function isGithubValidationError(error: unknown): boolean {
@@ -527,14 +521,6 @@ function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required env var: ${name}.`);
   return value;
-}
-
-function clientIp(req: Request): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]?.trim() ?? "unknown";
-  const real = req.headers.get("x-real-ip");
-  if (real) return real;
-  return "unknown";
 }
 
 function jsonError(status: number, message: string) {

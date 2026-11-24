@@ -1742,8 +1742,8 @@ Distribution semantics:
 
 Cache lifecycle:
 
-- The first registry refresh starts in the background when the desktop host initializes. Browsing Chat does not wait for network, MSAL, or provider detection.
-- On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
+- With Automatic network requests on, the first registry refresh starts in the background when the desktop host initializes. Browsing Chat does not wait for network, MSAL, or provider detection.
+- While automatic registry refresh is enabled, refresh `index.json` on launch, every six hours and on focus after an hour. Compare to cached per-agent versions and surface per-agent update badges.
 - Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
 - Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must retain a valid revision, and all cached entries pass the same schema and manifest-metadata validation as fetched entries. Legacy signature metadata is ignored.
 - Failed refresh is silent: keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
@@ -1958,31 +1958,117 @@ and `EBUSY` failures with bounded backoff (seven attempts, 1.26 seconds of waiti
 The previous destination remains intact throughout; persistent errors still surface.
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
-error-reporting telemetry. Packaged production builds may send a minimal public
-registry install count event when a public agent is installed: agent slug, app
-version, OS platform, and a yearly per-agent SHA-256 hash derived from a random
-local install ID. Users can disable registry install counts in Settings. The
-stats endpoint may use IP addresses for short-lived rate limiting. These events
-must never include tenant identifiers, user identifiers, prompts, run results,
-or Microsoft Graph data.
+error-reporting telemetry. Packaged builds count public registry installs by
+default. An event contains only the agent slug, app version, and OS platform.
+Before sending, the desktop records the attempt for that slug and UTC year in
+local state. A failed or interrupted request still uses that year's attempt.
+This can undercount installs. Existing installs are not reported retroactively.
+Agent Hub uses bundled counts.
+
+The website stores aggregate install counts by agent slug and UTC day in the
+shared Supabase project in Frankfurt (`eu-central-1`). The hourly cron preserves
+published lifetime totals in `stats/agents.json` and sums the current UTC day
+and the six preceding days for the rolling total. Commit trailers preserve
+only per-agent, per-UTC-day aggregate totals. They contain no install or user
+identifiers. The cron checks the latest 100 commits that changed
+`stats/agents.json` for the newest trailer so it can acknowledge counts after
+GitHub accepts a commit, including on retry. Fully flushed daily rows are kept
+for eight full UTC days after the recorded day ends and can be purged from day
+nine onward. The install endpoint ignores legacy install IDs. The
+desktop removes its former identifier and usage telemetry preference on upgrade.
+
+The website caches the GitHub agent directory list for an hour through Next.js.
+Install, agent submission and support issue rate limiting use fixed windows.
+Each scope stores a separate HMAC-SHA256 of its scope and the client IP until
+the window expires. The database receives no raw IP addresses. The server
+reads Vercel's `x-vercel-forwarded-for` first, then `x-real-ip`. It uses
+`STATS_IP_HASH_SECRET` when set. Otherwise it derives
+the HMAC key from `SUPABASE_SECRET_KEY` with the fixed label
+`openadminos:stats:ip-hash:v1`. Support deduplication claims expire after one
+day. The website's `service_role` can execute explicitly granted functions in
+`openadminos` and has no direct access to its tables. The role is project-wide
+in the shared Supabase project. The routes return HTTP 503 when the stats
+client cannot initialize from `SUPABASE_URL` and `SUPABASE_SECRET_KEY`.
+
+#### Website stats migration
+
+1. Apply the SQL in `web/supabase/migrations` to the shared Supabase project as
+   `postgres`. Default privileges apply to the creator role and are scoped to
+   the `openadminos` schema, so other apps in the shared project are not
+   affected. PostgreSQL grants `PUBLIC` execute on new functions by default and
+   that cannot be removed for one schema, so every function added to this
+   schema later must revoke execute from `public` explicitly. Never grant
+   `usage` on the schema to `anon` or `authenticated`. Add `openadminos` to the Data
+   API's Exposed schemas list and confirm the website's production database URL
+   and server-only secret are configured.
+2. Create a client with the publishable (anon) key and no signed-in session.
+   Call `supabase.schema("openadminos").rpc("health")` and confirm the Data API
+   rejects the request before proceeding.
+3. Pause legacy install intake for the final legacy flush and cutover. Confirm
+   the last flush succeeded so all pending counts are in the GitHub lifetime
+   totals before deploying the new website. The new store starts the rolling
+   total from its own UTC daily rows.
+4. Check that `GET /api/health` returns HTTP 200 with `{"ok":true}`. POST a valid
+   public agent slug, app version, and platform to `/api/install` without an
+   install ID. Confirm HTTP 200 with `{"counted":true}` and verify that the next
+   flush preserves lifetime totals and adds the test install.
+5. Send an authenticated `POST /api/admin/legacy-upstash-cleanup` with the cron
+   bearer secret. Review the dry-run counts. Send the same request with
+   `?apply=1` to remove the legacy website keys. For either mode, repeat with
+   `cursor=<nextCursor>` until `complete` is true. Each response counts the
+   current invocation. Run a final dry run from cursor zero to verify no
+   website keys remain.
+6. Remove the legacy REST URL and token from the website environment and remove
+   the temporary route. Delete the Upstash account after confirming its other
+   projects, if any, have been migrated.
+
+Settings > Privacy offers Automatic network requests, on by default. Turning it
+off stops background app update checks, startup, focus and periodic registry
+refreshes, automatic documentation index and embedding model downloads, and
+install-count pings. In-flight automatic registry refreshes and documentation
+downloads are cancelled. Manual app update checks, registry refreshes and
+documentation index installations remain available. Schedules, tenant cache
+refreshes, connector deliveries and model checks you set up still run.
+The separate registry install counts and documentation auto-install
+preferences also default to on and are retained when automatic requests are
+paused. In `policy.json`, `automaticNetworkRequests` and `registryInstallCounts`
+take `"on"` or `"off"`. A locked value overrides the user's saved preference.
+An unlocked value is the default until the user saves a choice.
 
 User-initiated support bundles are a separate explicit action, not telemetry.
 The Settings → About action and contextual failure-state actions open an in-app
-support form; issue reporting is not permanent sidebar navigation. OpenAdminOS may export a local diagnostics
-JSON file only after the admin chooses that option. After the admin checks an
-explicit public-issue confirmation and clicks submit, the desktop app posts a
-bounded support report to the OpenAdminOS web API; the server creates the public
-GitHub issue with a repo-scoped GitHub token that is never shipped to the
-desktop app. The endpoint owns the repo mapping, applies server-side
-redaction, enforces request-size limits, rate-limits by IP, and deduplicates
-matching recent reports. The optional diagnostics JSON is bounded to
-app/build/OS, provider status categories, registry/scheduler/cache health,
-aggregate run counts, and hashed error categories. It must not include tenant
-identifiers, account usernames, tenant domains, prompts, LLM output, Graph
-response bodies, run reports, raw run logs, SQLite databases, screenshots, MSAL
-tokens, provider credentials, or keychain values. No support report is
-submitted automatically after a crash or failure, and no screenshot/session
-replay capture is part of this flow. The desktop and support endpoint both run
+support form; issue reporting is not permanent sidebar navigation. The form
+previews the exact public GitHub title and Markdown body on the device.
+Diagnostics are selected by default. With diagnostics selected, the admin must
+open the preview before submitting. Editing report text or toggling
+diagnostics requires a fresh preview. The app sends the same diagnostics
+snapshot the admin reviewed, and the endpoint verifies that the formatted issue
+matches. If formatting differs or the diagnostics are too large, the app clears
+the preview and offers recovery by updating OpenAdminOS or clearing Include
+diagnostics. A duplicate report tells the admin to look for it in recent GitHub
+issues. A successful submission consumes the reviewed snapshot. The admin can
+also export a local diagnostics JSON file.
+After explicit public-issue confirmation and submission, the desktop app posts
+a bounded report to the OpenAdminOS web API. The server creates the public
+GitHub issue with a repo-scoped token it keeps server-side. The endpoint
+applies redaction, limits request size and frequency, and deduplicates recent
+reports. The optional diagnostics JSON covers app, build and OS details,
+provider status, registry, scheduler and cache health, and a run summary.
+Diagnostics schema version 2 shows counts such as cached rows, pages, connected
+organizations, and runs as ranges. Activity times are age ranges relative to
+the report, upcoming due times are marked future, and the report date is a UTC
+calendar date. Error details are limited to categories. An agent is identified
+by its slug when its installation and the official registry confirm it is
+public. Other agents are labeled local. The diagnostics omit run identifiers
+and report text lengths. The server rebuilds diagnostics from the permitted
+fields and values for both schemas. It buckets counts, including numeric
+strings, and strips exact activity timestamps and diagnostic hashes from older
+clients. Diagnostics must not
+include tenant identifiers, account usernames, tenant domains, prompts, LLM
+output, Graph response bodies, run reports, raw run logs, SQLite databases,
+screenshots, MSAL tokens, provider credentials, or keychain values. No support
+report is submitted automatically after a crash or failure, and no
+screenshot/session replay capture is part of this flow. The desktop and support endpoint both run
 a deterministic redaction pass over support issue free text before upload and
 public issue creation. The pass catches common secret shapes such as provider
 API keys, GitHub tokens, AWS/Google/Stripe/npm/Vercel tokens, JWTs, private-key
@@ -2361,10 +2447,12 @@ that cannot embed queries never fetches the index. Making a local runtime
 a hard product requirement was considered and deliberately deferred: the
 positioning is local-first by default, not local-only.
 
-Documentation grounding has two prerequisites and both install themselves:
-the versioned index (downloaded from the published release into userData)
-and the embedding model it was built with (`nomic-embed-text`, pulled
-through the local Ollama). One Settings switch governs both. The app never
+Documentation grounding has two prerequisites: the versioned index (downloaded
+from the published release into userData) and the embedding model it was built
+with (`nomic-embed-text`, pulled through the local Ollama). The Privacy setting
+Automatically install the documentation index governs both at launch and depends
+on Automatic network requests. Users can download or import an index manually
+from Privacy. The app never
 installs Ollama itself; when Ollama is absent the model pull is skipped
 and Settings names the missing prerequisite instead of showing grounding
 as available. Embedding always runs against loopback, so questions never
@@ -3659,7 +3747,7 @@ These were debated and decided. Don't relitigate without explicit reason.
 | Write-mode agent confirmation | Always pause for diff, every time | Trust requires no exceptions |
 | Activity stream default | Plain language with raw-log toggle | Admins want comprehension first, debug detail on demand |
 | Default LLM provider | Ollama (local) | Trust positioning starts with the default |
-| Tenant/prompt/run/error telemetry default | Off | Local-first means local-first; registry install counts are a separate aggregate counter with a Settings opt-out |
+| Registry install counts | On | Settings > Privacy can disable them individually or with Automatic network requests |
 | Update model for agents | Pin by default, explicit upgrade | Avoids surprise behavior changes mid-shift |
 | Tenant scope expiry behavior | Block all agent runs until re-auth | No partial-trust states |
 | Multi-tenant switcher | Color-coded, search-first, scope-guarded | MSPs may manage 100+ tenants |
@@ -4199,7 +4287,7 @@ These must exist and work well before any public release.
 - Manual agent runs open a preflight review before queueing. It shows the active organization, the services the agent reads, provider residency, model, mode, and Graph scopes. With no organization it names the services the agent needs with Connect and Choose an organization, and starts only an agent that calls no service API (updated 2026-11-09; it no longer opens setup first). It blocks when a needed service is not connected, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
 - Provider trust messaging is scoped to the surface: overview/settings/chat/status surfaces use the current active tenant/provider/default model, while queued run reports use the run's pinned tenant, provider, and model rather than the current global tenant/provider selection.
 - Settings -> About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, menu bar launch state, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
-- Support issue reporting is visible from failed-run remediation cards and Settings → About, not as permanent sidebar navigation. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
+- Support issue reporting is visible from failed-run remediation cards and Settings → About, not as permanent sidebar navigation. It previews the public title and body, requires the preview when diagnostics are included, and creates a public GitHub issue only after explicit confirmation; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status) and configurable
   retention for old eligible records
@@ -4308,7 +4396,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `19-fleet.html` | v0.5 multi-tenant fleet drift status and per-tenant write confirmation | ✅ Done |
 | `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
 | `22-office.html` | Office room, original persona avatars, and assignment briefing | ✅ Done |
-| `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
+| `21-telemetry.html` | Historical v0.5 Privacy design | Retired |
 | `27-calm-shell.html` | Calm shell desktop redesign | ✅ Done |
 | `28-logo-explorations.html` | Logo concepts; concept A (oa ligature) shipped | ✅ Done |
 | `29-first-run.html` | Two-choice welcome, pilot mode, and connected-stage summary | ✅ Done |
@@ -4381,8 +4469,6 @@ v0.5 adds four capability areas on top of the drift timeline; each maps to an ac
 **Retrieval.** Local documentation grounding ported from the model bench's `retrieve.mjs`: a locally installed index (Intune/Entra/Defender docs, matched to one embedding model) is cosine-ranked against the question, with source-file provenance on every hit. Query embedding hits a loopback embedding server and refuses any non-loopback endpoint, so a local provider never sends the question off-device. A missing index is a designed "not documentation-grounded yet" state, not an error. Index distribution uses GitHub release assets on a dedicated `docs-index-<date>` tag: release assets allow files just under 2 GiB and are downloaded with no bandwidth limit or charge, which suits a 264 MB index, while the marketing host caps static uploads at 100 MB on its lower tier and bills egress on blob storage. The index ships on its own tag so it can be rebuilt on the documentation's cadence without cutting an app release, and `scripts/publish-docs-index.mjs` generates the SHA-256 manifest and creates the release. Downloads are hash-verified and staged before replacing a working index. Machines without network access install the same files from a folder.
 
 Query embedding reuses the Ollama instance the app already manages (`nomic-embed-text`, 768 dimensions, matching the index) rather than supervising a second embedding server, and refuses non-loopback endpoints.
-
-**Opt-in usage telemetry.** Off by default. Counts and versions only: a resettable anonymous install id, app version, OS/arch, whether the active provider is local or hosted, and bucketed (never exact) tenant/agent/run counts, plus whether a retrieval index is installed. Never tenant content, tenant ids, prompts, run results, or error text. The Privacy preview shows the exact JSON, and the send path serializes that same payload, so preview and wire can never diverge. Nothing is sent unless the user opts in AND the build has a collector URL configured (empty by default).
 
 **Fleet.** For installs with two or more tenants, a Fleet view aggregates each tenant's active baseline, drift counts, and last capture time, filterable by tenant group. Multi-tenant runs keep per-tenant confirmation for writes.
 

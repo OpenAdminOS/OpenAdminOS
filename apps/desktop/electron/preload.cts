@@ -10,6 +10,7 @@ import type {
   SaveTextFileArgs,
   SetAzureOpenAIProviderConfigInput,
   SupportBundleInput,
+  SupportIssuePreviewInput,
   SupportIssueSubmissionInput,
   StartRunOptions,
   UpdateChannel,
@@ -56,6 +57,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
   exportSupportBundle: (input: SupportBundleInput) =>
     ipcRenderer.invoke("openadminos:export-support-bundle", input),
+  previewSupportIssue: (input: SupportIssuePreviewInput) =>
+    ipcRenderer.invoke("openadminos:preview-support-issue", input),
   submitSupportIssue: (input: SupportIssueSubmissionInput) =>
     ipcRenderer.invoke("openadminos:submit-support-issue", input),
   writeClipboardText: (text: string) =>
@@ -77,6 +80,8 @@ const api: OpenAdminOSApi = {
   refreshRegistry: () => ipcRenderer.invoke("openadminos:refresh-registry"),
   setRegistrySource: (url: string, options?: { confirmExternalSource?: boolean }) =>
     ipcRenderer.invoke("openadminos:set-registry-source", url, options),
+  setAutomaticNetworkRequestsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-automatic-network-requests-enabled", enabled),
   setRegistryInstallCountsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-registry-install-counts-enabled", enabled),
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
@@ -296,12 +301,6 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:start-baseline-rollback", input),
   getFleetDriftStatus: (input) =>
     ipcRenderer.invoke("openadminos:get-fleet-drift-status", input),
-  getUsageTelemetryPreview: () =>
-    ipcRenderer.invoke("openadminos:get-usage-telemetry-preview"),
-  setUsageTelemetryEnabled: (enabled: boolean) =>
-    ipcRenderer.invoke("openadminos:set-usage-telemetry-enabled", enabled),
-  sendUsageTelemetryTest: () =>
-    ipcRenderer.invoke("openadminos:send-usage-telemetry-test"),
   getRetrievalStatus: () =>
     ipcRenderer.invoke("openadminos:get-retrieval-status"),
   refreshRetrievalIndex: () =>

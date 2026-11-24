@@ -14,15 +14,17 @@
     "start": "next start",
     "pretypecheck": "npm run sync-stats",
     "typecheck": "tsc --noEmit",
-    "landing-shots": "node ./scripts/landing-shots.mjs"
+    "landing-shots": "node ./scripts/landing-shots.mjs",
+    "test": "tsx --tsconfig tsconfig.json --test \"src/**/*.test.ts\"",
+    "pretest": "npm run sync-stats"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@fontsource-variable/newsreader": "^5.3.0",
     "@octokit/rest": "^21.1.1",
+    "@supabase/supabase-js": "2.119.2",
     "@t3-oss/env-nextjs": "^0.13.11",
-    "@upstash/redis": "^1.34.4",
     "js-yaml": "^4.1.1",
     "marked": "^18.1.1",
     "next": "^16.2.6",
@@ -38,6 +40,7 @@
     "@types/react-dom": "^19.0.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^4.0.15",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   },
   "ct3aMetadata": {
