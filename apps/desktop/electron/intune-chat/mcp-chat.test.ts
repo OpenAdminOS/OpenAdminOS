@@ -1353,7 +1353,7 @@ describe("chat tool use status", () => {
 
 it("Chat keeps MCP tools when Sophos Central context fails", async () => {
   await withStore(async (store) => {
-    const mcp = mcpContext([docsTool]);
+    const mcp = mcpContext([]);
     const service = new IntuneChatService({
       sophosChatContext: async () => { throw new Error("Fixture context unavailable"); },
       mcpChatContext: async () => mcp,

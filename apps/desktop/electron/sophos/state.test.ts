@@ -22,6 +22,12 @@ const other = { ...tenant, id: "22222222-2222-2222-2222-222222222222", displayNa
 const organizationId = `org-${tenant.id}`;
 const endpointId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 test("Sophos tools and confirmed writes stay in their organization and records never include credentials", async () => {
   const directory = await mkdtemp(join(tmpdir(), "openadminos-sophos-"));
   const filePath = join(directory, "state.json");
@@ -105,8 +111,8 @@ test("Sophos tools and confirmed writes stay in their organization and records n
       () => store.listSophosTargets(organizationId, ""),
       () => store.prepareSophosChange({ organizationId, kind: "isolate", targetIds: [endpointId], comment: "Investigate" }),
     ]) {
-      const started = Promise.withResolvers<void>();
-      const resume = Promise.withResolvers<void>();
+      const started = deferred();
+      const resume = deferred();
       blockedRead = { started: started.resolve, resume: resume.promise };
       const pending = read();
       await started.promise;
