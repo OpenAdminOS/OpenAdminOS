@@ -61,7 +61,7 @@ import {
   type WebContents,
 } from "electron";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease, tmpdir } from "node:os";
@@ -98,11 +98,17 @@ import {
   windowsTaskState,
 } from "./scheduler-registration.js";
 import {
+  bucketSupportAge,
   bucketSupportCount,
   formatSupportIssue,
+  redactSupportPublicText,
   supportIssuePreviewDigest,
 } from "./support-issue-format.js";
-import { redactSupportPublicText } from "./support-secret-redaction.js";
+import { publicSupportAgentSlugs } from "./support-agent-slugs.js";
+import {
+  SUPPORT_DIAGNOSTICS_TOO_LARGE,
+  SUPPORT_PREVIEW_MISMATCH,
+} from "../src/shared/support-issue-errors.js";
 import type {
   ConnectSplashtopInput,
   PrepareSplashtopChangeInput,
@@ -566,6 +572,7 @@ function seedReportIssueSmokeState(userDataDir: string): void {
   if (!isReportIssueSmokeLaunch) return;
   mkdirSync(userDataDir, { recursive: true });
   const now = new Date().toISOString();
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
   writeFileSync(
     join(userDataDir, "state.json"),
     JSON.stringify(
@@ -592,13 +599,27 @@ function seedReportIssueSmokeState(userDataDir: string): void {
           {
             id: "report-smoke-run",
             agentSlug: "report-smoke-agent",
+            tenantId: "report-smoke-tenant",
             status: "failed",
             queuedAt: now,
             startedAt: now,
             finishedAt: now,
             providerId: "ollama",
-            trigger: "manual",
+            trigger: "schedule",
             error: "Ollama not reachable for report smoke.",
+            steps: [],
+            logs: [],
+          },
+          {
+            id: "report-smoke-completed-run",
+            agentSlug: "report-smoke-agent",
+            tenantId: "report-smoke-tenant",
+            status: "completed",
+            queuedAt: twoDaysAgo,
+            startedAt: twoDaysAgo,
+            finishedAt: twoDaysAgo,
+            providerId: "ollama",
+            trigger: "schedule",
             steps: [],
             logs: [],
           },
@@ -1148,10 +1169,49 @@ async function runReportIssueSmoke(): Promise<void> {
   if (!window || window.isDestroyed()) {
     throw new Error("Report issue smoke window was not available.");
   }
-  const result = await window.webContents.executeJavaScript(
-    `(${reportIssueSmokeScript.toString()})()`,
-    true,
-  );
+  const step = (phase: ReportIssueSmokePhase): Promise<Record<string, unknown>> =>
+    window.webContents.executeJavaScript(
+      `(${reportIssueSmokeScript.toString()})(${JSON.stringify(phase)})`,
+      true,
+    );
+  const captureOut = process.env.OPENADMINOS_REPORT_SMOKE_SCREENSHOTS;
+  if (captureOut) window.webContents.setBackgroundThrottling(false);
+  const capture = async (filename: string) => {
+    if (!captureOut) return;
+    await window.webContents.executeJavaScript("document.fonts.ready.then(() => true)");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await writeWindowScreenshot(window, join(captureOut, filename));
+  };
+  await step("prepare");
+  if (captureOut) {
+    // The first capture on Xvfb can return a frame from before the modal opened.
+    await window.webContents.capturePage();
+  }
+  await step("mismatch");
+  await capture("after-preview-error.png");
+  await step("duplicate-and-size");
+  await step("review");
+  if (captureOut) {
+    await step("show-preview");
+    await capture("after-public-preview.png");
+    await step("show-diagnostics");
+    await capture("after-preview-diagnostics.png");
+  }
+  const reviewed = await supportIssuePreviews.get(window.webContents);
+  if (!reviewed) throw new Error("The smoke report did not prepare a fresh preview.");
+  const result = await step("submit");
+  try {
+    await submitSupportIssue(window.webContents, {
+      ...JSON.parse(reviewed.input),
+      confirmPublic: true,
+      previewId: reviewed.preview.previewId,
+    });
+    throw new Error("The reviewed support report was accepted a second time.");
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "Open the current public issue preview before submitting.") {
+      throw error;
+    }
+  }
   if (!capturedExternalUrlFile) {
     throw new Error("OPENADMINOS_CAPTURE_EXTERNAL_URL is required for report smoke.");
   }
@@ -1471,6 +1531,10 @@ async function captureScreenshotPng(
     throw new Error(`Invalid screenshot output path: ${relativePath}`);
   }
   const outputPath = join(screenshotCaptureOutDir, relativePath);
+  await writeWindowScreenshot(window, outputPath);
+}
+
+async function writeWindowScreenshot(window: BrowserWindow, outputPath: string): Promise<void> {
   mkdirSync(dirname(outputPath), { recursive: true });
   // Chromium can return the previous compositor frame immediately after a
   // client-side route change under Xvfb. Force and discard one frame so the
@@ -2301,7 +2365,16 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   };
 }
 
-async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
+type ReportIssueSmokePhase =
+  | "prepare"
+  | "show-diagnostics"
+  | "show-preview"
+  | "mismatch"
+  | "duplicate-and-size"
+  | "review"
+  | "submit";
+
+async function reportIssueSmokeScript(phase: ReportIssueSmokePhase): Promise<Record<string, unknown>> {
   const waitFor = async (
     predicate: () => boolean,
     label: string,
@@ -2377,52 +2450,106 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
     await waitFor(() => checkbox.checked, `modal checkbox ${index} checked`);
   };
 
-  await waitFor(
-    () => bodyText().includes("Run an agent with /"),
-    "initial Chat route",
-  );
-  location.hash = "/settings/about";
-  await waitFor(() => location.hash === "#/settings/about", "About settings hash");
-  await waitFor(
-    () =>
-      bodyText().includes("Settings") &&
-      bodyText().includes("Readiness diagnostics"),
-    "About settings",
-  );
-  await clickButton("Report a problem");
-  await waitFor(
-    () =>
-      bodyText().includes("Submit a public GitHub issue") &&
-      bodyText().includes("This creates a public GitHub issue") &&
-      bodyText().includes("repo-scoped token"),
-    "report issue modal",
-  );
-  await setInput("Smoke report issue");
-  await setTextarea(0, "The report issue smoke flow should submit a public GitHub issue.");
-  await setTextarea(
-    1,
-    "1. Open Settings and select About.\n2. Select Create issue and fill the modal.\n3. Confirm public issue creation.",
-  );
-  await setTextarea(
-    2,
-    "A public GitHub issue is created after explicit confirmation.",
-  );
-  await setTextarea(3, "The public issue was not created.");
-  await clickButton("Export diagnostics JSON");
-  await waitFor(
-    () => bodyText().includes("Diagnostics file exported locally"),
-    "diagnostics export notice",
-  );
-  await clickCheckbox(1);
-  if (!findButton("Submit public issue")?.disabled) {
-    throw new Error("Support issue submission must wait for the diagnostics preview.");
-  }
-  await clickButton("Preview public issue");
   const previewRegion = '[aria-label="Public issue preview"]';
-  await waitFor(
-    () => document.querySelectorAll(`${previewRegion} pre`).length === 2,
-    "public issue preview",
-  );
+  const submitLabel = "Submit public issue";
+  const openPreview = async () => {
+    await clickButton("Preview public issue");
+    await waitFor(
+      () => document.querySelectorAll(`${previewRegion} pre`).length === 2,
+      "public issue preview",
+    );
+  };
+  const expectError = async (message: string, previewRemains: boolean) => {
+    await waitFor(
+      () => bodyText().includes(message) &&
+        findButton(submitLabel)?.disabled === !previewRemains,
+      message,
+    );
+    if (Boolean(document.querySelector(previewRegion)) !== previewRemains) {
+      throw new Error("The support issue preview remained in the wrong state after rejection.");
+    }
+  };
+
+  if (phase === "prepare") {
+    await waitFor(
+      () => bodyText().includes("Run an agent with /"),
+      "initial Chat route",
+    );
+    location.hash = "/settings/about";
+    await waitFor(() => location.hash === "#/settings/about", "About settings hash");
+    await waitFor(
+      () =>
+        bodyText().includes("Settings") &&
+        bodyText().includes("Readiness diagnostics"),
+      "About settings",
+    );
+    await clickButton("Report a problem");
+    await waitFor(
+      () =>
+        bodyText().includes("Submit a public GitHub issue") &&
+        bodyText().includes("This creates a public GitHub issue") &&
+        bodyText().includes("repo-scoped token"),
+      "report issue modal",
+    );
+    await setInput("Smoke report issue");
+    await setTextarea(0, "The report issue smoke flow should submit a public GitHub issue.");
+    await setTextarea(
+      1,
+      "1. Open Settings and select About.\n2. Select Report a problem and fill the form.\n3. Confirm public issue creation.",
+    );
+    await setTextarea(
+      2,
+      "A public GitHub issue is created after explicit confirmation.",
+    );
+    await setTextarea(3, "The public issue was not created.");
+    await clickButton("Export diagnostics JSON");
+    await waitFor(
+      () => bodyText().includes("Diagnostics file exported locally"),
+      "diagnostics export notice",
+    );
+    await clickCheckbox(1);
+    if (!findButton("Submit public issue")?.disabled) {
+      throw new Error("Support issue submission must wait for the diagnostics preview.");
+    }
+    await openPreview();
+    return {};
+  }
+  if (phase === "show-diagnostics" || phase === "show-preview") {
+    const region = document.querySelector(previewRegion);
+    if (!region) throw new Error("The smoke report preview was missing during capture.");
+    if (phase === "show-preview") {
+      region.scrollTop = 0;
+      return {};
+    }
+    const text = region.querySelectorAll("pre")[1]?.firstChild;
+    const marker = '"lastRunAt"';
+    const offset = text?.textContent?.indexOf(marker) ?? -1;
+    if (!(text instanceof Text) || offset < 0) {
+      throw new Error("The preview did not show cache schedule diagnostics.");
+    }
+    const range = document.createRange();
+    range.setStart(text, offset);
+    range.setEnd(text, offset + marker.length);
+    region.scrollTop += range.getBoundingClientRect().top - region.getBoundingClientRect().top - 12;
+    return {};
+  }
+  if (phase === "mismatch") {
+    await clickButton(submitLabel);
+    await expectError("The support server formatted the report differently.", false);
+    return {};
+  }
+  if (phase === "duplicate-and-size") {
+    await openPreview();
+    await clickButton(submitLabel);
+    await expectError("A matching report was already submitted.", true);
+    await clickButton(submitLabel);
+    await expectError("The diagnostics are too large to submit.", false);
+    return {};
+  }
+  if (phase === "review") {
+    await openPreview();
+    return {};
+  }
   const [previewTitle, previewBody] = document.querySelectorAll(`${previewRegion} pre`);
   await clickButton("Submit public issue");
   await waitFor(
@@ -2819,8 +2946,8 @@ async function exportSupportBundle(
   input: SupportBundleInput,
 ): Promise<{ canceled: boolean; filePath?: string }> {
   if (supportBundleExportFile) {
-    const bundle = await createSupportBundle(input);
-    await writeFile(supportBundleExportFile, JSON.stringify(bundle, null, 2), "utf8");
+    const { diagnostics } = await createSupportBundle(input);
+    await writeFile(supportBundleExportFile, JSON.stringify(diagnostics, null, 2), "utf8");
     return { canceled: false, filePath: supportBundleExportFile };
   }
 
@@ -2843,17 +2970,19 @@ async function exportSupportBundle(
     return { canceled: true };
   }
 
-  const bundle = await createSupportBundle(input);
-  await writeFile(result.filePath, JSON.stringify(bundle, null, 2), "utf8");
+  const { diagnostics } = await createSupportBundle(input);
+  await writeFile(result.filePath, JSON.stringify(diagnostics, null, 2), "utf8");
   return { canceled: false, filePath: result.filePath };
 }
 
+const submittingSupportIssues = new WeakSet<WebContents>();
 const supportIssuePreviews = new WeakMap<
   WebContents,
   ReturnType<typeof prepareSupportIssue>
 >();
 
 async function prepareSupportIssue(input: SupportIssuePreviewInput) {
+  const bundle = input.includeDiagnostics ? await createSupportBundle(input) : undefined;
   const payload = {
     issue: {
       title: input.title,
@@ -2864,9 +2993,9 @@ async function prepareSupportIssue(input: SupportIssuePreviewInput) {
       source: input.source ?? "sidebar",
       appVersion: app.getVersion(),
     },
-    diagnostics: input.includeDiagnostics ? await createSupportBundle(input) : undefined,
+    diagnostics: bundle?.diagnostics,
   };
-  const formatted = formatSupportIssue(payload);
+  const formatted = formatSupportIssue(payload, bundle?.publicAgentSlugs);
   if ("error" in formatted) throw new Error(formatted.error);
 
   const { title, body } = formatted.payload;
@@ -2895,24 +3024,52 @@ async function submitSupportIssue(
     throw new Error("Support issue endpoint is not configured in this build.");
   }
 
-  const reviewed = previewId ? await supportIssuePreviews.get(sender) : undefined;
-  if (
-    (input.includeDiagnostics || previewId) &&
-    (reviewed?.preview.previewId !== previewId || reviewed?.input !== JSON.stringify(input))
-  ) {
-    throw new Error("Open the current public issue preview before submitting.");
+  if (submittingSupportIssues.has(sender)) {
+    throw new Error("A support report is already being submitted. Wait for the result.");
   }
-  const { payload, preview } = reviewed ?? (await prepareSupportIssue(input));
-  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/support-issues`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+
+  submittingSupportIssues.add(sender);
+  try {
+    const pending = previewId ? supportIssuePreviews.get(sender) : undefined;
+    const reviewed = await pending;
+    if (
+      (input.includeDiagnostics || previewId) &&
+      (pending !== supportIssuePreviews.get(sender) ||
+        reviewed?.preview.previewId !== previewId ||
+        reviewed?.input !== JSON.stringify(input))
+    ) {
+      throw new Error("Open the current public issue preview before submitting.");
+    }
+    const { payload, preview } = reviewed ?? (await prepareSupportIssue(input));
+    const result = await postSupportIssue(baseUrl, {
       confirmPublic,
       ...payload,
       ...(reviewed ? { previewDigest: supportIssuePreviewDigest(preview.title, preview.body) } : {}),
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
+    });
+    if (pending && pending === supportIssuePreviews.get(sender)) {
+      supportIssuePreviews.delete(sender);
+    }
+    return result;
+  } finally {
+    submittingSupportIssues.delete(sender);
+  }
+}
+
+async function postSupportIssue(baseUrl: string, body: unknown): Promise<SupportIssueSubmissionResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/support-issues`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (error) {
+    const problem = error instanceof Error && error.name === "TimeoutError"
+      ? "The support server did not respond in time."
+      : "OpenAdminOS could not reach the support server.";
+    throw new Error(`${problem} Check recent GitHub issues before trying again.`);
+  }
 
   let parsed: unknown = null;
   try {
@@ -2922,14 +3079,8 @@ async function submitSupportIssue(
   }
 
   if (!response.ok) {
-    const message =
-      parsed &&
-      typeof parsed === "object" &&
-      "error" in parsed &&
-      typeof parsed.error === "string"
-        ? parsed.error
-        : `Support issue submission failed with HTTP ${response.status}.`;
-    throw new Error(message);
+    const error = parsed && typeof parsed === "object" && "error" in parsed ? parsed.error : undefined;
+    throw new Error(supportSubmissionError(response.status, error));
   }
 
   if (
@@ -2940,13 +3091,37 @@ async function submitSupportIssue(
     !("issueNumber" in parsed) ||
     typeof parsed.issueNumber !== "number"
   ) {
-    throw new Error("Support issue endpoint returned an invalid response.");
+    throw new Error("The support server returned an invalid response. Check recent GitHub issues before trying again.");
   }
 
   return {
     issueUrl: parsed.issueUrl,
     issueNumber: parsed.issueNumber,
   };
+}
+
+function supportSubmissionError(status: number, error: unknown): string {
+  if (status === 409) {
+    if (error === "The server formatted the report differently. Update OpenAdminOS and review the report again.") {
+      return SUPPORT_PREVIEW_MISMATCH;
+    }
+    if (error === "A matching support issue was already submitted recently.") {
+      return "A matching report was already submitted. Look for it in recent OpenAdminOS GitHub issues.";
+    }
+    return "The support server reported a conflict. Check recent GitHub issues before trying again.";
+  }
+  if (status === 413) {
+    return error === "Diagnostics payload is too large."
+      ? SUPPORT_DIAGNOSTICS_TOO_LARGE
+      : "The report is too large to submit. Shorten the report text or clear the diagnostics checkbox, then try again.";
+  }
+  if (status === 429) {
+    return "The support server received too many reports. Wait an hour before trying again.";
+  }
+  if (status === 400) {
+    return "The support server rejected the report. Check the title and description, then review the preview again.";
+  }
+  return `The support server could not create the GitHub issue (HTTP ${status}). Check recent GitHub issues before trying again.`;
 }
 
 function supportApiBaseUrl(): string {
@@ -2973,20 +3148,23 @@ async function createSupportBundle(input: SupportBundleInput) {
     )
     .slice(0, 5);
 
-  return {
+  const publicAgentSlugs = publicSupportAgentSlugs(state);
+  const agentLabel = (slug: string) => publicAgentSlugs.has(slug) ? slug : "local";
+  const inputAgentSlug = state.runs.find(({ id }) => id === input.runId)?.agentSlug ?? input.agentSlug;
+  const createdAtMs = Date.now();
+  const age = (value: unknown, due = false) => bucketSupportAge(value, createdAtMs, due);
+
+  const diagnostics = {
     schemaVersion: 2,
-    createdAt: new Date().toISOString(),
+    createdAt: new Date(createdAtMs).toISOString().slice(0, 10),
     notice:
       "Generated locally by OpenAdminOS for support review. Exported files stay local; public issue submission sends this summary only after explicit confirmation.",
     issueContext: {
       source: input.source ?? "sidebar",
-      titleLength: input.title.length,
-      descriptionLength: input.description.length,
       hasStepsToReproduce: Boolean(input.stepsToReproduce?.trim()),
       hasExpectedBehavior: Boolean(input.expectedBehavior?.trim()),
       hasActualBehavior: Boolean(input.actualBehavior?.trim()),
-      ...(input.agentSlug ? { agentSlugHash: diagnosticIdentifierHash(input.agentSlug) } : {}),
-      ...(input.runId ? { runIdHash: diagnosticIdentifierHash(input.runId) } : {}),
+      agentSlug: inputAgentSlug ? agentLabel(inputAgentSlug) : undefined,
     },
     app: {
       version: releaseDiagnostics.appVersion,
@@ -3045,7 +3223,7 @@ async function createSupportBundle(input: SupportBundleInput) {
       registry: {
         sourceKind:
           state.registrySource === DEFAULT_REGISTRY_SOURCE ? "official" : "custom",
-        lastRefresh: state.lastRegistryRefresh,
+        lastRefresh: age(state.lastRegistryRefresh),
         refreshErrorCategory: classifyDiagnosticText(state.registryRefreshError),
         installCountsEnabled: state.registryInstallCountsEnabled,
       },
@@ -3055,13 +3233,9 @@ async function createSupportBundle(input: SupportBundleInput) {
         requiresTenant: releaseDiagnostics.scheduler.requiresTenant,
         activeScheduleCount:
           activeScheduleCount === undefined ? undefined : bucketSupportCount(activeScheduleCount),
-        lastWakeAt:
-          state.schedulerStatus?.lastWakeAt ?? releaseDiagnostics.scheduler.lastWakeAt,
-        lastSuccessAt:
-          state.schedulerStatus?.lastSuccessAt ??
-          releaseDiagnostics.scheduler.lastSuccessAt,
-        nextDueAt:
-          state.schedulerStatus?.nextDueAt ?? releaseDiagnostics.scheduler.nextDueAt,
+        lastWakeAt: age(state.schedulerStatus?.lastWakeAt ?? releaseDiagnostics.scheduler.lastWakeAt),
+        lastSuccessAt: age(state.schedulerStatus?.lastSuccessAt ?? releaseDiagnostics.scheduler.lastSuccessAt),
+        nextDueAt: age(state.schedulerStatus?.nextDueAt ?? releaseDiagnostics.scheduler.nextDueAt, true),
         lastErrorCategory: classifyDiagnosticText(
           state.schedulerStatus?.lastError ?? releaseDiagnostics.scheduler.lastError,
         ),
@@ -3073,14 +3247,13 @@ async function createSupportBundle(input: SupportBundleInput) {
         helperBundled: releaseDiagnostics.companion.helperBundled,
         startedAtLogin: releaseDiagnostics.companion.startedAtLogin,
       },
-      runs: summarizeRuns(state.runs),
+      runs: summarizeRuns(state.runs, createdAtMs),
       recentFailures: runFailures.map((run) => ({
-        runIdHash: diagnosticIdentifierHash(run.id),
-        agentSlugHash: diagnosticIdentifierHash(run.agentSlug),
+        agentSlug: agentLabel(run.agentSlug),
         trigger: run.trigger ?? "manual",
         providerId: run.providerId,
-        queuedAt: run.queuedAt,
-        finishedAt: run.finishedAt,
+        queuedAt: age(run.queuedAt),
+        finishedAt: age(run.finishedAt),
         failedStepCount: bucketSupportCount(
           run.steps.filter((step) => step.status === "failed").length,
         ),
@@ -3089,7 +3262,7 @@ async function createSupportBundle(input: SupportBundleInput) {
         ),
         errorCategory: classifyDiagnosticText(run.error),
       })),
-      graphCache: await graphCacheDiagnostics(state.activeTenantId),
+      graphCache: await graphCacheDiagnostics(state.activeTenantId, createdAtMs),
     },
     excluded:
       [
@@ -3100,9 +3273,10 @@ async function createSupportBundle(input: SupportBundleInput) {
         "screenshots and session replay",
       ],
   };
+  return { diagnostics, publicAgentSlugs };
 }
 
-async function graphCacheDiagnostics(activeTenantId: string | undefined) {
+async function graphCacheDiagnostics(activeTenantId: string | undefined, createdAtMs: number) {
   if (!activeTenantId) {
     return { available: false, reason: "no-active-tenant" };
   }
@@ -3114,11 +3288,11 @@ async function graphCacheDiagnostics(activeTenantId: string | undefined) {
       schedule: cache.schedule
         ? {
             enabled: cache.schedule.enabled,
-            intervalMinutes: cache.schedule.intervalMinutes,
-            updatedAt: cache.schedule.updatedAt,
-            lastRunAt: cache.schedule.lastRunAt,
-            lastSuccessAt: cache.schedule.lastSuccessAt,
-            nextRunAt: cache.schedule.nextRunAt,
+            intervalMinutes: bucketSupportCount(cache.schedule.intervalMinutes),
+            updatedAt: bucketSupportAge(cache.schedule.updatedAt, createdAtMs),
+            lastRunAt: bucketSupportAge(cache.schedule.lastRunAt, createdAtMs),
+            lastSuccessAt: bucketSupportAge(cache.schedule.lastSuccessAt, createdAtMs),
+            nextRunAt: bucketSupportAge(cache.schedule.nextRunAt, createdAtMs, true),
             lastErrorCategory: classifyDiagnosticText(cache.schedule.lastError),
           }
         : undefined,
@@ -3127,7 +3301,7 @@ async function graphCacheDiagnostics(activeTenantId: string | undefined) {
         rows: bucketSupportCount(resource.rows),
         pages: resource.pages === undefined ? undefined : bucketSupportCount(resource.pages),
         pageLimitReached: resource.pageLimitReached,
-        refreshedAt: resource.refreshedAt,
+        refreshedAt: bucketSupportAge(resource.refreshedAt, createdAtMs),
         scopeCount: bucketSupportCount(resource.scopeSet.length),
         lastErrorCategory: classifyDiagnosticText(resource.lastError),
       })),
@@ -3141,7 +3315,7 @@ async function graphCacheDiagnostics(activeTenantId: string | undefined) {
   }
 }
 
-function summarizeRuns(runs: RunRecord[]) {
+function summarizeRuns(runs: RunRecord[], createdAtMs: number) {
   const byStatus: Record<RunRecord["status"], number> = {
     queued: 0,
     running: 0,
@@ -3175,7 +3349,7 @@ function summarizeRuns(runs: RunRecord[]) {
     byTrigger: Object.fromEntries(
       Object.entries(byTrigger).map(([trigger, count]) => [trigger, bucketSupportCount(count)]),
     ),
-    latestRunAt,
+    latestRunAt: bucketSupportAge(latestRunAt, createdAtMs),
   };
 }
 
@@ -3194,12 +3368,6 @@ function classifyDiagnosticText(value: unknown): string | undefined {
   if (/scheduler|launchagent|task scheduler|launchctl/.test(text)) return "scheduler";
   if (/registry|github|manifesturl/.test(text)) return "registry";
   return "other";
-}
-
-function diagnosticIdentifierHash(value: string): string | undefined {
-  const text = redactedDiagnosticText(value, 1_000);
-  if (!text) return undefined;
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 
 function redactedDiagnosticText(value: unknown, maxLength: number): string {

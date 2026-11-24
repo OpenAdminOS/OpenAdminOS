@@ -13,7 +13,7 @@ OpenAdminOS does not send tenant-content telemetry. Registry install counts, whe
 
 Use **Settings > About > Report a problem** to prepare a public GitHub issue. The form can preview the exact title and Markdown body on your device. If you include diagnostics, open the preview before submitting. Review the text for sensitive information and confirm that the issue will be public.
 
-Diagnostics show cache row and page counts and other activity counts as ranges. Errors are summarized by category. You can clear the diagnostics checkbox or export the diagnostics JSON to a local file.
+Diagnostics show cache row and page counts and other activity counts as ranges. Activity times are relative age ranges, and the report date is in UTC. Errors are summarized by category. Public registry agents can appear by slug. Other agents appear as local, and run identifiers are omitted. If the preview is rejected or the diagnostics are too large, update OpenAdminOS or clear **Include diagnostics** and submit again. You can also export the diagnostics JSON to a local file.
 
 ## Tenant Content in Prompts
 

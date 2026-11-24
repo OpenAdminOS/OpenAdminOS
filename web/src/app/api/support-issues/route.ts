@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/rest";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 
+import registryIndex from "~/generated/registry-index.json";
 import {
   formatSupportIssue,
   supportIssuePreviewDigest,
@@ -16,6 +17,7 @@ const MAX_BODY_BYTES = 100_000;
 const SUPPORT_RATE_WINDOW_SECONDS = 60 * 60;
 const SUPPORT_RATE_MAX_PER_WINDOW = 5;
 const SUPPORT_DEDUP_TTL_SECONDS = 24 * 60 * 60;
+const publicAgentSlugs = new Set(registryIndex.agents.map(({ slug }) => slug));
 
 export async function POST(req: Request) {
   const raw = await req.text();
@@ -39,7 +41,7 @@ export async function POST(req: Request) {
 
   let parsed: ReturnType<typeof formatSupportIssue>;
   try {
-    parsed = formatSupportIssue(body);
+    parsed = formatSupportIssue(body, publicAgentSlugs);
   } catch (error) {
     if (error instanceof SupportIssueSizeError) {
       return jsonError(error.status, error.message);

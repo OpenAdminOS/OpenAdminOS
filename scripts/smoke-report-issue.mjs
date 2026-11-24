@@ -25,6 +25,11 @@ const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-report-issue-smoke
 const externalUrlFile = join(userDataDir, "external-url.txt");
 const supportBundleFile = join(userDataDir, "diagnostics.json");
 const receivedSupportIssues = [];
+const rejectedReports = [
+  [409, "The server formatted the report differently. Update OpenAdminOS and review the report again."],
+  [409, "A matching support issue was already submitted recently."],
+  [413, "Diagnostics payload is too large."],
+];
 let renderer;
 let electron;
 let supportServer;
@@ -34,6 +39,13 @@ delete electronEnv.ELECTRON_RUN_AS_NODE;
 try {
   const store = new IntelligenceSqliteStore(join(userDataDir, "openadminos.db"));
   try {
+    const now = new Date().toISOString();
+    store.setGraphCacheRefreshSchedule({
+      tenantId: "report-smoke-tenant", enabled: true, intervalMinutes: 60, now,
+    });
+    store.markGraphCacheRefreshScheduleRun({
+      tenantId: "report-smoke-tenant", success: true, startedAt: now,
+    });
     store.replaceGraphResources({
       tenantId: "report-smoke-tenant",
       resource: "managedDevices",
@@ -42,7 +54,7 @@ try {
       rows: Array.from({ length: 137 }, (_, index) => ({ id: `report-smoke-device-${index}` })),
       pageCount: 14,
       pageLimitReached: true,
-      refreshedAt: new Date().toISOString(),
+      refreshedAt: now,
     });
   } finally {
     store.close();
@@ -59,6 +71,13 @@ try {
       const raw = await readRequest(req, 120_000);
       const parsed = JSON.parse(raw);
       receivedSupportIssues.push(parsed);
+      const rejection = rejectedReports[receivedSupportIssues.length - 1];
+      if (rejection) {
+        const [status, error] = rejection;
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error }));
+        return;
+      }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ issueUrl, issueNumber: 12345 }));
     } catch (error) {
@@ -88,6 +107,9 @@ try {
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic smoke process, never the packaged app.
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
+  if (process.env.OPENADMINOS_REPORT_SMOKE_SCREENSHOTS) {
+    electronArgs.push("--force-prefers-reduced-motion");
+  }
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,
     env: {
@@ -117,10 +139,9 @@ try {
     throw new Error(`Unexpected GitHub issue URL: ${externalUrl}`);
   }
 
-  if (receivedSupportIssues.length !== 1) {
-    throw new Error(`Expected one support issue submission, saw ${receivedSupportIssues.length}.`);
-  }
-  const submission = receivedSupportIssues[0];
+  assert.equal(receivedSupportIssues.length, rejectedReports.length + 1,
+    "Only the three rejected reports and the successful report should reach the server.");
+  const submission = receivedSupportIssues.at(-1);
   if (submission.confirmPublic !== true) {
     throw new Error("Support issue submission did not include public confirmation.");
   }
@@ -156,18 +177,33 @@ try {
   const parsedBundle = JSON.parse(supportBundle);
   for (const diagnostics of [parsedBundle, submission.diagnostics]) {
     assert.equal(diagnostics.schemaVersion, 2);
-    const { graphCache, tenants, runs, recentFailures } = diagnostics.state;
+    assert.match(diagnostics.createdAt, /^\d{4}-\d{2}-\d{2}$/);
+    const { graphCache, scheduler, tenants, runs, recentFailures } = diagnostics.state;
     const devices = graphCache.resources.find(({ resource }) => resource === "managedDevices");
     assert.ok(devices);
     assert.equal(devices.rows, "101-1000");
     assert.equal(devices.pages, "11-100");
     assert.equal(devices.pageLimitReached, true);
+    assert.equal(devices.refreshedAt, "<1h");
+    assert.equal(graphCache.schedule.intervalMinutes, "11-100");
+    assert.equal(graphCache.schedule.updatedAt, "<1h");
+    assert.equal(graphCache.schedule.lastRunAt, "<1h");
+    assert.equal(graphCache.schedule.lastSuccessAt, "<1h");
+    assert.equal(graphCache.schedule.nextRunAt, "future");
+    assert.equal(scheduler.lastWakeAt, "<1h");
+    assert.equal(scheduler.lastSuccessAt, "1-7d");
     assert.equal(tenants.connectedCount, "1-10");
     assert.equal(runs.total, "1-10");
     assert.equal(runs.byStatus.failed, "1-10");
+    assert.equal(runs.latestRunAt, "<1h");
+    assert.equal(recentFailures[0].queuedAt, "<1h");
+    assert.equal(recentFailures[0].finishedAt, "<1h");
+    assert.equal(recentFailures[0].agentSlug, "local");
     assert.equal(recentFailures[0].errorCategory, "ollama");
     assert.equal(recentFailures[0].failedStepCount, "0");
-    assert.doesNotMatch(JSON.stringify(diagnostics), /"(?:detailHash|errorHash|\w+ErrorHash)":/);
+    const json = JSON.stringify(diagnostics);
+    assert.doesNotMatch(json, /"(?:agentSlugHash|runIdHash|detailHash|errorHash|\w+ErrorHash|titleLength|descriptionLength)":/);
+    assert.doesNotMatch(json, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
   }
   if (parsedBundle.privacy?.automaticUploadByOpenAdminOS !== false) {
     throw new Error("Diagnostics bundle did not declare automaticUploadByOpenAdminOS=false.");

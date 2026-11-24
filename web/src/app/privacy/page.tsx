@@ -197,6 +197,9 @@ export default function PrivacyPage() {
                 issue.
                 Optional diagnostics group cache row and page counts and other
                 activity counts into ranges and summarize errors by category.
+                Activity times use relative age ranges, and the report date
+                is in UTC. Public registry agents can appear by slug. Other
+                agents appear as local, and run identifiers are omitted.
                 Diagnostics exclude tenant identifiers, prompts, Graph responses,
                 run results, raw logs, screenshots, local databases, tokens,
                 and provider credentials. The endpoint uses your IP address

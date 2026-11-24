@@ -18,7 +18,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
-- Public support reports require an exact preview when diagnostics are included. Diagnostics group cache and activity counts into ranges and report errors by category only.
+- Public support reports require an exact preview when diagnostics are included. Diagnostics use count ranges, relative ages, UTC report dates, and error categories. They identify only confirmed public registry agents and omit run identifiers. If the server rejects a preview or its diagnostics are too large, the form explains how to update the app or submit without diagnostics.
 
 ## [0.8.0] - 2026-11-24
 

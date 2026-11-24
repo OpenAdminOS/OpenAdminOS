@@ -1963,7 +1963,11 @@ Diagnostics are selected by default. With diagnostics selected, the admin must
 open the preview before submitting. Editing report text or toggling
 diagnostics requires a fresh preview. The app sends the same diagnostics
 snapshot the admin reviewed, and the endpoint verifies that the formatted issue
-matches. The admin can also export a local diagnostics JSON file.
+matches. If formatting differs or the diagnostics are too large, the app clears
+the preview and offers recovery by updating OpenAdminOS or clearing Include
+diagnostics. A duplicate report tells the admin to look for it in recent GitHub
+issues. A successful submission consumes the reviewed snapshot. The admin can
+also export a local diagnostics JSON file.
 After explicit public-issue confirmation and submission, the desktop app posts
 a bounded report to the OpenAdminOS web API. The server creates the public
 GitHub issue with a repo-scoped token it keeps server-side. The endpoint
@@ -1971,8 +1975,15 @@ applies redaction, limits request size and frequency, and deduplicates recent
 reports. The optional diagnostics JSON covers app, build and OS details,
 provider status, registry, scheduler and cache health, and a run summary.
 Diagnostics schema version 2 shows counts such as cached rows, pages, connected
-organizations, and runs as ranges. Error details are limited to categories. The server also buckets
-numeric counts and strips error hashes from older clients. Diagnostics must not
+organizations, and runs as ranges. Activity times are age ranges relative to
+the report, upcoming due times are marked future, and the report date is a UTC
+calendar date. Error details are limited to categories. An agent is identified
+by its slug when its installation and the official registry confirm it is
+public. Other agents are labeled local. The diagnostics omit run identifiers
+and report text lengths. The server rebuilds diagnostics from the permitted
+fields and values for both schemas. It buckets counts, including numeric
+strings, and strips exact activity timestamps and diagnostic hashes from older
+clients. Diagnostics must not
 include tenant identifiers, account usernames, tenant domains, prompts, LLM
 output, Graph response bodies, run reports, raw run logs, SQLite databases,
 screenshots, MSAL tokens, provider credentials, or keychain values. No support
