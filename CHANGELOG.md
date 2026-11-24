@@ -85,6 +85,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat labels timestamps for cache data made stale by a write as "Before the last write (stale)".
+- Chat, Nova and multi-tenant dossiers use the same local date and time format for cache refreshes. Device last-sync dates omit the time and show the year for dates outside the current year.
+
 - Reset OpenAdminOS and quitting the app stop its Ollama index model check or download. A cancelled reset lets the app download the model again. The reset dialog explains how to remove an index model already stored in Ollama.
 - Runs and schedules advise re-running with the same Ollama model when a kept context size fails, including when Ollama refuses a prompt without reporting token counts or the failure happens while rechecking a plan, proposal, or retry. If it fails again, the app suggests freeing memory or choosing a smaller model.
 - The Agent Team smoke rehearsal supplies Ollama model metadata so it checks on-device planning and verifies that the Chief skips redundant work.

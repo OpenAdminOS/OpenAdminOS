@@ -3511,6 +3511,8 @@ export interface OpenAdminOSApi {
    * shortcut hints, etc.). Resolved at preload time; never changes.
    */
   platform: HostPlatform;
+  /** Formatting preferences shared with the main process at launch. */
+  chatDateTimeLocale?: { locale?: string; timeZone?: string };
   getCompanionSnapshot(): Promise<CompanionSnapshot>;
   getCompanionLaunchSettings(): Promise<CompanionLaunchSettings>;
   getAppState(): Promise<AppState>;

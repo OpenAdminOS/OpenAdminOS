@@ -1,3 +1,4 @@
+import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate, type ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
 import { createHash } from "node:crypto";
 import {
   OPENADMINOS_CLIENT_ID,
@@ -850,6 +851,7 @@ export function buildMultiTenantSummary(
 
 
 export function buildMultiTenantDossierMarkdown(input: {
+  timestampLocale?: ChatDateTimeLocale;
   prompt: string;
   providerName: string;
   model?: string;
@@ -861,7 +863,7 @@ export function buildMultiTenantDossierMarkdown(input: {
   const lines = [
     "# Multi-tenant Chat dossier",
     "",
-    `Generated: ${input.generatedAt}`,
+    `Generated: ${formatChatDateTime(new Date(input.generatedAt), { ...input.timestampLocale, year: "numeric" }) ?? "unknown"}`,
     `Provider: ${input.providerName}${input.model ? ` · ${input.model}` : ""}`,
     `Query: ${input.prompt}`,
     "",
@@ -882,7 +884,7 @@ export function buildMultiTenantDossierMarkdown(input: {
   ];
   for (const tenant of input.comparisons) {
     lines.push(
-      `| ${tenant.tenantName} | ${tenant.status} | ${tenant.windowsDevices} | ${tenant.compliant} | ${tenant.nonCompliant} | ${tenant.unknown} | ${tenant.lastRefresh ?? "unknown"} |`,
+      `| ${tenant.tenantName} | ${tenant.status} | ${tenant.windowsDevices} | ${tenant.compliant} | ${tenant.nonCompliant} | ${tenant.unknown} | ${formatCacheRefreshTime(tenant.lastRefresh ?? "", input.timestampLocale) ?? "unknown"} |`,
     );
   }
   lines.push("", "## Device Rows", "");
@@ -890,7 +892,7 @@ export function buildMultiTenantDossierMarkdown(input: {
   lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const row of input.rows) {
     lines.push(
-      `| ${row.tenantName} | ${row.deviceName} | ${row.complianceState} | ${row.operatingSystem} | ${row.osVersion ?? ""} | ${row.lastSyncDateTime ?? ""} | ${row.owner ?? ""} |`,
+      `| ${row.tenantName} | ${row.deviceName} | ${row.complianceState} | ${row.operatingSystem} | ${row.osVersion ?? ""} | ${formatDeviceSyncDate(row.lastSyncDateTime ?? "", input.timestampLocale) ?? "unknown"} | ${row.owner ?? ""} |`,
     );
   }
   return `${lines.join("\n")}\n`;

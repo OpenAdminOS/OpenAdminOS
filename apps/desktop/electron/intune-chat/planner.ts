@@ -1,3 +1,4 @@
+import { formatCacheRefreshTime, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
 import {
   GRAPH_CACHE_LOG_WINDOW_DAYS,
   isGraphCacheLogResource,
@@ -1737,6 +1738,7 @@ export function buildAnswerPack(input: {
    * resource carries no sample rows: the model states these facts.
    */
   computed?: ComputedResult;
+  timestampLocale?: ChatDateTimeLocale;
   limits?: {
     maxRowsReadPerResource?: number;
     maxSampleRowsPerResource?: number;
@@ -1777,6 +1779,7 @@ export function buildAnswerPack(input: {
         includedSampleRows: sampleRows.length,
         omittedCachedRows: Math.max(0, status.rows - selectedRows.length),
         refreshedAt: status.refreshedAt,
+        refreshedAtText: status.refreshedAt ? formatCacheRefreshTime(status.refreshedAt, input.timestampLocale) : undefined,
         lastError: status.lastError,
         sampleRows,
         ...(coveredByComputed ? { sampleRowsNote: "No sample rows: computedResult holds the exact counts and the matching rows for this resource." } : {}),
@@ -1817,6 +1820,7 @@ export function buildAnswerPack(input: {
         rule: "SQLite/Graph filtering selects bounded evidence first; deterministic filters may preselect rows before sampling. cachedRows may be larger than selectedRows, and omittedCachedRows is intentionally not sent as raw data.",
       },
       resources: resourceBlocks,
+      timestampInstruction: "Never show an ISO timestamp to the user. Use the date or time wording in the facts or refreshedAtText when available.",
       instruction: input.computed
         ? "computedResult is authoritative: it was computed in code over every cached row. State its facts, numbers and listed names exactly, in the order given, and answer every part of the question from it. Do not count sample rows, do not add devices it does not list, and do not give reasons it does not state. Where it says the data does not hold something, say so plainly. Use the other resources only for what computedResult does not cover."
         : "Answer only from these resources. If evidence is missing, say what needs to be refreshed or connected. Do not invent tenant state.",

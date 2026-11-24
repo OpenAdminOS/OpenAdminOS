@@ -23,6 +23,7 @@ import type {
   GraphCacheStatus,
   IntuneChatConversation,
   IntuneChatMessage,
+  MultiTenantChatJob,
   OpenAdminOSApi,
   ProviderSummary,
   SendIntuneChatMessageResult,
@@ -2593,4 +2594,124 @@ it("says Azure OpenAI answers through the Azure OpenAI API in the hosted confirm
   const dialog = await screen.findByRole("dialog", { name: "Send this question to Azure OpenAI?" });
   expect(dialog).toHaveTextContent("Azure OpenAI answers through the Azure OpenAI API.");
   expect(dialog).not.toHaveTextContent("Azure OpenAI answers through Azure OpenAI.");
+});
+
+describe("IntuneChat timestamp presentation", () => {
+  const locale = "de-DE";
+  const timeZone = "Europe/Berlin";
+  const timestamp = "2020-04-02T23:15:00.000Z";
+  const dateOptions = { timeZone, year: "numeric", month: "short", day: "numeric" } as const;
+  const conversation = {
+    id: "timestamp-conversation",
+    title: "Windows devices",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    tenantId: "tenant-1",
+    scopeKind: "single-tenant",
+  } satisfies IntuneChatConversation;
+  const answer = {
+    id: "timestamp-answer",
+    conversationId: conversation.id,
+    role: "assistant",
+    content: "One Windows device.",
+    createdAt: timestamp,
+    status: "completed",
+  } satisfies IntuneChatMessage;
+
+  function renderTimestampChat(overrides: Partial<OpenAdminOSApi>) {
+    const bridge = makeMockBridge({
+      chatDateTimeLocale: { locale, timeZone },
+      listIntuneChatConversations: async () => [conversation],
+      getIntuneChatMessages: async () => [answer],
+      ...overrides,
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: `/chat/${conversation.id}`, bridge });
+  }
+
+  it("localizes the inline refresh timestamp on a legacy cache trace", async () => {
+    const user = userEvent.setup();
+    const dateTime = new Intl.DateTimeFormat(locale, { ...dateOptions, hour: "2-digit", minute: "2-digit" });
+    renderTimestampChat({
+      getIntuneChatMessages: async () => [{
+        ...answer,
+        toolTrace: [{
+          id: "legacy-cache-trace",
+          tool: "query_cache",
+          params: {},
+          resultSummary: `1 row; snapshot ${timestamp}`,
+          durationMs: 1,
+          createdAt: timestamp,
+          completedAt: timestamp,
+        }],
+      }],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "How the answer was made" }));
+    await user.click(screen.getByRole("button", { name: /What ran/ }));
+    expect(screen.getByText(`1 row · Snapshot refreshed ${dateTime.format(new Date(timestamp))}`)).toBeInTheDocument();
+  });
+
+  it("labels an epoch timestamp as stale in the answer tooltip", async () => {
+    renderTimestampChat({
+      getIntuneChatMessages: async () => [{ ...answer, createdAt: "1970-01-01T00:00:00.000Z" }],
+    });
+
+    expect(await screen.findByTitle("Answered Before the last write (stale)")).toBeInTheDocument();
+  });
+
+  it("shows the localized sync date without a time in the expanded device table", async () => {
+    const user = userEvent.setup();
+    const dateOnly = new Intl.DateTimeFormat(locale, dateOptions);
+    const counts = { windowsDevices: 1, compliant: 1, nonCompliant: 0, unknown: 0 };
+    const tenant = { tenantId: "tenant-1", tenantName: "Contoso" };
+    const job: MultiTenantChatJob = {
+      id: "timestamp-job",
+      conversationId: conversation.id,
+      prompt: conversation.title,
+      tenantScope: { kind: "all" },
+      resolvedTenantIds: [tenant.tenantId],
+      providerId: "ollama",
+      providerName: "Ollama",
+      providerIsLocal: true,
+      status: "completed",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      preflight: {
+        id: "timestamp-preflight",
+        prompt: conversation.title,
+        tenantScope: { kind: "all" },
+        resolvedTenantIds: [tenant.tenantId],
+        resolvedGroups: [],
+        resources: ["managedDevices"],
+        providerId: "ollama",
+        providerName: "Ollama",
+        providerIsLocal: true,
+        generatedAt: timestamp,
+        tenants: [],
+        canRun: true,
+      },
+      progress: [],
+      summary: { ...counts, tenantsScanned: 1, failedTenants: 0, skippedTenants: 0, staleTenants: 0 },
+      comparisons: [{ ...tenant, ...counts, status: "ready", lastRefresh: timestamp, warnings: [] }],
+      deviceRows: [{
+        ...tenant,
+        deviceName: "WIN-01",
+        complianceState: "compliant",
+        operatingSystem: "Windows",
+        lastSyncDateTime: timestamp,
+        stale: false,
+      }],
+      assistantText: answer.content,
+      exportDossierMarkdown: "",
+    };
+    renderTimestampChat({
+      listIntuneChatConversations: async () => [{ ...conversation, scopeKind: "multi-tenant", multiTenantJobId: job.id }],
+      getMultiTenantChatJob: async () => job,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Contoso" }));
+    const deviceTable = screen.getByRole("columnheader", { name: "Last sync" }).closest("table")!;
+    const deviceRow = within(deviceTable).getByRole("row", { name: /WIN-01/ });
+    expect(within(deviceRow).getByRole("cell", { name: dateOnly.format(new Date(timestamp)) })).toBeInTheDocument();
+  });
 });

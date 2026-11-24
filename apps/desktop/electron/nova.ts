@@ -1,3 +1,4 @@
+import { formatChatDateTime, type ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
 import { activeModelProvider, hostedOllamaDestination, type HostedOllamaDestination } from "@openadminos/agent-sdk";
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
@@ -230,6 +231,7 @@ export class NovaService {
     ) => Promise<SendIntuneChatMessageResult>,
     private readonly request: typeof fetch = fetch,
     private readonly actions?: NovaActionHost,
+    private readonly timestampLocale?: ChatDateTimeLocale,
   ) {}
   async handle(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse> {
     if (!input || typeof input !== "object")
@@ -808,7 +810,7 @@ export class NovaService {
         activity({ kind: "answer", status: "failed", message: answerError });
         return {
           answerError,
-          text: boundedVoiceAnswer(`${answerError} You can retry or ask another question.`),
+          text: boundedVoiceAnswer(`${answerError} You can retry or ask another question.`, false, this.timestampLocale),
           conversationId: result.conversation.id,
         };
       }
@@ -820,7 +822,7 @@ export class NovaService {
       }
       return {
         displayText: result.assistantMessage.content,
-        text: boundedVoiceAnswer(result.assistantMessage.content, Boolean(result.assistantMessage.toolTrace?.some(trace => trace.tool === "web_search" && !trace.error && trace.webSources?.length))),
+        text: boundedVoiceAnswer(result.assistantMessage.content, Boolean(result.assistantMessage.toolTrace?.some(trace => trace.tool === "web_search" && !trace.error && trace.webSources?.length)), this.timestampLocale),
         conversationId: result.conversation.id,
       };
     }
@@ -1014,14 +1016,14 @@ export class NovaService {
   }
 }
 
-export function boundedVoiceAnswer(text: string, hasPublicSources = false): string {
+export function boundedVoiceAnswer(text: string, hasPublicSources = false, timestampLocale?: ChatDateTimeLocale): string {
   const sourceIndex = text.indexOf("\n\nPublic web sources:");
   if (sourceIndex >= 0) text = text.slice(0, sourceIndex);
   text = text.replace(/\n\nDetected matching agent:[^\n]*/g, "").trim();
-  text = text.replace(/\b(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):\d{2}(?:\.\d+)?Z\b/g, (_, year, month, day, hour, minute) => {
-    const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
-    return Number.isNaN(date.getTime()) ? "an unavailable timestamp" : date.toLocaleString("en-GB", { timeZone: "UTC", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) + " UTC";
-  });
+  text = text.replace(
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z\b|[+-]\d{2}:\d{2}\b)/g,
+    (timestamp) => formatChatDateTime(new Date(timestamp), { ...timestampLocale, year: "numeric" }) ?? "an unavailable timestamp",
+  );
   if (hasPublicSources) text += " Public source links are available in Chat.";
   if (text.length <= 2000) return text;
   return `${text.slice(0, 1900)}… The full answer and evidence are available in Chat.`;

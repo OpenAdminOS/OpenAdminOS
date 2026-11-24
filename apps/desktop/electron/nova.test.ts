@@ -764,8 +764,10 @@ it('keeps the full noncompliant list through channel selection, failed setup and
     questions.push(input.content);
     const content = await voiceDeviceEvidenceAnswer(input.content, [{resource:'managedDevices',rows:9,refreshedAt:'2026-09-13T21:56:23.006Z'}] as any, {
       tenantId:'tenant-a', store:{queryGraphCache: () => ({totalCount:2,returnedRows:2,rows:[{row:{deviceName:'Device A'}},{row:{deviceName:'Device B'}}]})}
-    } as any, () => {});
+    } as any, '2026-09-14T08:00:00.000Z', () => {});
     assert.ok(content, input.content);
+    assert.match(content, /^Intune snapshot refreshed .*2026.*: 9 cached device records/);
+    assert.doesNotMatch(content, /2026-09-13T21:56:23/);
     return {conversation:{id:'report'},assistantMessage:{content,status:'completed'}} as SendIntuneChatMessageResult;
   }, fetch, { ...novaSettingsHost, activeTenantId: async () => f.state.activeTenantId,
     classifyCommand: async () => { throw new Error('Explicit commands must not need a model'); },
@@ -808,9 +810,16 @@ it('retains a split spoken delivery request while interpretation is pending and 
   assert.match(next.text!, /connector is unavailable/);
 });
 
-it('speaks readable freshness while preserving the original evidence timestamp elsewhere', () => {
-  assert.match(boundedVoiceAnswer('9 devices, refreshed 2026-09-13T21:56:23.006Z.'), /13 September.*21:56 UTC/);
-  assert.doesNotMatch(boundedVoiceAnswer('9 devices, refreshed 2026-09-13T21:56:23.006Z.'), /T21|\.006/);
+it('speaks readable freshness in the desktop locale and time zone', () => {
+  const timestampLocale = { locale: "de-DE", timeZone: "Europe/Berlin" };
+  const instant = "2026-09-13T21:56:23.006Z";
+  const expected = new Intl.DateTimeFormat(timestampLocale.locale, {
+    timeZone: timestampLocale.timeZone, year: "numeric", month: "short",
+    day: "numeric", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(instant));
+  for (const timestamp of [instant, "2026-09-13T23:56:23.006+02:00"]) {
+    assert.equal(boundedVoiceAnswer(`9 devices, refreshed ${timestamp}.`, false, timestampLocale), `9 devices, refreshed ${expected}.`);
+  }
 });
 
 it('answers general capabilities directly while preserving a running task and its subsequent action preview', async () => {

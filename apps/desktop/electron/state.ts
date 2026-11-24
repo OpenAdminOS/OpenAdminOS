@@ -1,3 +1,4 @@
+import type { ChatDateTimeLocale } from "../src/shared/chat-date-time.js";
 import { activeModelProvider, isOnDeviceModel, providerForModel } from "@openadminos/agent-sdk";
 import { OfficeService } from "./office.js";
 import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
@@ -1613,6 +1614,7 @@ function serializeAuditLogCsv(input: AuditLogSerializeInput): string {
 const AUDIT_RETENTION_NOTE = `Audit events are recorded when they happen and listed in the order they were recorded, not sorted by timestamp: events imported from an earlier version at upgrade may follow newer ones. They are kept for ${AUDIT_LOG_RETENTION_DAYS.toLocaleString("en-US")} days, independent of run-history retention and of disconnecting an organization. Events of runs that retention removed before the audit log existed are not in it, nor configuration changes older than the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")} kept until then. In CSV, a cell that starts with =, +, - or @, also after spaces, or with a tab or carriage return, gets a leading apostrophe so a spreadsheet does not run it as a formula.`;
 
 export interface AppStateStoreOptions {
+  chatDateTimeLocale?: ChatDateTimeLocale;
   filePath: string;
   tokenStore: TokenCacheStorage;
   openBrowser?(url: string): Promise<void>;
@@ -2112,6 +2114,7 @@ export class AppStateStore {
     });
     const host = this;
     this.chatService = new IntuneChatService({
+      timestampLocale: typeof options === "string" ? undefined : options.chatDateTimeLocale,
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
       tenantSignal: (tenantId) => this.tenantLifecycle.signal(tenantId),
