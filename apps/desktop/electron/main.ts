@@ -1,4 +1,5 @@
 import { isPlainRecord, requireBoundedString, validateSaveTextFileArgs } from "./save-text-file-args.js";
+import { novaScreenCapture } from "./nova-screen-capture.js";
 import { createNovaScreenHandler } from "./nova-screen.js";
 import { handleNovaWindow, showMainWindow } from "./nova-window-ipc.js";
 import { NovaWindowSession } from "./nova-window-session.js";
@@ -5506,6 +5507,7 @@ async function createWindow({ show = true, route, persistState = true, waitForLo
 let novaBubble: BrowserWindow | undefined;
 let novaBubbleOpening = false;
 let novaBubbleReady = false;
+let novaScreenDraft: string | undefined;
 let novaTransferredConversation: string | undefined;
 let novaMainReadyId: number | undefined;
 let novaMainOpenPending = false;
@@ -6683,10 +6685,11 @@ function registerIpcHandlers() {
       model: (...args) => store.novaPublicModel(...args),
     },
   );
-  const novaScreen = createNovaScreenHandler(store, () => [mainWindow, novaBubble], join(
+  const screenWindows = () => [mainWindow, novaBubble];
+  const novaScreen = createNovaScreenHandler(store, screenWindows, novaScreenCapture(screenWindows, join(
     app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"),
     "native", "apple-foundation-helper", "openadminos-apple-foundation-helper",
-  ));
+  )));
   ipcMain.handle("openadminos:nova-screen", handleTrusted((event, request: import("@openadminos/agent-sdk").NovaScreenRequest) =>
     novaScreen(event.sender, request)));
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
@@ -6739,8 +6742,23 @@ function registerIpcHandlers() {
           return;
         }
         if (action === "hide" && fromBubble) { hideNovaBubble(); return; }
+        if (action === "draft-screen-question" && fromBubble) {
+          if (!(await store.activeTenantId())) throw new Error("Connect an organization before asking in Chat.");
+          const question = requireBoundedString(payload, "Question", 600);
+          await openMainWindow();
+          novaScreenDraft = question;
+          if (novaMainReadyId === mainWindow?.webContents.id) sendNovaWindowEvent(mainWindow, "nova-screen-draft");
+          hideNovaBubble();
+          return;
+        }
+        if (action === "take-screen-question" && !fromBubble) {
+          const question = novaScreenDraft;
+          novaScreenDraft = undefined;
+          return question;
+        }
         if (action === "ready-main" && !fromBubble) {
           novaMainReadyId = event.sender.id;
+          if (novaScreenDraft) sendNovaWindowEvent(mainWindow, "nova-screen-draft");
           if (novaMainOpenPending) {
             novaMainOpenPending = false;
             sendNovaWindowEvent(mainWindow, "nova-open-main");

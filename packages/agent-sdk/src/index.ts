@@ -2442,8 +2442,11 @@ export interface NovaAnswerLink {
   route: string;
 }
 
+export const NOVA_SCREEN_TEXT_BYTES = 1400;
+export const NOVA_SCREEN_QUESTION_BYTES = 600;
+
 export type NovaScreenRequest =
-  | { action: "capture"; hostedVoice: boolean }
+  | { action: "capture" }
   | { action: "discard"; id: string }
   | { action: "settings" }
   | { action: "send"; id: string; question: string; text: string; consent: boolean };
@@ -2451,7 +2454,7 @@ export type NovaScreenRequest =
 export type NovaScreenResponse =
   | { status: "cancelled" | "permission" }
   | { status: "answered"; text: string }
-  | { status: "preview"; id: string; thumbnail: string; text: string; destination: string; needsConsent: boolean };
+  | { status: "preview"; id: string; thumbnail: string; text: string; destination: string; consentProvider?: string; emptyOcr?: boolean };
 
 export type NovaRequest =
   | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
@@ -3714,7 +3717,7 @@ export interface OpenAdminOSApi {
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
   novaScreen(request: NovaScreenRequest): Promise<NovaScreenResponse>;
   novaWindow(
-    action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings",
+    action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings" | "draft-screen-question" | "take-screen-question",
     payload?: string,
   ): Promise<string | undefined>;
   novaProfile(request: NovaProfileRequest): Promise<NovaProfileView>;

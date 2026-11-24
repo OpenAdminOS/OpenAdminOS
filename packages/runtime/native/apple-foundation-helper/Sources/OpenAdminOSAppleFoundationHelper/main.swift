@@ -65,7 +65,7 @@ struct OpenAdminOSAppleFoundationHelper {
         let image = FileHandle.standardInput.readDataToEndOfFile()
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
+        request.usesLanguageCorrection = false
         try VNImageRequestHandler(data: image).perform([request])
         let lines = (request.results ?? []).compactMap { observation -> OcrLine? in
           guard let candidate = observation.topCandidates(1).first else { return nil }

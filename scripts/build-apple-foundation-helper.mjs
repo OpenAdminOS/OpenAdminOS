@@ -26,6 +26,9 @@ if (process.platform !== "darwin") {
   stop("Skipping Apple Foundation helper build: not macOS.");
 }
 
+const swift = spawnSync("swift", ["--version"], { stdio: "ignore" });
+if (swift.status !== 0) stop("Skipping Apple Foundation helper build: Swift is unavailable.");
+
 const build = spawnSync(
   "swift",
   ["build", "-c", "release", "--package-path", packagePath],

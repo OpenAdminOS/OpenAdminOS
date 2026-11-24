@@ -571,3 +571,12 @@
 .nova-bubble .nova-screen-preview img {
   max-height: 66px;
 }
+
+.nova-screen-fields {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}

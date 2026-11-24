@@ -1092,23 +1092,32 @@ background wake-word engine are separate future work, not implied by the selecto
 
 Select **Look at screen** in Nova or ask Nova to look at the screen. Nova prompts
 for a region on the display under the pointer. Drag to select, press Enter for
-the whole display, or press Escape to cancel. On macOS, allow Screen Recording in
-System Settings and restart the app if permission is missing.
+the whole display, or press Escape to cancel. The selector closes after two
+minutes. On macOS, Nova requests Screen Recording on first use. If access is
+denied, grant it in System Settings and restart OpenAdminOS.
 
-On-device OCR creates editable reference text. Review the image thumbnail and
-text, then select **Send** or **Discard**. Each screen question has its own
-sharing session. Hosted reasoning or a hosted voice session requires separate
-screen consent in the preview. Only the selected reasoning provider receives
-approved text. Images and extracted text stay out of Chat, files and the audit
-log. The local audit records consent and sharing metadata, including destination,
-region dimensions, OCR engine and the byte length sent.
+On-device OCR creates editable reference text within a 1,400 UTF-8 byte limit.
+Review the thumbnail and exact text, then select **Send** or **Discard**.
+Each share to a hosted reasoning provider requires explicit consent naming that
+provider. With local reasoning, the text stays on the device even when hosted
+voice is configured. Only the reasoning provider receives the approved text.
+
+Nova keeps capture pixels in memory. Nova keeps extracted text out of Chat
+history and the audit log. Provider adapters may use transient files during
+completion, including the Codex adapter's temporary last-message output file.
+The local audit records consent and sharing metadata, including destination,
+region dimensions, OCR engine and bytes sent.
 
 Screen answers use the selected model and public documentation. Screen
 references are untrusted and cannot authorize actions or identify tenant
-targets. This path offers no Graph or connector tools. Apple Vision,
-Windows OCR and Tesseract run on the device. IT may set `novaScreen` to
-`off`, `local` (on-device reasoning only), or `any` (the unmanaged default).
-The **Screen questions** setting is on by default and follows managed policy.
+targets. This path offers no Graph or connector tools. With an organization
+active, **Ask in Chat** drafts only the question, and Chat applies its usual
+tenant and provider gates. Apple Vision, Windows OCR and Tesseract run on the
+device. IT may set `novaScreen` to `off`, `local` (on-device reasoning only),
+or `any`. The unmanaged default is `any`. This lets admins use their chosen
+reasoning provider while retaining a preview for every capture and explicit
+consent before each hosted share. The **Screen questions** setting is on by
+default and follows managed policy.
 
 ### Nova profile, notes, follow-ups and IT policy (2026-11-12)
 
