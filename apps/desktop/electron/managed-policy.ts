@@ -36,7 +36,7 @@ const DIRECTORY_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
 /** The longest standing instructions for Nova, the same limit as in the app. */
 export const NOVA_INSTRUCTIONS_MAX_LENGTH = 4000;
 const NOVA_VOICE_MODES: readonly NovaVoiceMode[] = ["local", "openai"];
-const NOVA_CAPABILITY_FIELDS = ["webSearch", "connectorSends", "startAgents", "navigation"] as const;
+const NOVA_CAPABILITY_FIELDS = ["webSearch", "connectorSends", "startAgents", "navigation", "screenQuestions"] as const;
 const CONNECTOR_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export interface ManagedPolicyPath {
@@ -460,6 +460,14 @@ export function parsePolicyFile(
         }
         break;
       }
+      case "novaScreen":
+        if (node.kind === "string" && (node.value === "off" || node.value === "local" || node.value === "any")) {
+          result.values.novaScreen = node.value;
+          result.keys.push(key);
+        } else {
+          issue('"novaScreen" must be "off", "local" or "any".', node, key);
+        }
+        break;
       case "novaMemory":
         if (node.kind !== "string" || node.value !== "off") {
           issue(`"novaMemory" can only be "off", which turns Nova's notes off. It is not applied.`, node, key);

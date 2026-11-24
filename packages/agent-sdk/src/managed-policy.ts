@@ -27,6 +27,7 @@ export const MANAGED_POLICY_KEYS = [
   "novaInstructions",
   "novaCapabilities",
   "novaMemory",
+  "novaScreen",
   "lock",
 ] as const;
 
@@ -46,6 +47,7 @@ export const MANAGED_POLICY_SETTING_KEYS = [
   "novaInstructions",
   "novaCapabilities",
   "novaMemory",
+  "novaScreen",
 ] as const;
 
 export type ManagedPolicySettingKey = (typeof MANAGED_POLICY_SETTING_KEYS)[number];
@@ -70,6 +72,7 @@ export interface ManagedNovaCapabilities {
   connectorSends?: boolean | string[];
   startAgents?: boolean;
   navigation?: boolean;
+  screenQuestions?: boolean;
 }
 
 /** The values in force after both files were read, validated and merged. */
@@ -90,6 +93,7 @@ export interface ManagedPolicyValues {
   novaCapabilities?: ManagedNovaCapabilities;
   /** "off" turns Nova's notes off: none are added and none reach a prompt. */
   novaMemory?: "off";
+  novaScreen?: "off" | "local" | "any";
 }
 
 /** One problem in a policy file. An invalid key is not applied; the rest of the file is. */

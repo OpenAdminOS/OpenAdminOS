@@ -55,6 +55,7 @@ function utc(value: string): string {
 
 const CAPABILITIES: { id: NovaCapabilityName; label: string; description: string }[] = [
   { id: "webSearch", label: "Web search", description: "Hosted voice may search the public web. Searches go to OpenAI." },
+  { id: "screenQuestions", label: "Screen questions", description: "Nova can read an area you select and show the extracted text for review." },
   { id: "navigation", label: "Open pages", description: "Nova may open app pages when you ask." },
   { id: "startAgents", label: "Start agents", description: "Nova may prepare agent runs. Each run still needs your click, and write plans their review." },
 ];

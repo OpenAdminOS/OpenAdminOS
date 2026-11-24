@@ -106,7 +106,7 @@ function valueText(policy: ManagedPolicyStatus, key: ManagedPolicySettingKey, re
       return values.novaInstructions ? POLICY_COPY.novaInstructionsLength(values.novaInstructions.length) : "";
     case "novaCapabilities": {
       const capabilities = values.novaCapabilities ?? {};
-      return (["webSearch", "connectorSends", "startAgents", "navigation"] as const)
+      return (["webSearch", "connectorSends", "startAgents", "navigation", "screenQuestions"] as const)
         .filter((name) => capabilities[name] !== undefined)
         .map((name) => {
           const value = capabilities[name];
@@ -121,6 +121,8 @@ function valueText(policy: ManagedPolicyStatus, key: ManagedPolicySettingKey, re
         })
         .join(", ");
     }
+    case "novaScreen":
+      return values.novaScreen ?? "";
     case "novaMemory":
       return POLICY_COPY.novaMemoryOff;
   }

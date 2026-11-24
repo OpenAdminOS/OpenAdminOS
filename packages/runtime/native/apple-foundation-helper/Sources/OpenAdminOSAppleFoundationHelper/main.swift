@@ -1,4 +1,5 @@
 import Foundation
+import Vision
 
 #if canImport(FoundationModels)
 import FoundationModels
@@ -47,9 +48,38 @@ struct TokenCountResult {
   let exact: Bool
 }
 
+private struct OcrLine: Encodable {
+  let text: String
+  let x: CGFloat
+  let y: CGFloat
+  let width: CGFloat
+  let height: CGFloat
+  let confidence: Float
+}
+
 @main
 struct OpenAdminOSAppleFoundationHelper {
   static func main() async {
+    if CommandLine.arguments.dropFirst().first == "ocr" {
+      do {
+        let image = FileHandle.standardInput.readDataToEndOfFile()
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        try VNImageRequestHandler(data: image).perform([request])
+        let lines = (request.results ?? []).compactMap { observation -> OcrLine? in
+          guard let candidate = observation.topCandidates(1).first else { return nil }
+          let box = observation.boundingBox
+          return OcrLine(text: candidate.string, x: box.minX, y: 1 - box.maxY,
+                         width: box.width, height: box.height, confidence: candidate.confidence)
+        }
+        FileHandle.standardOutput.write(try JSONEncoder().encode(lines))
+      } catch {
+        Foundation.exit(1)
+      }
+      return
+    }
+
     guard let data = FileHandle.standardInput.readDataToEndOfFile().nonEmpty else {
       emitErrorResponse("No JSON request was supplied.", exitCode: 2)
       return

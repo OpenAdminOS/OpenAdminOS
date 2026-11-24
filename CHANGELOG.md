@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Nova can answer questions about a screen region using on-device OCR, with an editable preview and sharing consent before hosted processing.
+
 - Open Nova over other apps with a configurable system-wide shortcut for voice and typed questions, including public Microsoft questions without an organization.
 - Nova answers public Microsoft feature and how-to questions without a connected organization, using the local documentation index when available and explaining when it is missing, unavailable for search, or has no matching passages.
 

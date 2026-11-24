@@ -488,6 +488,8 @@ function policyDetails(record: ManagedPolicyRecord): Record<string, Configuratio
     ...(values.novaCapabilities?.connectorSends !== undefined
       ? { novaConnectorSends: Array.isArray(values.novaCapabilities.connectorSends) ? [...values.novaCapabilities.connectorSends] : values.novaCapabilities.connectorSends }
       : {}),
+    ...(values.novaScreen ? { novaScreen: values.novaScreen } : {}),
+    ...(values.novaCapabilities?.screenQuestions !== undefined ? { novaScreenQuestions: values.novaCapabilities.screenQuestions } : {}),
     ...(values.novaMemory ? { novaMemory: values.novaMemory } : {}),
   };
 }
@@ -574,7 +576,7 @@ function novaSeeds(
   }
   const enabled: string[] = [];
   const disabled: string[] = [];
-  for (const name of ["webSearch", "startAgents", "navigation"] as const) {
+  for (const name of ["webSearch", "startAgents", "navigation", "screenQuestions"] as const) {
     const before = previous?.capabilities?.[name] ?? true;
     const after = next?.capabilities?.[name] ?? true;
     if (before !== after) (after ? enabled : disabled).push(name);
@@ -655,6 +657,8 @@ const POLICY_DETAIL_KEYS = [
   "novaNavigation",
   "novaConnectorSends",
   "novaMemory",
+  "novaScreen",
+  "novaScreenQuestions",
 ] as const;
 
 const NOVA_INSTRUCTION_DETAIL_KEYS = ["scope", "text", "length", "sha256", "previousSha256", "via", "revisionId"] as const;

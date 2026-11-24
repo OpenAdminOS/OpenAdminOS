@@ -230,7 +230,7 @@ export function sanitizeManagedPolicyRecord(value: unknown): ManagedPolicyRecord
   if (isRecord(rawValues.novaCapabilities)) {
     const raw = rawValues.novaCapabilities;
     const capabilities: NonNullable<ManagedPolicyValues["novaCapabilities"]> = {};
-    for (const field of ["webSearch", "startAgents", "navigation"] as const) {
+    for (const field of ["webSearch", "startAgents", "navigation", "screenQuestions"] as const) {
       if (typeof raw[field] === "boolean") capabilities[field] = raw[field] as boolean;
     }
     const sends = raw.connectorSends;
@@ -238,6 +238,7 @@ export function sanitizeManagedPolicyRecord(value: unknown): ManagedPolicyRecord
     else if (stringList(sends)) capabilities.connectorSends = stringList(sends);
     if (Object.keys(capabilities).length > 0) values.novaCapabilities = capabilities;
   }
+  if (rawValues.novaScreen === "off" || rawValues.novaScreen === "local" || rawValues.novaScreen === "any") values.novaScreen = rawValues.novaScreen;
   if (rawValues.novaMemory === "off") values.novaMemory = "off";
   const sources: ManagedPolicyRecord["sources"] = {};
   if (isRecord(value.sources)) {

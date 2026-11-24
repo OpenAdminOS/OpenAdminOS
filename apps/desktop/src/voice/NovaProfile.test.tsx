@@ -15,12 +15,12 @@ function effective(overrides: Partial<EffectiveNovaProfile> = {}): EffectiveNova
     instructions: "",
     instructionsSource: "none",
     addendum: "",
-    capabilities: { webSearch: true, startAgents: true, navigation: true },
+    capabilities: { webSearch: true, startAgents: true, navigation: true, screenQuestions: true },
     connectorSends: {},
     memoryEnabled: true,
     memoryPaused: false,
     shortcuts: [],
-    locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: false },
+    locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false, screenQuestions: false }, connectorSends: false, memory: false },
     ...overrides,
   };
 }
@@ -309,4 +309,31 @@ it("keeps the links of a local answer after its speech ends, until the next answ
   // A new session clears it.
   await user.click(screen.getByRole("button", { name: "Start Nova" }));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Review Retire devices" })).not.toBeInTheDocument());
+});
+
+it("keeps captured text in a preview until the admin consents and sends", async () => {
+  const novaScreen = vi.fn<NonNullable<typeof window.openAdminOS>["novaScreen"]>(async request => {
+    if (request.action === "capture") return {
+      status: "preview", id: "preview", thumbnail: "data:image/png;base64,", text: "Encryption: Off",
+      destination: "Screen text goes to OpenAI for reasoning", needsConsent: true,
+    };
+    return { status: "answered", text: "Encryption is off." };
+  });
+  const bridge = makeMockBridge({ novaScreen });
+  renderRoute(<Nova bubble />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.type(await screen.findByRole("textbox", { name: "Ask Nova" }), "What’s on my screen?");
+  await user.click(screen.getByRole("button", { name: "Ask" }));
+  expect(novaScreen).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Look at screen" }));
+  const send = await screen.findByRole("button", { name: "Send" });
+  expect(send).toBeDisabled();
+  await user.clear(screen.getByRole("textbox", { name: "Screen text" }));
+  await user.type(screen.getByRole("textbox", { name: "Screen text" }), "BitLocker: Off");
+  await user.click(screen.getByRole("checkbox", { name: "Allow screen sharing for this session" }));
+  await user.click(send);
+  expect(novaScreen).toHaveBeenLastCalledWith({
+    action: "send", id: "preview", question: "What’s on my screen?", text: "BitLocker: Off", consent: true,
+  });
+  expect(await screen.findByText("Encryption is off.")).toBeInTheDocument();
 });

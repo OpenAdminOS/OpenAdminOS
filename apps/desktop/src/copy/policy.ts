@@ -36,11 +36,12 @@ export const POLICY_COPY = {
       novaVoiceModes: "Nova voice modes",
       novaInstructions: "Nova instructions",
       novaCapabilities: "Nova abilities",
+      novaScreen: "Nova screen questions",
       novaMemory: "Nova notes",
     })[key],
   novaVoiceMode: (mode: "local" | "openai") => (mode === "openai" ? "OpenAI voice" : "Local voice"),
-  novaCapability: (name: "webSearch" | "connectorSends" | "startAgents" | "navigation") =>
-    ({ webSearch: "Web search", connectorSends: "Sending through connectors", startAgents: "Starting agents", navigation: "Opening pages" })[name],
+  novaCapability: (name: "webSearch" | "connectorSends" | "startAgents" | "navigation" | "screenQuestions") =>
+    ({ webSearch: "Web search", connectorSends: "Sending through connectors", startAgents: "Starting agents", navigation: "Opening pages", screenQuestions: "Screen questions" })[name],
   novaCapabilityOn: "on",
   novaCapabilityOff: "off",
   novaConnectorsOnly: (names: string) => `only ${names}`,

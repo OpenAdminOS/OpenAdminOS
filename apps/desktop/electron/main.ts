@@ -1,4 +1,5 @@
 import { isPlainRecord, requireBoundedString, validateSaveTextFileArgs } from "./save-text-file-args.js";
+import { createNovaScreenHandler } from "./nova-screen.js";
 import { handleNovaWindow, showMainWindow } from "./nova-window-ipc.js";
 import { NovaWindowSession } from "./nova-window-session.js";
 import { NovaWindowShortcut } from "./nova-window-shortcut.js";
@@ -6682,6 +6683,12 @@ function registerIpcHandlers() {
       model: (...args) => store.novaPublicModel(...args),
     },
   );
+  const novaScreen = createNovaScreenHandler(store, () => [mainWindow, novaBubble], join(
+    app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"),
+    "native", "apple-foundation-helper", "openadminos-apple-foundation-helper",
+  ));
+  ipcMain.handle("openadminos:nova-screen", handleTrusted((event, request: import("@openadminos/agent-sdk").NovaScreenRequest) =>
+    novaScreen(event.sender, request)));
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     if (!input || typeof input !== "object") throw new Error("Nova request is missing.");
     if (event.sender === novaBubble?.webContents && ["configure", "decide-action"].includes(input.action))

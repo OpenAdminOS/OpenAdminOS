@@ -1,6 +1,10 @@
 import { isNovaIntroduction } from "./nova-conversation.js";
 import { conversationalText, requestText, novaActionIntent, novaConnectorQuestion, type NovaActionIntent } from './nova-action-intent.js';
 
+export function novaScreenQuestion(text: string): boolean {
+  return /\b(?:look at (?:my|the) screen|what(?:'s| is) on (?:my|the) screen|what does this mean on (?:my |the )?screen)\b/i.test(text.replaceAll("’", "'"));
+}
+
 export const novaPages = { cache: '/settings/data', chat: '/chat', agents: '/agents', 'agent team': '/office', office: '/office', changes: '/changes', settings: '/settings', connectors: '/connections' } as const;
 /** Nova abilities a proposal may turn off. Turning one on is done in Settings only. */
 export type NovaProposableCapability = 'webSearch' | 'startAgents' | 'navigation';

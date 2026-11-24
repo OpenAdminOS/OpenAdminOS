@@ -44,7 +44,7 @@ export const NOVA_SHORTCUT_NAME_MAX_LENGTH = 40;
 export const NOVA_SHORTCUT_PROMPT_MAX_LENGTH = 600;
 
 export const NOVA_VOICE_MODES: readonly NovaVoiceMode[] = ["openai", "local"];
-export const NOVA_CAPABILITY_NAMES: readonly NovaCapabilityName[] = ["webSearch", "startAgents", "navigation"];
+export const NOVA_CAPABILITY_NAMES: readonly NovaCapabilityName[] = ["webSearch", "startAgents", "navigation", "screenQuestions"];
 const CONNECTOR_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
 
@@ -52,6 +52,7 @@ const CAPABILITY_LABELS: Record<NovaCapabilityName | "connectorSends", string> =
   webSearch: "web search",
   startAgents: "starting agents",
   navigation: "opening pages",
+  screenQuestions: "screen questions",
   connectorSends: "sending through connectors",
 };
 
@@ -220,6 +221,7 @@ interface CapabilityState {
 }
 
 function capabilityState(profile: NovaProfile | undefined, policy: ManagedPolicyStatus | undefined, name: NovaCapabilityName): CapabilityState {
+  if (name === "screenQuestions" && policy?.values.novaScreen === "off") return { value: false, locked: true };
   const forced = policy?.values.novaCapabilities?.[name];
   const locked = isManagedSettingLocked(policy, "novaCapabilities");
   if (forced === false) return { value: false, locked: true };

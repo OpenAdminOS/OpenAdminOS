@@ -521,3 +521,53 @@
 .nova-bubble-activity { font-size: 12px; color: var(--color-text-muted); }
 .nova-bubble-answer { flex: 1 1 auto; min-height: 0; }
 .nova-bubble-footer { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+
+.nova-screen-controls,
+.nova-screen-preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nova-screen-preview {
+  max-height: min(48vh, 460px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.nova-screen-preview img {
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  justify-self: start;
+}
+
+.nova-bubble .nova-screen-preview {
+  max-height: none;
+  overflow: visible;
+}
+
+.nova-bubble .nova-screen-preview img {
+  max-height: 76px;
+}
+
+.nova-screen-preview textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.nova-screen-text-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nova-bubble .nova-screen-preview {
+  gap: 5px;
+}
+
+.nova-bubble .nova-screen-preview img {
+  max-height: 66px;
+}
