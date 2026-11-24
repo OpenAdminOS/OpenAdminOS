@@ -1,7 +1,7 @@
 /**
  * Validation helpers for the public `/api/install` endpoint. Strict by
  * design because the binary can lie about anything in the body, so every
- * field is pattern-checked before it reaches Redis or GitHub.
+ * field is pattern-checked before it reaches stats storage or GitHub.
  */
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

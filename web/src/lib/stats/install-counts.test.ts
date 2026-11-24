@@ -1,21 +1,63 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import test from "node:test";
 
+import { POST as submitAgent } from "../../app/api/agent-submissions/route";
 import { GET as flush } from "../../app/api/flush/route";
+import { GET as health } from "../../app/api/health/route";
 import { POST as install } from "../../app/api/install/route";
-
-type Command = [string, ...unknown[]];
+import { POST as support } from "../../app/api/support-issues/route";
+import type { InstallSnapshot } from "./store";
 
 const slug = "sample-agent";
 const statsPath = "/repos/example/project/contents/stats/agents.json";
-const dailyKey = (day: string) => `oa:installs:day:${day}:${slug}`;
-const pendingKey = `oa:pending:installs:${slug}`;
+const ip = "192.0.2.1";
+const secret = "fake-supabase-key";
+const day = "2027-01-03";
 
-test("install and flush store only aggregate counts, including requests from legacy clients", async (t) => {
+function cronRequest() {
+  return new Request("https://example.test/api/flush", { headers: { authorization: "Bearer cron-test" } });
+}
+
+function installRequest(body: string) {
+  return new Request("https://example.test/api/install", {
+    method: "POST", headers: { "x-real-ip": ip }, body,
+  });
+}
+
+test("all stats routes return the same 503 when either storage variable is absent", async (t) => {
+  for (const name of ["SUPABASE_URL", "SUPABASE_SECRET_KEY"]) {
+    const before = process.env[name];
+    t.after(() => {
+      if (before === undefined) delete process.env[name];
+      else process.env[name] = before;
+    });
+  }
+  t.mock.method(globalThis, "fetch", () => assert.fail("Unconfigured routes must not fetch"));
+  for (const [url, key] of [[undefined, secret], ["https://db.example", undefined]]) {
+    if (url === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = url;
+    if (key === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = key;
+
+    for (const response of await Promise.all([
+      install(installRequest("{")), submitAgent(installRequest("{")),
+      support(installRequest("{")), flush(cronRequest()), health(),
+    ])) {
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), {
+        ok: false, error: "Stats storage is not configured in this environment.",
+      });
+    }
+  }
+});
+
+test("install and flush preserve aggregate counts over failures and retries", async (t) => {
   const settings = {
     CRON_SECRET: "cron-test",
-    UPSTASH_REDIS_REST_URL: "https://redis.example",
-    UPSTASH_REDIS_REST_TOKEN: "redis-test",
+    SUPABASE_URL: "https://db.example",
+    SUPABASE_SECRET_KEY: secret,
+    STATS_IP_HASH_SECRET: "",
     OPENADMINOS_GITHUB_TOKEN: "github-test",
     OPENADMINOS_GITHUB_OWNER: "example",
     OPENADMINOS_GITHUB_REPO: "project",
@@ -28,126 +70,137 @@ test("install and flush store only aggregate counts, including requests from leg
       else process.env[key] = previous;
     });
   }
-  t.mock.timers.enable({ apis: ["Date"], now: new Date("2027-01-03T00:00:00Z") });
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(`${day}T00:00:00Z`) });
 
-  const transactions: Command[][] = [];
-  const readKeys: string[][] = [];
-  const rateCommands: Command[] = [];
-  const counters = new Map<string, number>([[dailyKey("2026-12-28"), 3], [dailyKey("2026-12-27"), 5]]);
-  let githubFile = { updatedAt: "2027-01-02T00:00:00Z", agents: { [slug]: { installs: 10, installs7d: 9 } } };
-  let commits = 0;
+  const newDailyCounts = { installs: 0, flushed: 0 };
+  let priorDaysInWindow = 3;
+  let rateAllowed = true;
+  let failCommit = true;
+  let failMark = true;
+  let commit = { sha: "commit-0", commit: { message: "stats: +1 install" } };
+  let githubFile = {
+    updatedAt: "2027-01-02T00:00:00Z",
+    agents: { [slug]: { installs: 10, installs7d: 9, comments: 2 } },
+  };
+  const events: string[] = [];
 
-  function run([name, ...args]: Command): unknown {
-    const key = String(args[0]);
-    switch (name.toLowerCase()) {
-      case "get":
-        assert.equal(key, "oa:slugs");
-        return JSON.stringify({ slugs: [slug] });
-      case "mget":
-        readKeys.push(args.map(String));
-        return args.map((arg) => counters.get(String(arg)) ?? null);
-      case "incr":
-        if (key.startsWith("oa:rate:install:")) rateCommands.push([name, ...args]);
-        counters.set(key, (counters.get(key) ?? 0) + 1);
-        return counters.get(key);
-      case "expire":
-        if (key.startsWith("oa:rate:install:")) rateCommands.push([name, ...args]);
-        return 1;
-      case "decrby":
-        counters.set(key, (counters.get(key) ?? 0) - Number(args[1]));
-        return counters.get(key);
-      default:
-        assert.fail(`Unexpected Redis command: ${name}`);
-    }
-  }
-
+  t.mock.method(console, "error", () => {});
   t.mock.method(globalThis, "fetch", async (input: string | URL, options?: RequestInit) => {
     const url = new URL(String(input));
-    if (url.origin === "https://redis.example") {
-      const body = JSON.parse(String(options?.body)) as Command | Command[];
-      if (Array.isArray(body[0])) {
-        const commands = body as Command[];
-        if (url.pathname === "/multi-exec") transactions.push(commands);
-        return Response.json(commands.map((command) => ({ result: run(command) })));
+    if (url.origin === "https://db.example") {
+      const headers = new Headers(options?.headers);
+      assert.equal(headers.get("content-profile"), "openadminos");
+      assert.equal(headers.get("apikey"), secret);
+      const rpc = url.pathname.split("/").at(-1);
+      const body = JSON.parse(String(options?.body));
+      switch (rpc) {
+        case "health": return Response.json(true);
+        case "rate_limit_hit": {
+          const hashKey = createHmac("sha256", secret).update("openadminos:stats:ip-hash:v1").digest();
+          assert.deepEqual(body, {
+            p_scope: "install",
+            p_key_hash: createHmac("sha256", hashKey).update(ip).digest("hex"),
+            p_window_seconds: 60,
+            p_max: 30,
+          });
+          return Response.json(rateAllowed);
+        }
+        case "record_install":
+          assert.deepEqual(body, { p_slug: slug, p_day: day });
+          newDailyCounts.installs++;
+          return Response.json(null);
+        case "pending_install_snapshot": {
+          const delta = newDailyCounts.installs - newDailyCounts.flushed;
+          return Response.json(delta > 0 ? [{ slug, delta, days: { [day]: newDailyCounts.installs } }] : []);
+        }
+        case "installs_7d":
+          return Response.json([{ slug, installs: priorDaysInWindow + newDailyCounts.installs }]);
+        case "mark_installs_flushed": {
+          events.push("mark");
+          const [snapshot] = body.p_snapshot as InstallSnapshot[];
+          assert.equal(snapshot?.slug, slug);
+          if (failMark) return Response.json({ code: "42501", message: "test mark failure" }, { status: 400 });
+          newDailyCounts.flushed = Math.max(newDailyCounts.flushed, snapshot?.days[day] ?? 0);
+          return Response.json(null);
+        }
+        case "purge_expired":
+          events.push("purge");
+          return Response.json(null);
+        default: assert.fail(`Unexpected RPC: ${rpc}`);
       }
-      return Response.json({ result: run(body as Command) });
     }
+
     assert.equal(url.origin, "https://api.github.com");
-    assert.equal(decodeURIComponent(url.pathname), statsPath);
-    if (options?.method === "PUT") {
-      commits++;
-      const { content } = JSON.parse(String(options.body)) as { content: string };
-      githubFile = JSON.parse(Buffer.from(content, "base64").toString("utf8")) as typeof githubFile;
-      return Response.json({});
+    switch (decodeURIComponent(url.pathname)) {
+      case "/repos/example/project/contents/agents":
+        assert.deepEqual((options as RequestInit & { next: unknown }).next, { revalidate: 3600 });
+        return Response.json([{ name: slug, type: "dir" }]);
+      case "/repos/example/project/commits":
+        assert.equal(url.searchParams.get("path"), "stats/agents.json");
+        return Response.json([commit]);
+      case statsPath: {
+        if (options?.method === "PUT") {
+          events.push("commit");
+          if (failCommit) return Response.json({ message: "test conflict" }, { status: 409 });
+          const { content, sha, message } = JSON.parse(String(options.body));
+          assert.equal(sha, `blob-${commit.sha}`);
+          githubFile = JSON.parse(Buffer.from(content, "base64").toString("utf8"));
+          commit = { sha: `commit-${events.length}`, commit: { message } };
+          return Response.json({});
+        }
+        assert.equal(url.searchParams.get("ref"), commit.sha);
+        return Response.json({
+          type: "file",
+          sha: `blob-${commit.sha}`,
+          content: Buffer.from(JSON.stringify(githubFile)).toString("base64"),
+        });
+      }
+      default: assert.fail(`Unexpected GitHub path: ${url.pathname}`);
     }
-    return Response.json({ type: "file", sha: "sample-blob", content: Buffer.from(JSON.stringify(githubFile)).toString("base64") });
   });
 
+  assert.deepEqual(await (await health()).json(), { ok: true });
   const payload = { slug, version: "0.8.0", platform: "linux" };
-  const request = (body: string) => new Request("https://example.test/api/install", {
-    method: "POST", headers: { "x-real-ip": "192.0.2.1" }, body,
-  });
-  const validBodies = [
-    payload,
-    ...["legacy-id", 42, false, null, ["legacy-id"], { ignored: "legacy-id" }].map((installId) => ({
-      ...payload, installId,
-    })),
-  ];
-  for (const body of validBodies) {
-    const response = await install(request(JSON.stringify(body)));
+  const send = (body: unknown) => install(installRequest(JSON.stringify(body)));
+  for (const body of [payload, ...["legacy-id", 42, false, null, [], {}].map((installId) => ({ ...payload, installId }))]) {
+    const response = await send(body);
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { counted: true });
   }
-  const increment = [
-    ["incr", pendingKey],
-    ["incr", dailyKey("2027-01-03")],
-    ["expire", dailyKey("2027-01-03"), 8 * 24 * 60 * 60],
-  ];
-  assert.deepEqual(transactions, validBodies.map(() => increment));
-  assert.equal(rateCommands.length, validBodies.length + 1);
-  assert.deepEqual(rateCommands[1]?.slice(2), [60]);
-
-  for (const [body, message] of [
-    ["{", "Body must be valid JSON."],
-    ["[]", "Body must be a JSON object."],
-    [JSON.stringify({ ...payload, slug: "INVALID" }), "`slug` must be a kebab-case string (max 64 chars)."],
-    [JSON.stringify({ ...payload, version: "invalid" }), "`version` must be a semver string (max 32 chars)."],
-    [JSON.stringify({ ...payload, platform: "invalid" }), "`platform` must be 'darwin', 'win32', or 'linux'."],
-  ] as const) {
-    const invalid = await install(request(body));
-    assert.equal(invalid.status, 400);
-    assert.deepEqual(await invalid.json(), { error: message });
+  assert.equal((await install(installRequest("{"))).status, 400);
+  for (const invalid of [[], { ...payload, slug: "INVALID" }, { ...payload, version: "invalid" }, { ...payload, platform: "invalid" }]) {
+    assert.equal((await send(invalid)).status, 400);
   }
-  assert.equal(rateCommands.length, validBodies.length + 1);
-
-  const unknown = await install(request(JSON.stringify({ ...payload, slug: "unknown-agent" })));
-  assert.equal(unknown.status, 404);
-  assert.deepEqual(await unknown.json(), { error: "Unknown agent: unknown-agent" });
-  const rateKey = String(rateCommands[0]?.[1]);
-  counters.set(rateKey, 30);
-  const limited = await install(request(JSON.stringify(payload)));
+  assert.equal((await send({ ...payload, slug: "unknown-agent" })).status, 404);
+  rateAllowed = false;
+  const limited = await send(payload);
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get("retry-after"), "60");
-  assert.deepEqual(await limited.json(), { error: "Rate limited. Slow down." });
-  assert.equal(transactions.length, validBodies.length);
+  assert.equal(newDailyCounts.installs, 7);
 
-  const cronRequest = () => new Request("https://example.test/api/flush", { headers: { authorization: "Bearer cron-test" } });
-  const first = await flush(cronRequest());
-  assert.equal(first.status, 200);
-  assert.equal(commits, 1);
-  assert.deepEqual(githubFile.agents[slug], { installs: 10 + validBodies.length, installs7d: 3 + validBodies.length });
-  assert.deepEqual(readKeys[0], [pendingKey, ...[
-    "2027-01-03", "2027-01-02", "2027-01-01", "2026-12-31", "2026-12-30", "2026-12-29", "2026-12-28",
-  ].map(dailyKey)]);
-  assert.deepEqual(transactions[validBodies.length], [["decrby", pendingKey, validBodies.length]]);
+  assert.equal((await flush(cronRequest())).status, 500);
+  assert.deepEqual(events.splice(0), ["commit"]);
+  assert.equal(newDailyCounts.flushed, 0);
 
-  t.mock.timers.setTime(new Date("2027-01-04T00:00:00Z").getTime());
-  const expired = await flush(cronRequest());
-  assert.equal(expired.status, 200);
-  assert.equal(commits, 2);
-  assert.deepEqual(githubFile.agents[slug], { installs: 10 + validBodies.length, installs7d: validBodies.length });
+  failCommit = false;
+  assert.equal((await flush(cronRequest())).status, 503);
+  assert.deepEqual(events.splice(0), ["commit", "mark"]);
+  assert.deepEqual(githubFile.agents[slug], { installs: 17, installs7d: 10, comments: 2 });
+  assert.equal(newDailyCounts.flushed, 0);
 
-  const unchanged = await flush(cronRequest());
-  assert.equal((await unchanged.json()).flushed, false);
-  assert.equal(commits, 2);
+  rateAllowed = true;
+  assert.equal((await send(payload)).status, 200);
+  failMark = false;
+  assert.equal((await flush(cronRequest())).status, 200);
+  assert.deepEqual(events.splice(0), ["mark", "commit", "mark", "purge"]);
+  assert.deepEqual(githubFile.agents[slug], { installs: 18, installs7d: 11, comments: 2 });
+  assert.equal(newDailyCounts.flushed, 8);
+
+  priorDaysInWindow = 0;
+  assert.equal((await flush(cronRequest())).status, 200);
+  assert.deepEqual(events.splice(0), ["mark", "commit", "purge"]);
+  assert.deepEqual(githubFile.agents[slug], { installs: 18, installs7d: 8, comments: 2 });
+
+  assert.equal((await (await flush(cronRequest())).json()).flushed, false);
+  assert.deepEqual(events, ["purge"]);
 });

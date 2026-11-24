@@ -8,7 +8,8 @@ import {
   supportIssuePreviewDigest,
   SupportIssueSizeError,
 } from "~/lib/support/issue-format";
-import { getRedis, keys } from "~/lib/stats/redis";
+import { statsUnavailable } from "~/lib/stats/responses";
+import { getStatsStore, StatsStorageError } from "~/lib/stats/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,12 @@ const SUPPORT_RATE_MAX_PER_WINDOW = 5;
 const SUPPORT_DEDUP_TTL_SECONDS = 24 * 60 * 60;
 const publicAgentSlugs = new Set(registryIndex.agents.map(({ slug }) => slug));
 
+class MissingGitHubConfig extends Error {}
+
 export async function POST(req: Request) {
+  const store = getStatsStore();
+  if (!store) return statsUnavailable(false);
+
   const raw = await req.text();
   if (Buffer.byteLength(raw, "utf8") > MAX_BODY_BYTES) {
     return jsonError(413, "Support report is too large.");
@@ -60,8 +66,8 @@ export async function POST(req: Request) {
   const dedupHash = sha256(dedupInput);
 
   try {
-    const rateLimited = await applySupportRateLimit(clientIp(req));
-    if (rateLimited) {
+    const allowed = await store.rateLimitHit("support-issue", req, SUPPORT_RATE_WINDOW_SECONDS, SUPPORT_RATE_MAX_PER_WINDOW);
+    if (!allowed) {
       return NextResponse.json(
         { error: "Rate limited. Try again later." },
         {
@@ -71,13 +77,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const duplicate = await hasSupportIssueDedup(dedupHash);
-    if (duplicate) {
+    const claimed = await store.claimSupportDedup(dedupHash, SUPPORT_DEDUP_TTL_SECONDS);
+    if (!claimed) {
       return jsonError(409, "A matching support issue was already submitted recently.");
     }
 
-    const issue = await createSupportIssue(title, issueBody);
-    await markSupportIssueDedup(dedupHash);
+    const issue = await createSupportIssue(title, issueBody).catch(async (error: unknown) => {
+      // Release on a definite rejection. A lost GitHub response can still mean the issue exists.
+      if (isGithubRejection(error)) await store.releaseSupportDedup(dedupHash);
+      throw error;
+    });
     return NextResponse.json({
       issueUrl: issue.html_url,
       issueNumber: issue.number,
@@ -85,6 +94,7 @@ export async function POST(req: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[support-issues] failed:", message);
+    if (error instanceof StatsStorageError) return statsUnavailable(true);
     return jsonError(500, "Failed to create GitHub issue.");
   }
 }
@@ -104,33 +114,15 @@ async function createSupportIssue(title: string, body: string) {
   return response.data;
 }
 
-async function applySupportRateLimit(ip: string): Promise<boolean> {
-  const redis = getRedis();
-  const bucket = Math.floor(Date.now() / 1000 / SUPPORT_RATE_WINDOW_SECONDS);
-  const rateKey = keys.supportIssueRate(ip, bucket);
-  const count = await redis.incr(rateKey);
-  if (count === 1) {
-    await redis.expire(rateKey, SUPPORT_RATE_WINDOW_SECONDS);
-  }
-  return count > SUPPORT_RATE_MAX_PER_WINDOW;
-}
-
-async function hasSupportIssueDedup(hash: string): Promise<boolean> {
-  const redis = getRedis();
-  return (await redis.get(keys.supportIssueDedup(hash))) !== null;
-}
-
-async function markSupportIssueDedup(hash: string): Promise<void> {
-  const redis = getRedis();
-  await redis.set(keys.supportIssueDedup(hash), "1", {
-    nx: true,
-    ex: SUPPORT_DEDUP_TTL_SECONDS,
-  });
+function isGithubRejection(error: unknown): boolean {
+  if (error instanceof MissingGitHubConfig) return true;
+  return typeof error === "object" && error !== null && "status" in error &&
+    typeof error.status === "number" && error.status >= 400 && error.status < 500 && error.status !== 408;
 }
 
 function requireEnv(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} is not configured.`);
+  if (!value) throw new MissingGitHubConfig(`${name} is not configured.`);
   return value;
 }
 
@@ -140,12 +132,4 @@ function sha256(value: string): string {
 
 function jsonError(status: number, message: string) {
   return NextResponse.json({ error: message }, { status });
-}
-
-function clientIp(req: Request): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]?.trim() ?? "unknown";
-  const real = req.headers.get("x-real-ip");
-  if (real) return real;
-  return "unknown";
 }

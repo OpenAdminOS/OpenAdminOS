@@ -1954,27 +1954,47 @@ local state. A failed or interrupted request still uses that year's attempt.
 This can undercount installs. Existing installs are not reported retroactively.
 Agent Hub uses bundled counts.
 
-The stats endpoint keeps aggregate pending counters and eight-day UTC daily
-counters. The cron sums the current day and six preceding UTC days. IP addresses
-are used briefly for rate limiting. Legacy clients can still send an install ID,
-which the endpoint ignores. The desktop removes its former identifier and usage
-telemetry preference when upgrading.
+The website stores aggregate install counts by agent slug and UTC day in the
+shared Supabase project in Frankfurt (`eu-central-1`). The hourly cron preserves
+published lifetime totals in `stats/agents.json` and sums the current UTC day
+and the six preceding days for the rolling total. A commit records the daily
+counter snapshot in its message so the cron can acknowledge it after GitHub
+accepts the commit, including on retry. Fully flushed daily rows older than
+eight days are purged. The install endpoint ignores legacy install IDs. The
+desktop removes its former identifier and usage telemetry preference on upgrade.
 
-Run the install-count migration in this order.
+The website caches the GitHub agent directory list for an hour through Next.js.
+Install, agent submission and support issue rate limiting store an HMAC-SHA256
+of the client IP until the window expires. The database receives no raw IP
+addresses. The server uses `STATS_IP_HASH_SECRET` when set. Otherwise it derives
+the HMAC key from `SUPABASE_SECRET_KEY` with the fixed label
+`openadminos:stats:ip-hash:v1`. Support deduplication claims expire after one
+day. The API role can execute functions in `openadminos` and has no direct
+table access. The routes return HTTP 503 unless both `SUPABASE_URL` and
+`SUPABASE_SECRET_KEY` are available.
 
-1. Deploy the web app with the updated install endpoint and stats cron.
-2. POST a valid public agent slug, app version, and platform to `/api/install`
-   without `installId`. Confirm an HTTP 200 response with `{"counted":true}`.
-3. With the web dependencies installed and `UPSTASH_REDIS_REST_URL` and
-   `UPSTASH_REDIS_REST_TOKEN` set for the deployed database, run
-   `node scripts/delete-legacy-install-keys.mjs` and review the count. Then run
-   `node scripts/delete-legacy-install-keys.mjs --apply` to remove the legacy
-   `oa:dedup:<id>:<slug>` and `oa:installs7d:<slug>` keys. The script preserves
-   support deduplication, rate limits, pending install keys and per-day counts.
-4. Release the updated desktop app.
+#### Website stats migration
 
-The stats cron preserves lifetime totals and applies existing pending deltas.
-The seven-day total starts from the new daily counters.
+1. Apply the SQL in `web/supabase/migrations` to the shared Supabase project and
+   add `openadminos` to the Data API's Exposed schemas list. Confirm the
+   website's production database URL and server-only secret are configured.
+2. Pause legacy install intake for the final legacy flush and cutover. Confirm
+   the last flush succeeded so all pending counts are in the GitHub lifetime
+   totals before deploying the new website. The new store starts the rolling
+   total from its own UTC daily rows.
+3. Check that `GET /api/health` returns HTTP 200 with `{"ok":true}`. POST a valid
+   public agent slug, app version, and platform to `/api/install` without an
+   install ID. Confirm HTTP 200 with `{"counted":true}` and verify that the next
+   flush preserves lifetime totals and adds the test install.
+4. Send an authenticated `POST /api/admin/legacy-upstash-cleanup` with the cron
+   bearer secret. Review the dry-run counts. Send the same request with
+   `?apply=1` to remove the legacy website keys. For either mode, repeat with
+   `cursor=<nextCursor>` until `complete` is true. Each response counts the
+   current invocation. Run a final dry run from cursor zero to verify no
+   website keys remain.
+5. Remove the legacy REST URL and token from the website environment and remove
+   the temporary route. Delete the Upstash account after confirming its other
+   projects, if any, have been migrated.
 
 Settings > Privacy offers Automatic network requests, on by default. Turning it
 off stops background app update checks, startup, focus and periodic registry

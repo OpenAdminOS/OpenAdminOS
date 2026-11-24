@@ -10,6 +10,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The website stores install counts and abuse limits in an EU-hosted database without storing raw IP addresses.
+
 - Public registry install counts send only the agent slug, app version, and platform. OpenAdminOS records one attempt per agent and UTC year on the device, including failed requests. About shows counts as paused when automatic requests are off and the count preference is on.
 
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
