@@ -14,7 +14,8 @@
     "start": "next start",
     "pretypecheck": "npm run sync-stats",
     "typecheck": "tsc --noEmit",
-    "landing-shots": "node ./scripts/landing-shots.mjs"
+    "landing-shots": "node ./scripts/landing-shots.mjs",
+    "test": "node --import tsx --test \"src/lib/support/*.test.ts\""
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -38,6 +39,7 @@
     "@types/react-dom": "^19.0.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^4.0.15",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   },
   "ct3aMetadata": {
