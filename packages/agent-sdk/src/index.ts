@@ -1116,7 +1116,8 @@ export interface RunRecord {
   /**
    * The run failed because the model on this device could not do it, as the
    * host classified the failure and confirmed, when it failed, that the model
-   * ran on this device. The run page offers other providers only from this.
+   * ran on this device. Older reasoning-only failures may also show an offer
+   * based on the recorded cause or Ollama error message.
    */
   modelFit?: ModelFitIssue;
   /** Model fit rerun: where the provider was reached at admission; every phase is built only for it. */

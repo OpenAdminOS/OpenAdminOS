@@ -8,7 +8,7 @@ import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { ModelFitNotice } from "../components/ModelFitNotice";
 import { isOnDeviceModel, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
-import { isOllamaKeptContextFailure } from "../shared/ollama-failure";
+import { isOllamaKeptContextFailure, isReasoningWithoutAnswerRun } from "../shared/ollama-failure";
 import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
@@ -113,10 +113,8 @@ function RunResultPage({ run }: { run: RunRecord }) {
     : undefined;
   // Fall back to the built-in catalog so a run whose provider entry was
   // later removed still reports where its data went.
-  const endpointProvider = run.providerId
-    ? state.providers.find((provider) => provider.id === run.providerId) ??
-      providerCatalog.find((provider) => provider.id === run.providerId)
-    : undefined;
+  const currentProvider = state.providers.find((provider) => provider.id === run.providerId);
+  const endpointProvider = currentProvider ?? providerCatalog.find((provider) => provider.id === run.providerId);
   const runProvider = providerForModel(
     endpointProvider && run.ollamaCloud !== undefined && run.model
       ? { ...endpointProvider, isLocal: !run.ollamaCloud, remoteModels: run.ollamaCloud ? [run.model] : [] }
@@ -138,15 +136,20 @@ function RunResultPage({ run }: { run: RunRecord }) {
     run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
   );
 
-  // The local model could not fit this run: offer what else is configured
-  // (mockup 36, section F). Team runs keep their own review in Agent Team.
-  // The host records the fit issue when the run fails, after confirming its model ran on this
-  // device then; a provider that is not on this device now is not offered from either.
-  const modelFit =
-    run.status === "failed" && !isSystemRun && !run.officeContext && run.modelFit && run.failureCause !== "reasoning-without-answer"
-      && !isOllamaKeptContextFailure(run.error, run.failureReason) && runProvider && isOnDeviceModel(runProvider, run.model)
-      ? run.modelFit
-      : undefined;
+  // Team runs keep their own review. Older reasoning failures can recover the
+  // issue from their saved cause or Ollama's own message.
+  let modelFit: ModelFitIssue | undefined;
+  if (run.status === "failed" && !isSystemRun && !run.officeContext && !run.ollamaOffDevice && runProvider && isOnDeviceModel(runProvider, run.model)) {
+    if (isReasoningWithoutAnswerRun(run)) {
+      if (currentProvider && isOnDeviceModel(currentProvider, run.model)) {
+        modelFit = run.modelFit?.reason === "thinking-only"
+          ? run.modelFit
+          : { reason: "thinking-only", providerId: runProvider.id, ...(run.model ? { model: run.model } : {}) };
+      }
+    } else if (!isOllamaKeptContextFailure(run.error, run.failureReason)) {
+      modelFit = run.modelFit;
+    }
+  }
   // Run again of a model fit rerun keeps its safeguards: the on-device check and the endpoint binding.
   const ownRerunChoice: RerunChoice = {
     ...(run.providerId ? { providerId: run.providerId } : {}),
@@ -564,8 +567,7 @@ function RunPage({
             />
           ) : null}
 
-          {/* A run the model fit notice covers gets one recovery: the notice, with the numbers and the choices. */}
-          {modelFit ? null : <RunFailureRemediation run={run} />}
+          {!modelFit || modelFit.issue.reason === "thinking-only" ? <RunFailureRemediation run={run} /> : null}
           {modelFit ? (
             <ModelFitNotice
               issue={modelFit.issue}

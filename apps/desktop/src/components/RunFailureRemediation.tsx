@@ -2,7 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
-import { isOllamaKeptContextFailure, ollamaFailureOwnText as ownText } from "../shared/ollama-failure";
+import { isOllamaKeptContextFailure, isOllamaReasoningWithoutAnswerMessage, ollamaFailureOwnText as ownText } from "../shared/ollama-failure";
 import { errorIsGraphSignInRejection, graphAccessDenialFromStoredText, storedGraphAccessDenial, type ContextTooSmallFailure } from "@openadminos/agent-sdk";
 
 interface Suggestion {
@@ -40,16 +40,8 @@ function lmStudioContextAdvice(error: string): string {
     : "LM Studio sets a model's context length when the model is loaded, and this request did not fit. In LM Studio, raise Context Length in the model's load settings and reload the model, then re-run.";
 }
 
-/**
- * The runtime's two messages for an Ollama reply with reasoning and no answer,
- * read from the app's own text so a quoted server body cannot match.
- */
-const isReasoningWithoutAnswer = (e: string) =>
-  /^Ollama stopped "[^"]+" at the token limit while it was still reasoning, so there is no answer\./.test(ownText(e)) ||
-  /^Ollama returned only reasoning from "[^"]+" and no answer\./.test(ownText(e));
-
 /** Errors with one cause and one recovery: only their own playbook is shown. */
-const EXCLUSIVE = [isOllamaKeptContextFailure, isLmStudioContextTooSmall, isContextLimitLookup, isReasoningWithoutAnswer];
+const EXCLUSIVE = [isOllamaReasoningWithoutAnswerMessage, isOllamaKeptContextFailure, isLmStudioContextTooSmall, isContextLimitLookup];
 
 /**
  * A Microsoft sign-in error as MSAL reports it: the message starts with an
@@ -87,7 +79,7 @@ const SUGGESTIONS: Suggestion[] = [
     body: lmStudioContextAdvice,
   },
   {
-    match: isReasoningWithoutAnswer,
+    match: isOllamaReasoningWithoutAnswerMessage,
     title: "Model reasoned without answering",
     body: "The model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or pick a model that answers without reasoning in Settings → LLM Providers, then re-run.",
   },
@@ -169,10 +161,10 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const own = ownText(run.error);
   // A cause the runtime classified from its typed error decides, whatever
   // wrapper the app put in front of the message.
-  const exclusive = typed
-    ? (typed.ollamaKeptContext === true ? isOllamaKeptContextFailure : undefined)
-    : run.failureCause === "reasoning-without-answer"
-      ? isReasoningWithoutAnswer
+  const exclusive = run.failureCause === "reasoning-without-answer"
+    ? isOllamaReasoningWithoutAnswerMessage
+    : typed
+      ? (typed.ollamaKeptContext === true ? isOllamaKeptContextFailure : undefined)
       : EXCLUSIVE.find((match) => match(own));
   const matched = exclusive
     ? SUGGESTIONS.filter((suggestion) => suggestion.match === exclusive)

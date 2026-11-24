@@ -475,9 +475,9 @@ answer the broker never handled (a refused request file) is none; an error
 without an id is the script's own, even with the same text as a failure it
 handled, so the output is never parsed for it, and every matching failure must
 be this cause; that recorded failure also decides before the output is read
-for a context size refusal), and the failure panel shows only the
-"Model reasoned without answering" card; such a run gets no model fit offer
-from text that reads like a context limit, and Chat's compact loop fails the
+for a context size refusal). The failure panel keeps the
+"Model reasoned without answering" card alongside the reasoning-only
+model fit offer for an on-device run. Chat's compact loop fails the
 message with the cause instead of falling back to cached data. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this
@@ -2678,8 +2678,11 @@ Signals. Only a model on this device gets the offer: a local provider, and not
 a remote-backed or Ollama Cloud model, whose prompt already left the device.
 Its locality is confirmed when the request fails (the same fresh check), not
 from a provider list read earlier. For runs the host records the fit issue on
-the run (`RunRecord.modelFit`) when it fails, after that check, and the run page
-offers only from it.
+the run (`RunRecord.modelFit`) when it fails, after that check. For older
+reasoning-only runs without that issue, the run page checks the recorded cause
+or matches Ollama's two reasoning-only messages after removing the app's
+write-plan failure wrappers. The offer requires an on-device model and is
+unavailable for runs recorded against Ollama Cloud or an off-device server.
 - The prompt does not fit the context window. Today this is the provider's own
   error: the Ollama adapter's "context size too small" message with the tokens
   needed and the limit (PR #211 and later), including the form where Ollama could
@@ -2708,8 +2711,10 @@ adapter's "LM Studio context length too small" message (PR #219), Ollama's HTTP 
   from cached data and carries the offer. When the investigation loop reports
   a finer `failureReason` with its fallback (`context-too-small` or
   `thinking-only`, from the local model accuracy work), that reason is used.
-- A thinking-only answer that ran out of budget, once the runtime reports it as
-  its own typed reason (`thinking-only`). There is no text guessing for it.
+- A thinking-only answer from the Chat loop or Ollama's typed
+  reasoning-without-answer failure on an agent run. The run records the
+  `thinking-only` fit reason, including when Ollama stops without an answer
+  before reaching the token limit.
 
 The notice replaces the generic error above the composer. It says why in
 plain numbers where known ("This request needs about 40,652 tokens. OpenAdmin
@@ -2720,8 +2725,10 @@ and a cost note that says where the cost lands (the app knows no plan or
 price). Hosted means a hosted service (a vendor CLI or Azure OpenAI): an
 Ollama, LM Studio or Lemonade server outside this device is not offered and
 the host refuses it, because its location is not stated and its adapter
-follows redirects; up to two installed local models with a larger parameter count in
-their name. For a context overflow, local choices must report a context
+follows redirects. The notice also offers up to two installed local models.
+A reasoning-only failure can offer any other on-device model, regardless of
+parameter count or context window. For a context overflow, local choices must
+have at least the same parameter count when the failed model's count is known and report a context
 window at least as large as the request's known token count. This includes
 a 1,024-token answer margin when llama.cpp reports only the prompt size.
 A model of the same parameter count can qualify if its context fits.
@@ -2813,8 +2820,11 @@ uses the model it left; read later, after the admin changed the provider or
 model, the line ends at "for this request only." A failed answer carries `modelFit` with the
 reason and numbers, kept in the answer metadata.
 
-Agent runs. A run that failed on a local provider with a context failure shows
-the same notice on the run page ("Run again with"). Choosing a provider opens
+Agent runs. A run that failed on an on-device model with a context or
+reasoning-only failure shows the model fit notice on the run page. The
+reasoning-only offer says "<model> reasoned without answering" and
+"Run this agent with another model". The scheduled-run banner links to
+the failed run, where the admin can review the choices. Choosing a provider opens
 the run review with that provider and model, which is the run's accept step:
 it names where prompts go and says "<model> could not fit the last run, so
 this run uses <provider>. This run only: the agent keeps its model for later
@@ -2822,7 +2832,8 @@ runs." Start run starts the agent with `providerId` and `model` for that run
 only, pinned to the organization the review showed (`tenantId`), or with
 `expectNoTenant` when it showed none, so an organization switch before the
 host admits the run refuses it instead of running elsewhere. A failed dry run
-stays a dry run. A larger local model passes `requireOnDeviceModel`, so the
+stays a dry run and a write run still pauses for diff confirmation. An
+on-device alternative passes `requireOnDeviceModel`, so the
 host makes the same fresh check before it admits the run, and the run record
 keeps it so every later phase (plan, replan after the diff, apply) checks
 again before it builds the model and before every model call. Every fit rerun passes

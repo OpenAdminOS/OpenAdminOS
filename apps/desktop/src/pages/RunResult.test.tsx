@@ -885,6 +885,7 @@ it("says Run again did not continue when the run page closes before the switch l
 
 describe("Run with another provider after a model fit failure (mockup 36, section F)", () => {
   const CONTEXT_ERROR = "Ollama context size too small: This request needs 40,652 tokens of context, but Ollama could only give llama3.1 16,384, usually because free memory ran out.";
+  const REASONING_ERROR = 'Ollama returned only reasoning from "llama3.1" and no answer. Retry, or pick a model that answers without reasoning.';
   // What the host records with such a failure, after confirming the model ran on this device.
   const FIT = { modelFit: { reason: "context-too-small" as const, providerId: "ollama" as const, model: "llama3.1", neededTokens: 40652, limitTokens: 16384 } };
 
@@ -925,6 +926,73 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
     // Pinned to the organization the review showed, so a switch before admission cannot move it.
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5", tenantId: "tenant-1", bindProviderEndpoint: true, expectedProviderDestination: "dest-openai" })));
+  });
+
+  it("keeps the recovery card and offers on-device alternatives for an older wrapped reasoning-only failure", async () => {
+    const run = createAwaitingConfirmationRun({
+      status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1",
+      error: "Nothing was applied: The proposal could not be checked against the tenant before applying, so nothing was applied. " + REASONING_ERROR,
+    });
+    const providers = mockProviders.map((provider) => provider.id === "ollama"
+      ? { ...provider, models: ["llama3.1", "cloud-alias", "qwen:32b-cloud", "qwen:4b", "custom"], remoteModels: ["cloud-alias"] }
+      : provider);
+    const getModelFitContextWindow = vi.fn();
+    const bridge = makeMockBridge({ getModelFitContextWindow }, createMockAppState({ providers, runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+    const notice = await screen.findByRole("region", { name: "llama3.1 reasoned without answering" });
+    expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+    expect(within(notice).getByText("Run this agent with another model")).toBeInTheDocument();
+    expect(within(notice).getByRole("button", { name: "Use qwen:4b" })).toBeInTheDocument();
+    expect(within(notice).getByRole("button", { name: "Use custom" })).toBeInTheDocument();
+    expect(within(notice).queryByRole("button", { name: /Use (llama3\.1|cloud-alias|qwen:32b-cloud)/ })).toBeNull();
+    expect(within(notice).queryByText(/context|tokens/i)).toBeNull();
+    expect(getModelFitContextWindow).not.toHaveBeenCalled();
+  });
+
+  it("requires hosted review for a reasoning-only write rerun and still waits for diff confirmation", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({
+      status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1",
+      failureCause: "reasoning-without-answer", error: REASONING_ERROR,
+    });
+    const proposed = createAwaitingConfirmationRun({
+      id: "hosted-rerun", agentSlug: run.agentSlug, providerId: "openai", model: "gpt-5", tenantId: "tenant-1",
+    });
+    const state = createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] });
+    let runs = [run];
+    const bridge = makeMockBridge({
+      startRun: vi.fn(async () => { runs = [proposed, run]; return proposed; }),
+      getAppState: vi.fn(async () => ({ ...state, runs })),
+    }, state);
+    renderWithPreflight(run.id, bridge);
+
+    const notice = await screen.findByRole("region", { name: "llama3.1 reasoned without answering" });
+    expect(within(notice).getByText("Codex · location set by your account")).toBeInTheDocument();
+    await user.click(within(notice).getByRole("button", { name: "Run with Codex" }));
+    const review = await screen.findByRole("dialog", { name: "Review run" });
+    expect(within(review).getByText(/llama3\.1 reasoned without answering on the last run, so this run uses Codex/)).toBeInTheDocument();
+    expect(within(review).getByText(/leave this device through Codex; location set by your account/)).toBeInTheDocument();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+    await user.click(within(review).getByRole("button", { name: "Start run" }));
+    expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({
+      providerId: "openai", model: "gpt-5", tenantId: "tenant-1", bindProviderEndpoint: true, expectedProviderDestination: "dest-openai",
+    }));
+    expect(await screen.findByRole("button", { name: "Apply 2 changes" })).toBeDisabled();
+    expect(bridge.confirmRun).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ollamaCloud: true },
+    { ollamaOffDevice: true as const },
+  ])("keeps the reasoning card without an offer for an off-device run: %j", async (destination) => {
+    const run = createAwaitingConfirmationRun({
+      status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", error: REASONING_ERROR, ...destination,
+    });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    expect(await screen.findByText("Model reasoned without answering")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "llama3.1 reasoned without answering" })).toBeNull();
   });
 
   it("shows one recovery for a typed context failure: the notice, not also the remediation text", async () => {
@@ -984,12 +1052,15 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     expect(bridge.startRun).not.toHaveBeenCalled();
   });
 
-  it("keeps a failed dry run a dry run when it is run again with another provider", async () => {
+  it.each([
+    { error: CONTEXT_ERROR, ...FIT },
+    { error: REASONING_ERROR, failureCause: "reasoning-without-answer" as const },
+  ])("keeps a failed dry run a dry run when it is run again with another provider: %j", async (failure) => {
     const user = userEvent.setup();
-    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, dryRun: true, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", error: CONTEXT_ERROR, ...FIT });
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, dryRun: true, providerId: "ollama", model: "llama3.1", tenantId: "tenant-1", ...failure });
     const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }));
     renderWithPreflight(run.id, bridge);
-    await user.click(within(await screen.findByRole("region", { name: "llama3.1 cannot fit this run" })).getByRole("button", { name: "Run with Codex" }));
+    await user.click(await screen.findByRole("button", { name: "Run with Codex" }));
     const dialog = await screen.findByRole("dialog", { name: /Review dry run/ });
     await user.click(within(dialog).getByRole("button", { name: /Start/ }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ dryRun: true, providerId: "openai" })));
