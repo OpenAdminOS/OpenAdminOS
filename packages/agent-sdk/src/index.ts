@@ -1488,7 +1488,17 @@ export interface IntuneChatAgentSuggestion {
   scopes: string[];
 }
 
+export interface ChatDataTable {
+  resource: GraphCacheResourceKind;
+  filters: string;
+  totalCount: number;
+  columns: string[];
+  rows: string[][];
+  refreshedAt: string;
+}
+
 export interface IntuneChatMessage {
+  dataTables?: ChatDataTable[];
   id: string;
   conversationId: string;
   role: IntuneChatMessageRole;

@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
+import type { ChatDataTable, GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
 import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate, type ChatDateTimeLocale } from "../../src/shared/chat-date-time.js";
+import { CHAT_TABLE_ROW_CAP, chatCacheTable, chatTableNote } from "./cache-table.js";
 import type { GraphCacheQueryPredicate, IntelligenceSqliteStore } from "./sqlite-store.js";
 
 /**
@@ -97,6 +98,7 @@ export interface ComputedResult {
   /** Rows of the set itself, when the set is listed and has no focus. */
   rows?: ComputedListedRow[];
   rowsComplete?: boolean;
+  dataTable?: ChatDataTable;
   /** Plain sentences, computed in code: the answer a local model's turn shows, and the facts a hosted model states. */
   facts: string[];
   /** What the question asks that the cached data does not hold. */
@@ -618,6 +620,13 @@ export function computeStructuredResult(input: {
   // noncompliant list lists the compliant ones, labelled as such.
   const listedFilters = query.focus ? [...query.filters.filter((filter) => !query.focus!.filters.some((focus) => focus.field === filter.field)), ...query.focus.filters] : query.filters;
   const listedTotal = query.focus && focusCount ? focusCount.total : counted.total;
+  const countedFilters = [...baseFilters, ...(query.focus?.filters ?? [])];
+  const tableFilters = describeFilters(countedFilters, input.timestampLocale);
+  const dataTable = (listSet || query.focus) && listedTotal > COMPUTED_LIST_LIMIT && listedTotal <= CHAT_TABLE_ROW_CAP
+    ? chatCacheTable(query.resource, query.ids ? `${tableFilters} within the previous result` : tableFilters, status.refreshedAt, store.countGraphCache({
+        tenantId, resource: query.resource, filters: countedFilters, ...ids, listLimit: listedTotal,
+      }).rows ?? [])
+    : undefined;
   // The ids a follow-up narrows: the listed set, when it is small enough to keep.
   const contextIds = listedTotal <= CONTEXT_ID_LIMIT
     ? (store.countGraphCache({ tenantId, resource: query.resource, filters: query.focus ? [...baseFilters, ...query.focus.filters] : baseFilters, ...ids, listLimit: CONTEXT_ID_LIMIT }).rows ?? []).flatMap((row) => listedRow(row)?.id ?? [])
@@ -658,16 +667,15 @@ export function computeStructuredResult(input: {
     // An OS split asked for in a follow-up is shown even with one OS; otherwise only when the subset spans several.
     const showOs = os && (Object.keys(focusCount.groups.operatingSystem ?? {}).length > 1 || (query.followUp !== undefined && query.breakdown.includes("operatingSystem")));
     const parts = [...(showOs ? [os] : []), ...focusBreakdown];
-    facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length ? ":" : "."}`);
-    facts.push(...focusRows.map(formatRow));
-    if (focusCount.total > focusRows.length) facts.push(`${focusCount.total - focusRows.length} more match and are not listed.`);
+    facts.push(`${subject}: ${focusCount.total}${parts.length ? ` (${parts.join("; ")})` : ""}${focusRows.length && !dataTable ? ":" : "."}`);
+    if (!dataTable) facts.push(...focusRows.map(formatRow));
+    if (focusCount.total > focusRows.length) facts.push(chatTableNote(focusCount.total, Boolean(dataTable)));
   } else if (listSet) {
-    facts.push(...rows.map(formatRow));
-    if (counted.total > rows.length) facts.push(`${counted.total - rows.length} more match and are not listed.`);
+    if (!dataTable) facts.push(...rows.map(formatRow));
+    if (counted.total > rows.length) facts.push(chatTableNote(counted.total, Boolean(dataTable)));
   }
   // A sync window counts devices with a reported sync time; those without one are said, not silently left out.
   // The set the window applied to is what was counted: the previous rows by id for a follow-up, the filters otherwise.
-  const countedFilters = query.focus ? [...baseFilters, ...query.focus.filters] : baseFilters;
   if (countedFilters.some((filter) => filter.field === "lastSyncDateTime")) {
     const others = countedFilters.filter((filter) => filter.field !== "lastSyncDateTime");
     const unknown = store.countGraphCache({ tenantId, resource: query.resource, filters: [...others, { field: "lastSyncDateTime", op: "eq", value: null }], ...ids }).total;
@@ -691,6 +699,7 @@ export function computeStructuredResult(input: {
       : {}),
     ...(listSet ? { rows, rowsComplete: rows.length === counted.total } : {}),
     facts,
+    ...(dataTable ? { dataTable } : {}),
     ...(snapshot ? { snapshot } : {}),
     context: {
       version: 1,
@@ -813,13 +822,13 @@ export function computedAnswerText(result: ComputedResult): string {
 export function computedResultForModel(result: ComputedResult): Record<string, unknown> {
   return {
     authoritative: true,
-    rule: "Computed in code over every cached row. State these facts and numbers exactly, name every listed row, and do not count sample rows yourself. Do not give reasons that are not in these facts; where the data does not hold the answer, say so.",
+    rule: "Computed in code over every cached row. State these facts and numbers exactly, name every listed row when no complete table is attached, and do not count sample rows yourself. When a complete table is attached, tell the user it can be opened or exported below the answer. Do not give reasons that are not in these facts; where the data does not hold the answer, say so.",
     resource: result.resource,
     scope: result.scopeLabel,
     total: result.total,
     ...(Object.keys(result.groups).length ? { breakdowns: result.groups } : {}),
-    ...(result.focus ? { focus: result.focus } : {}),
-    ...(result.rows ? { rows: result.rows } : {}),
+    ...(result.focus ? { focus: result.dataTable ? { ...result.focus, rows: [] } : result.focus } : {}),
+    ...(result.rows && !result.dataTable ? { rows: result.rows } : {}),
     ...(result.notInData ? { notInData: result.notInData } : {}),
     facts: result.facts,
   };

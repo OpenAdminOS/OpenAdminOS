@@ -802,8 +802,9 @@ sent to hosted speech. Numbered Nova lists retain their numbering, including a
 single-item list; other report previews retain the existing numbered-section default.
 
 Fleet non-compliance and unencrypted-device lists use filtered SQLite fields directly,
-include snapshot freshness and coverage, and report the 50-row detail cap. Missing
-encryption is unknown. Fleet “why non-compliant” questions read live per-device
+include snapshot freshness and coverage. Larger chat lists attach a complete table with
+CSV export for up to 10,000 cached matches. Cache queries support 50-row pages.
+Missing encryption is unknown. Fleet “why non-compliant” questions read live per-device
 compliance policy setting states with DeviceManagementConfiguration.Read.All consent; they investigate
 at most ten matching devices and explicitly disclose the remaining coverage. Each
 collection follows validated beta continuation links with a ten-page/1,000-row bound.

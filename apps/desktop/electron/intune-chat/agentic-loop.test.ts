@@ -1220,3 +1220,70 @@ describe("the tool set behind Nova shortcuts and follow-ups", () => {
     });
   }
 });
+
+it("attaches complete cached app lists outside the model prompt and pages every row", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-app-list-"));
+  const store = seededStore(dir);
+  try {
+    const types = [...Array(78).fill("win32LobApp"), ...Array(19).fill("winGetApp"), "windowsUniversalAppX"];
+    const rows = Array.from({ length: 216 }, (_, index) => ({
+      id: `app-${String(index).padStart(3, "0")}`,
+      displayName: `Synthetic App ${String(index).padStart(3, "0")}`,
+      "@odata.type": `#microsoft.graph.${types[index] ?? ["iosStoreApp", "androidLobApp", "macOSPkgApp"][index % 3]}`,
+    }));
+    store.replaceGraphResources({
+      tenantId: tenant.id, resource: "mobileApps", label: "Apps", scopeSet: [],
+      refreshedAt: "2026-11-24T06:39:00.000Z", rows,
+    });
+    const tables: import("@openadminos/agent-sdk").ChatDataTable[] = [];
+    const tools = { ...toolContext(store), attachTable: (table: (typeof tables)[number]) => tables.push(table) };
+    const params = { resource: "mobileApps", list: true };
+    const all = await executeIntuneChatTool(tools, "count_cached", params);
+    assert.equal((all.result as { totalCount: number }).totalCount, 216);
+    const windows = await executeIntuneChatTool(tools, "count_cached", { ...params, where: { appPlatform: "Windows" } });
+    assert.equal((windows.result as { totalCount: number }).totalCount, 98);
+    for (const [index, total] of [216, 98].entries()) {
+      const table = tables[index]!;
+      assert.equal(table.totalCount, total);
+      assert.deepEqual(table.rows.map(row => row[table.columns.indexOf("id")]), rows.slice(0, total).map(row => row.id));
+    }
+    const paged: string[] = [];
+    for (const offset of [0, 50, 100, 150, 200, 250]) {
+      const page = (await executeIntuneChatTool(tools, "query_cache", { resource: "mobileApps", offset, limit: 50 })).result as {
+        totalCount: number; returnedRows: number; hasMore: boolean; nextOffset: number | null; rows: { row: { id: string } }[];
+      };
+      assert.equal(page.totalCount, 216);
+      assert.equal(page.returnedRows, Math.max(0, Math.min(50, 216 - offset)));
+      assert.equal(page.hasMore, offset < 200);
+      assert.equal(page.nextOffset, offset < 200 ? offset + 50 : null);
+      paged.push(...page.rows.map(entry => entry.row.id));
+    }
+    assert.deepEqual(paged, rows.map(row => row.id));
+
+    const prompts: string[] = [];
+    const llm = scriptedLlm([
+      '```json\n{"tool":"count_cached","params":{"resource":"mobileApps","list":true}}\n```',
+      '```json\n{"final":true,"answer":"The complete list of 216 apps is attached."}\n```',
+    ]);
+    const result = await runAgenticChat({
+      ...baseInput(store, { ...llm, async complete(options) {
+        prompts.push(JSON.stringify(options));
+        return llm.complete(options);
+      } }),
+      question: "List all Intune apps",
+      plannedResources: ["mobileApps"],
+      tools,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(tables[2]?.rows.length, 216);
+    assert.match(prompts.join("\n"), /complete list of 216 matching cached rows/);
+    assert.doesNotMatch(prompts.join("\n"), /Synthetic App 215/);
+    const conversation = store.createConversation({ id: "app-list", tenantId: tenant.id, title: "App list", now: tenant.addedAt });
+    store.insertMessage({ id: "answer", conversationId: conversation.id, role: "assistant", status: "completed",
+      content: result.answer ?? "", createdAt: new Date().toISOString(), dataTables: [tables[2]!] });
+    assert.deepEqual(store.listMessages(conversation.id)[0]?.dataTables, [tables[2]]);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

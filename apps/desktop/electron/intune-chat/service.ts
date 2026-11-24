@@ -2370,6 +2370,8 @@ export class IntuneChatService {
     let engineNotice: string | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
+    const dataTables: NonNullable<IntuneChatMessage["dataTables"]> = [];
+    const attachTable = (table: (typeof dataTables)[number]) => dataTables.push(table);
     let documentationSources: IntuneChatDocumentationSource[] = [];
     let modelFollowUps: string[] = [];
     let modelTitle: string | undefined;
@@ -2506,7 +2508,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant), ...mcp, tenantObservations },
+              tools: { ...this.buildChatToolContext(tenant), ...mcp, tenantObservations, attachTable },
               plannedResources: planned.resources,
               smallTalk: isSmallTalk(content),
               agentSuggestions,
@@ -2624,6 +2626,7 @@ export class IntuneChatService {
           : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
+      ...((dataTables.length || computed?.dataTable) ? { dataTables: [...dataTables, ...(computed?.dataTable ? [computed.dataTable] : [])] } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
     };
@@ -3157,6 +3160,8 @@ export class IntuneChatService {
     let fitModel = selectedModel;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
+    const dataTables: NonNullable<IntuneChatMessage["dataTables"]> = [];
+    const attachTable = (table: (typeof dataTables)[number]) => dataTables.push(table);
     let documentationSources: IntuneChatDocumentationSource[] = [];
     let modelFollowUps: string[] = [];
     let modelTitle: string | undefined;
@@ -3390,7 +3395,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations },
+              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations, attachTable },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000, ...(voiceProfile ? { voiceProfile } : {}) } : {}),
               plannedResources: planned.resources,
               smallTalk: isSmallTalk(content),
@@ -3683,6 +3688,7 @@ export class IntuneChatService {
           : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
+      ...((dataTables.length || computed?.dataTable) ? { dataTables: [...dataTables, ...(computed?.dataTable ? [computed.dataTable] : [])] } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
     };

@@ -1190,11 +1190,11 @@ describe("count_cached", () => {
       assert.deepEqual(listed.rows.map((row) => row.deviceName), ["DEV-00", "DEV-01", "DEV-02", "DEV-03", "DEV-04", "DEV-05"]);
       assert.deepEqual(Object.keys(listed.rows[0]!).sort(), ["complianceState", "deviceName", "id", "isEncrypted", "operatingSystem"]);
 
-      // More than 50 matches are counted, not listed.
+      // Without a chat attachment collector, page through larger lists.
       const many = (await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", list: true })).result as { totalCount: number; returnedRows: number; note: string };
       assert.equal(many.totalCount, 60);
-      assert.equal(many.returnedRows, 0);
-      assert.match(many.note, /more than 50, so none are listed/);
+      assert.equal(many.returnedRows, 50);
+      assert.match(many.note, /60 cached rows match.*nextOffset/);
 
       const invalid = await executeIntuneChatTool(ctx, "count_cached", { resource: "managedDevices", groupBy: ["noSuchField"] });
       assert.match(invalid.trace.error ?? "", /Unsupported managedDevices field: noSuchField/);

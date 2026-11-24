@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
 
-import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
+import IntuneChat, { ChatAnswerTable, createHostedBatchProviderConsent } from "./IntuneChat";
 import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
 import { DataBoundaryProvider, useAppState } from "../state";
@@ -2714,4 +2714,22 @@ describe("IntuneChat timestamp presentation", () => {
     const deviceRow = within(deviceTable).getByRole("row", { name: /WIN-01/ });
     expect(within(deviceRow).getByRole("cell", { name: dateOnly.format(new Date(timestamp)) })).toBeInTheDocument();
   });
+});
+
+it("expands an attached list and exports all rows as safe CSV", async () => {
+  const saveTextFile = vi.fn().mockResolvedValue({ canceled: false });
+  const rows = Array.from({ length: 216 }, (_, index) => [`app-${index}`, index ? `App ${index}` : "=1+1"]);
+  renderWithAppState(<ChatAnswerTable table={{
+    resource: "mobileApps", filters: "All cached rows", totalCount: rows.length,
+    columns: ["id", "displayName"], rows, refreshedAt: "2026-11-24T06:39:00.000Z",
+  }} />, { bridge: makeMockBridge({ saveTextFile }) });
+  const toggle = screen.getByRole("button", { name: /216 rows · mobileApps/ });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(toggle);
+  expect(screen.getByText("App 215")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+  const lines = saveTextFile.mock.calls[0]?.[0].content.trimEnd().split("\n");
+  expect(lines).toHaveLength(217);
+  expect(lines[0]).toBe("id,displayName");
+  expect(lines[1]).toContain("'=1+1");
 });

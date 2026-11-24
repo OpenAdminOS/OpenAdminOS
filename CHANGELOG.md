@@ -123,6 +123,8 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Fixed
 
+- Open and export complete cached lists from Chat when more than 50 rows match. Cache queries also support paging.
+
 - Refine the homepage screenshots in both themes. Chat shows which devices missed the seven-day sync window and the cache used to answer, and the mobile write-confirmation hero shows the tenant and local provider.
 - Chat uses a general listing for broad Microsoft 365 roadmap questions and shows details when Microsoft Release Communications returns an error.
 - Chat checks Microsoft Release Communications first for roadmap questions about an organization and waits for that lookup before checking tenant data for relevance. If the source is missing or turned off, Chat points to Marketplace.

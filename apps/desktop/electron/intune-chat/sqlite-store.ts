@@ -72,7 +72,7 @@ interface MessageRow {
 }
 
 /** Answer fields stored together: the question kind, steps, citation targets, follow-ups and prompt provenance. */
-type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected" | "modelFit" | "switchedFrom">;
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected" | "modelFit" | "switchedFrom" | "dataTables">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -318,6 +318,8 @@ export interface GraphCacheQueryResult {
   resource: GraphCacheResourceKind;
   totalCount: number;
   returnedRows: number;
+  hasMore: boolean;
+  nextOffset: number | null;
   limit: number;
   rows: { row: unknown; refreshedAt?: string }[];
 }
@@ -1253,18 +1255,7 @@ export class IntelligenceSqliteStore {
         { field: "@odata.type", expression: odataType },
         {
           field: "appPlatform",
-          expression: `CASE
-            WHEN ${odataType} IS NULL THEN NULL
-            WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
-            WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
-            WHEN lower(${odataType}) LIKE '%win32%'
-              OR lower(${odataType}) LIKE '%windows%'
-              OR lower(${odataType}) LIKE '%winget%'
-              OR lower(${odataType}) LIKE '%microsoftstoreforbusiness%'
-              OR lower(${odataType}) LIKE '%officesuiteapp%' THEN 'Windows'
-            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
-            ELSE ${odataType}
-          END`,
+          expression: graphCacheFieldSql("appPlatform"),
         },
       );
     }
@@ -2427,7 +2418,9 @@ export class IntelligenceSqliteStore {
     filters?: GraphCacheQueryPredicate[];
     sort?: { field: string; direction?: "asc" | "desc" };
     limit?: number;
+    offset?: number;
   }): GraphCacheQueryResult {
+    const offset = input.offset ?? 0;
     const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 25)));
     const where: string[] = ["tenant_id = ?", "resource = ?"];
     const args: Array<string | number> = [input.tenantId, input.resource];
@@ -2446,14 +2439,20 @@ export class IntelligenceSqliteStore {
       SELECT raw_json, refreshed_at, COUNT(*) OVER () AS total_count
       FROM graph_resources
       WHERE ${where.join(" AND ")}
-      ORDER BY ${sortField} ${sortDirection}
-      LIMIT ?`;
+      ORDER BY ${sortField} ${sortDirection}, graph_id ASC
+      LIMIT ? OFFSET ?`;
     const rows = this.db
       .prepare(sql)
-      .all(...args, limit) as unknown as QueryCacheRow[];
+      .all(...args, limit, offset) as unknown as QueryCacheRow[];
+    const totalCount = rows[0]?.total_count ?? (offset > 0
+      ? (this.db.prepare(`SELECT COUNT(*) AS n FROM graph_resources WHERE ${where.join(" AND ")}`).get(...args) as { n: number }).n
+      : 0);
+    const hasMore = offset + rows.length < totalCount;
     return {
       resource: input.resource,
-      totalCount: rows[0]?.total_count ?? 0,
+      totalCount,
+      hasMore,
+      nextOffset: hasMore ? offset + rows.length : null,
       returnedRows: rows.length,
       limit,
       rows: rows.map((row) => ({
@@ -2507,7 +2506,7 @@ export class IntelligenceSqliteStore {
     }
     if (input.listLimit === undefined) return { total, groups };
     const rows = this.db
-      .prepare(`SELECT raw_json FROM graph_resources WHERE ${clause} ORDER BY lower(COALESCE(display_name, graph_id)) ASC LIMIT ?`)
+      .prepare(`SELECT raw_json FROM graph_resources WHERE ${clause} ORDER BY lower(COALESCE(display_name, graph_id)) ASC, graph_id ASC LIMIT ?`)
       .all(...args, Math.max(0, Math.floor(input.listLimit))) as unknown as ResourceRow[];
     return { total, groups, rows: rows.map((row) => readJson<unknown>(row.raw_json, {})) };
   }
@@ -4298,6 +4297,7 @@ function withoutLiveOffer(issue: NonNullable<IntuneChatMessage["modelFit"]>): No
 
 function answerMetaJson(message: IntuneChatMessage): string | null {
   const meta: AnswerMeta = {
+    ...(message.dataTables?.length ? { dataTables: message.dataTables } : {}),
     ...(message.questionKind ? { questionKind: message.questionKind } : {}),
     ...(message.steps?.length ? { steps: message.steps } : {}),
     ...(message.documentationSources?.length ? { documentationSources: message.documentationSources } : {}),
@@ -4747,6 +4747,21 @@ function sqlScalar(value: unknown): string | number {
 
 function graphCacheFieldSql(field: string): string {
   const normalized = field.trim();
+  if (normalized === "appPlatform") {
+    const odataType = graphCacheFieldSql("@odata.type");
+    return `CASE
+      WHEN ${odataType} IS NULL THEN NULL
+      WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
+      WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
+      WHEN lower(${odataType}) LIKE '%win32%'
+        OR lower(${odataType}) LIKE '%windows%'
+        OR lower(${odataType}) LIKE '%winget%'
+        OR lower(${odataType}) LIKE '%microsoftstoreforbusiness%'
+        OR lower(${odataType}) LIKE '%officesuiteapp%' THEN 'Windows'
+      WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
+      ELSE ${odataType}
+    END`;
+  }
   if (normalized === "@odata.type") {
     return "json_extract(raw_json, '$.\"@odata.type\"')";
   }

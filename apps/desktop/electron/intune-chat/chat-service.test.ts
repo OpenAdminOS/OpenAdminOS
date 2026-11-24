@@ -2154,3 +2154,45 @@ for (const path of ["send", "stream"] as const) {
     }
   });
 }
+
+it("saves a complete structured list on the chat answer", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-structured-list-"));
+  const filePath = join(dir, "state.json");
+  const tenantId = "synthetic-tenant";
+  const createdAt = "2026-11-24T06:39:00.000Z";
+  await writeFile(filePath, JSON.stringify({
+    activeProviderId: "ollama",
+    activeModelByProviderId: { ollama: "mock-chat" },
+    activeTenantId: tenantId,
+    tenants: [{ id: tenantId, displayName: "Sample Lab", username: "admin@sample.invalid",
+      homeAccountId: "synthetic-account", addedAt: createdAt }],
+    runs: [],
+  }));
+  const rows = Array.from({ length: 216 }, (_, index) => ({
+    id: `device-${index}`,
+    deviceName: `LAB-WIN-${index}`,
+    operatingSystem: "Windows",
+    complianceState: "noncompliant",
+  }));
+  const graph: RunGraphApi = {
+    listManagedDevices: async () => [],
+    retireManagedDevice: async () => { throw new Error("Unexpected write"); },
+    request: async ({ path }) => ({ value: path === "/deviceManagement/managedDevices" ? rows : [] }),
+  };
+  const store = new AppStateStore({
+    filePath, tokenStore, userDataPath: dir, statsApiUrl: "", graphFactory: () => graph,
+    llmFactory: () => { throw new Error("A structured list does not need the model"); },
+  });
+  try {
+    const result = await store.streamIntuneChatMessage({ content: "List all noncompliant Windows devices" }, () => {});
+    const table = result.assistantMessage.dataTables?.[0];
+    assert.equal(table?.totalCount, 216, result.assistantMessage.content);
+    assert.equal(new Set(table?.rows.map(row => row[table.columns.indexOf("id")])).size, 216);
+    assert.match(result.assistantMessage.content, /complete list of 216 matching cached rows/);
+    const messages = await store.getIntuneChatMessages(result.conversation.id);
+    assert.deepEqual(messages.at(-1)?.dataTables, [table]);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
