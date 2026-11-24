@@ -92,7 +92,8 @@ export default function PrivacyPage() {
               ))}
             </address>
             <p className="mt-3">
-              Data protection officer contact, if applicable: [to be confirmed].
+              Ugurlabs has no data protection officer. Fewer than 20 people regularly
+              carry out automated processing of personal data at Ugurlabs (§ 38 BDSG).
               The full provider disclosure is in the{" "}
               <Link href="/legal-notice" className="text-link">legal notice</Link>.
             </p>
@@ -166,8 +167,8 @@ export default function PrivacyPage() {
                   logs with IP addresses, browser or app user-agent strings, and
                   timestamps to serve requests, troubleshoot, and protect the site.
                   We rely on our legitimate interest in operating and securing the
-                  site (Art. 6(1)(f) GDPR, [to be confirmed]). Log retention is
-                  [to be confirmed]. Logging is part of using the site or API.
+                  site (Art. 6(1)(f) GDPR). Access-log retention depends on the Vercel
+                  plan and is [to be confirmed]. Logging is part of using the site or API.
                   See <Link href="https://vercel.com/legal/privacy-policy" className="text-link">Vercel&rsquo;s privacy policy</Link>.
                 </p>
               </div>
@@ -177,9 +178,10 @@ export default function PrivacyPage() {
                   Upstash Redis processes short-lived keys containing the requester&rsquo;s
                   IP address. Install rate-limit keys expire after 60 seconds. Support and
                   agent submission rate-limit keys expire after 1 hour. A hash used to
-                  detect repeated support reports expires after 24 hours. The storage region
-                  is [to be confirmed]. We rely on our legitimate interest in preventing
-                  abuse and duplicate issues (Art. 6(1)(f) GDPR, [to be confirmed]).
+                  detect repeated support reports expires after 24 hours. The intended
+                  storage region is Frankfurt, Germany (<code>eu-central-1</code>),
+                  [to be confirmed]. We rely on our legitimate interest in preventing
+                  abuse and duplicate issues (Art. 6(1)(f) GDPR).
                   Rate limiting applies when you use these endpoints.
                 </p>
               </div>
@@ -191,10 +193,10 @@ export default function PrivacyPage() {
                   checks for duplicates on your device. Upstash Redis stores aggregate
                   daily counters for about 8 days. Pending counts stay in Redis until
                   the hourly update to the public <code>stats/agents.json</code> file.
-                  We briefly use your
-                  IP address for rate limiting as described above. Our legitimate
-                  interest is measuring which agents are installed (Art. 6(1)(f)
-                  GDPR, [to be confirmed]).
+                  We keep the published aggregate counts indefinitely. They contain
+                  no personal data. We briefly use your IP address for rate limiting
+                  as described above. Our legitimate interest is improving the
+                  registry by measuring which agents are installed (Art. 6(1)(f) GDPR).
                   Counts are on by default. Turn them off in Settings &gt; Privacy.
                 </p>
               </div>
@@ -213,11 +215,11 @@ export default function PrivacyPage() {
                   Plausible Analytics measures aggregate use of our marketing
                   pages. It receives page, referral, and engagement information
                   and uses request IP addresses and user agents transiently for
-                  daily visitor estimates. It uses no cookies and does not store
-                  raw IP addresses or user agents. We rely on our legitimate interest
-                  in understanding which pages are used (Art. 6(1)(f) GDPR,
-                  [to be confirmed]). Plausible deletes its daily salt after 24
-                  hours. Aggregate retention is [to be confirmed]. The docs and
+                  daily visitor estimates. Plausible uses no cookies, stores no
+                  personal data, and keeps only aggregate statistics. We rely on
+                  our legitimate interest in improving the marketing site by
+                  understanding which pages people use (Art. 6(1)(f) GDPR).
+                  Plausible deletes its daily salt after 24 hours. The docs and
                   desktop app do not load Plausible. You can block its script in
                   your browser. See <Link href="https://plausible.io/data-policy" className="text-link">Plausible&rsquo;s data policy</Link>.
                 </p>
@@ -230,8 +232,8 @@ export default function PrivacyPage() {
                   default agent registry. The desktop updater also sends GitHub a
                   random UUID saved on your device in its <code>x-user-staging-id</code>{" "}
                   header. Our legitimate interest is making releases and the catalog
-                  available and helping users find updates (Art. 6(1)(f) GDPR,
-                  [to be confirmed]). GitHub acts as an independent controller for
+                  available and helping users find updates (Art. 6(1)(f) GDPR).
+                  GitHub acts as an independent controller for
                   these requests. Its own statement covers its logging, retention,
                   and rights requests. To stop update checks and downloads and automatic
                   registry refreshes, turn off Automatic network requests in Settings &gt;
@@ -251,10 +253,18 @@ export default function PrivacyPage() {
                 <p>
                   When you email us, we use your address, message, and any attachments
                   to handle your request. Microsoft 365 Exchange Online hosts the
-                  mailbox for us [to be confirmed]. The legal basis is handling the support you
-                  request (Art. 6(1)(b) GDPR, [to be confirmed]). Mail retention
-                  is [to be confirmed]. Email is optional. We need a return address
-                  and enough information about the problem to respond.
+                  mailbox for us. For customers, we handle support as part of the
+                  contract (Art. 6(1)(b) GDPR). For other senders, we rely on our
+                  legitimate interest in responding to support requests and resolving
+                  reported problems (Art. 6(1)(f) GDPR).
+                </p>
+                <p className="mt-2">
+                  We delete support email 12 months after the request is closed.
+                  We keep business correspondence for six years, or for ten years
+                  if it falls into a record category with that retention period under
+                  German commercial or tax law (§ 257 HGB and § 147 AO).
+                  Email is optional. We need a return address and enough information
+                  about the problem to respond.
                 </p>
               </div>
               <div>
@@ -266,10 +276,11 @@ export default function PrivacyPage() {
                   A preview is required when diagnostics are included. Diagnostics group
                   counts into ranges.
                   Agent submissions include the manifest, supporting details, and
-                  contact information you provide. We use reports to respond
-                  to support requests (Art. 6(1)(b) GDPR, [to be confirmed]) and
-                  rely on our legitimate interest in reviewing community contributions
-                  in public (Art. 6(1)(f) GDPR, [to be confirmed]).
+                  contact information you provide. Our legitimate interest in
+                  processing public support reports is diagnosing and resolving
+                  reported problems (Art. 6(1)(f) GDPR). Our legitimate interest
+                  in processing agent submissions is reviewing community contributions
+                  in public and maintaining the registry (Art. 6(1)(f) GDPR).
                 </p>
                 <p className="mt-2">
                   Anyone can read the issue, and issues can remain public indefinitely.
@@ -281,13 +292,13 @@ export default function PrivacyPage() {
               <div>
                 <h3 className="font-medium text-brand-ink">Booking a call</h3>
                 <p>
-                  Our site links to Cal.com. When you book, Cal.com receives the
-                  name, email address, selected time, and any notes you enter [to be confirmed].
-                  We use these details to arrange and hold the call on Microsoft
-                  Teams [to be confirmed]. We do not record the calls [to be confirmed].
-                  The legal basis is arranging
-                  the call you requested (Art. 6(1)(b) GDPR, [to be confirmed]).
-                  Booking retention is [to be confirmed]. Booking is optional.
+                  Our site links to Cal.com. The full list of fields Cal.com collects
+                  is [to be confirmed]. We use booking details to arrange and hold
+                  the call on Microsoft Teams. The Teams hosting location is
+                  [to be confirmed]. Whether calls are recorded is [to be confirmed].
+                  We process booking details to perform a contract or take steps you
+                  request before entering into one (Art. 6(1)(b) GDPR). We keep booking
+                  details for 12 months after the call. Booking is optional.
                   We need your email address and a time to confirm the appointment.
                   See <Link href="https://cal.com/privacy" className="text-link">Cal.com&rsquo;s privacy policy</Link>.
                 </p>
@@ -300,22 +311,16 @@ export default function PrivacyPage() {
               International transfers
             </h2>
             <p className="mt-3">
-              Some service providers may process data outside the European Economic
-              Area, including in the United States. The safeguards can include an
-              adequacy decision under the EU-US Data Privacy Framework for an
-              eligible, certified recipient, or the European Commission&rsquo;s
-              standard contractual clauses (SCCs).
+              Vercel, GitHub, Microsoft, and Cal.com may process data in the United
+              States. For these transfers we rely on the EU-US Data Privacy Framework
+              where the provider is certified and on the European Commission&rsquo;s
+              standard contractual clauses in the providers&rsquo; data processing terms.
+              We are verifying each provider&rsquo;s certification [to be confirmed].
             </p>
-            <ul className="mt-3 list-disc space-y-1 pl-5">
-              <li>Vercel (hosting and access logs): [to be confirmed].</li>
-              <li>Upstash (rate limiting, deduplication, and counters): [to be confirmed].</li>
-              <li>Plausible (marketing website analytics): [to be confirmed].</li>
-              <li>Microsoft (Exchange Online and Teams): [to be confirmed].</li>
-              <li>Cal.com (bookings): [to be confirmed].</li>
-              <li>GitHub (public issues and downloads): [to be confirmed].</li>
-            </ul>
             <p className="mt-3">
-              Email {SUPPORT_EMAIL} to ask for details or a copy of the relevant safeguards.
+              Plausible hosts our analytics in the EU, with no transfer outside the
+              EU. For a copy of the relevant safeguards, email{" "}
+              <Link href={`mailto:${SUPPORT_EMAIL}`} className="text-link">{SUPPORT_EMAIL}</Link>.
             </p>
           </section>
 
@@ -337,22 +342,22 @@ export default function PrivacyPage() {
               Email {SUPPORT_EMAIL}. We generally cannot link app traffic to
               you. Install counts carry no installation identifier. Older app versions
               may still send a legacy hash, which the server discards without storing.
-              Legacy keys were deleted at the switch (date [to be confirmed]). The updater
-              UUID goes to GitHub. An email address you used
+              The date we switched to aggregate-only counts and whether the legacy
+              keys were deleted are [to be confirmed].
+              The updater UUID goes to GitHub. An email address you used
               to contact us, an issue URL, a booking reference, or an approximate
               date and time can help us locate a record. We may ask for enough
               information to verify that the record is yours. We normally respond
               within one month.
             </p>
             <p className="mt-3">
-              You can lodge a complaint with a data protection supervisory authority,
-              including in the EU country where you live, work, or believe a
-              violation occurred. In North Rhine-Westphalia, Germany, the authority
-              is the{" "}
-              <Link href="https://www.ldi.nrw.de/kontakt/ihre-beschwerde" className="text-link">
+              You can lodge a complaint with any data protection supervisory
+              authority in the EU, in particular where you live or work. Our
+              supervisory authority is the{" "}
+              <Link href="https://www.ldi.nrw.de" className="text-link">
                 Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-Westfalen
               </Link>{" "}
-              ([to be confirmed] as the authority for our company).
+              (LDI NRW) in Düsseldorf, Germany.
             </p>
           </section>
 

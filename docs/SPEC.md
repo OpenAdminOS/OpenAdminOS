@@ -119,8 +119,8 @@ The header shows "Book a demo" as an outlined button next to Download and links
 to `/book`, which presents both calls. The homepage hero and closing section
 link to the demo, and a band after the registry section presents the build
 call. On the build call the customer shares their screen and runs every step
-in their own app and tenant; we never sign in to their tenant, never ask for a
-password, and do not record the call. The site only links to Cal.com and loads
+in their own app and tenant. We never sign in to their tenant or ask for a
+password. The site only links to Cal.com and loads
 nothing from it, and the privacy policy names Cal.com as the booking service.
 Between the `lg` and `xl` breakpoints the header leaves out Blog and Roadmap so
 both buttons fit; the footer and the mobile menu keep them.
@@ -177,21 +177,41 @@ footer, legal notice, and terms states that Ugurlabs is a member of the
 Microsoft AI Cloud Partner Program and that OpenAdminOS is an independent
 product, not made, endorsed, or sponsored by Microsoft.
 
+The privacy notice uses Art. 6(1)(f) GDPR for hosting logs, rate limiting and
+deduplication, install counts, Plausible analytics, GitHub release and registry
+distribution, public agent submissions, support for people who are not
+customers, and public support reports. It states the legitimate interest for
+each activity. Customer support email and call bookings use Art. 6(1)(b) GDPR
+for a contract or steps requested before a contract.
+
+Ugurlabs has no data protection officer. Fewer than 20 people regularly carry
+out automated processing of personal data at Ugurlabs (§ 38 BDSG). Privacy
+requests go to the support address (`SUPPORT_EMAIL`). The competent authority
+is the [Landesbeauftragte für Datenschutz und Informationsfreiheit Nordrhein-Westfalen](https://www.ldi.nrw.de)
+(LDI NRW) in Düsseldorf. People can complain to any EU data protection
+supervisory authority, in particular where they live or work.
+
+Microsoft 365 Exchange Online hosts the support mailbox. The domain receives
+mail through Exchange Online Protection. Support email is deleted 12 months
+after the request closes, with statutory retention for business correspondence
+for six years and records in the ten-year category for ten years (§ 257 HGB
+and § 147 AO). Booking details are kept for 12 months after the call.
+Plausible stores aggregate statistics only, stores no personal data, and uses
+no cookies. Plausible is hosted in the EU with no third-country transfer.
+For US transfers to Vercel, GitHub, Microsoft, and Cal.com, the privacy notice
+names the EU-US Data Privacy Framework where the provider is certified and the
+standard contractual clauses in their data processing terms. Copies are
+available via the support address.
+
 <!--
 Privacy notice confirmations for /privacy
 
-- TODO(ugur): Confirm whether a data protection officer is required and publish their contact details if applicable.
-- TODO(ugur): Confirm the Art. 6(1)(f) basis, Vercel log retention, and processor terms.
-- TODO(ugur): Confirm the Art. 6(1)(f) basis for rate limiting and duplicate reports, Upstash region, and processor terms.
-- TODO(ugur): Confirm the Art. 6(1)(f) basis for install counts.
-- TODO(ugur): Confirm the Art. 6(1)(f) basis and Plausible analytics retention for this site.
-- TODO(ugur): Confirm the Art. 6(1)(f) basis for distributing releases and registry data through GitHub.
-- TODO(ugur): Confirm Exchange Online mailbox hosting, the Art. 6(1)(b) basis, and support mailbox retention.
-- TODO(ugur): Confirm Art. 6(1)(b) for support reports and Art. 6(1)(f) for agent submissions.
-- TODO(ugur): Confirm the Cal.com fields, Teams hosting, whether calls are recorded, the Art. 6(1)(b) basis, processor roles, and booking retention.
-- TODO(ugur): Confirm each provider's transfer countries and safeguards, including DPF certification or SCCs, and how to obtain copies.
-- TODO(ugur): Confirm the install-count switch date and that the legacy Redis keys were deleted at the switch.
-- TODO(ugur): Confirm the competent supervisory authority for the controller.
+- TODO(ugur): Confirm access-log retention for the Vercel plan.
+- TODO(ugur): Confirm the intended Upstash region (Frankfurt, eu-central-1).
+- TODO(ugur): Confirm the install-count switch date and legacy Redis key deletion.
+- TODO(ugur): Confirm the Teams hosting location and whether calls are recorded.
+- TODO(ugur): Confirm the Cal.com field list.
+- TODO(ugur): verify each provider's listing on dataprivacyframework.gov
 -->
 
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
@@ -1974,7 +1994,8 @@ platform. The app deduplicates on the device. The server uses IP addresses brief
 for rate limiting and stores aggregate daily counters without a per-install
 identifier. Legacy client hashes are discarded. Daily counters expire after eight
 days. Pending counts are applied to the public `stats/agents.json` file by the
-hourly flush. Settings > Privacy controls install counts and docs index auto-install
+hourly flush. The published aggregates contain no personal data and are kept
+indefinitely. Settings > Privacy controls install counts and docs index auto-install
 individually. The Automatic network requests switch covers update checks,
 registry refresh, docs index auto-install, and registry install counts. It also
 gates the manual update check. An available update downloads in the background
@@ -1985,7 +2006,7 @@ IT can set `automaticNetworkRequests` and `registryInstallCounts` to `"on"` or
 `"off"` through managed configuration.
 See [Network calls](gitbook/trust/network-calls.md) for timing and destinations.
 
-<!-- TODO(ugur): Confirm the managed policy keys automaticNetworkRequests and registryInstallCounts and their on/off values. -->
+For 0.8.0, Linux spellcheck is off to avoid dictionary downloads from Google. Bundled en-US and de-DE dictionaries are planned for a later release.
 
 Submitting a support report requires an explicit user action.
 The Settings → About action and contextual failure-state actions open an in-app

@@ -145,6 +145,8 @@ Remote hosts see your IP address and standard request headers. Turn off **Automa
 | Docs index auto-install | GitHub Releases and `registry.ollama.ai` (through local Ollama) | Checks the index pointer at launch when local Ollama is reachable. Downloads about 264 MB when the index is missing or outdated, at most one download attempt per day. Local Ollama pulls the embedding model if needed. | Index pointer and asset requests, plus an Ollama model request. | Docs index auto-install in Settings > Privacy |
 | Registry install counts | `openadminos.com/api/install` | On public agent install in packaged builds (stable and nightly). On by default and deduplicated on your device. | Agent slug, app version, and platform. The server uses IP briefly for rate limiting and stores daily aggregate counts without a per-install identifier. | Registry install counts in Settings > Privacy |
 
+The published aggregate install counts contain no personal data and are kept indefinitely.
+
 See [Network calls](docs/gitbook/trust/network-calls.md) for requests that depend on your setup, and [Managed configuration](docs/gitbook/getting-started/managed-configuration.md) for rollout controls.
 
 ### What's shipped vs what's coming

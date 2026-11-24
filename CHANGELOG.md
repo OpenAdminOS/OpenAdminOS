@@ -11,7 +11,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Clarify what stays on the device with a local model and show app traffic in Connections.
-- Explain who controls tenant data, how install counts are retained, and when support previews are required in the website privacy notice.
+- Explain who controls tenant data, when support previews are required, and the legal bases, retention periods, and transfer safeguards for the services covered by the website privacy notice.
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
 
 ### Removed

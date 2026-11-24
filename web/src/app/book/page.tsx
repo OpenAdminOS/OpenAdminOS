@@ -129,10 +129,9 @@ export default function BookPage() {
         </h2>
         <p className="mt-3 max-w-3xl text-[15px] leading-7 text-brand-muted">
           You share your screen and do every click. We never sign in to your
-          tenant, never ask for a password, and do not record the call. For a
-          build call, have OpenAdminOS installed and use an account that can
-          grant admin consent in your tenant. Booking runs on Cal.com, which
-          receives the name, email, and notes you enter; see the{" "}
+          tenant or ask for a password. For a build call, have OpenAdminOS
+          installed and use an account that can grant admin consent in your
+          tenant. Booking runs on Cal.com. For details, see the{" "}
           <Link href="/privacy" className="text-link">
             privacy policy
           </Link>
