@@ -14,6 +14,7 @@ import { ServiceAccessDialog } from "../components/ServiceAccess";
 import { AgentNeedChips } from "../components/AgentNeedChips";
 import { AGENT_COPY, SCHEDULE_ORGANIZATION_COPY, SERVICE_COPY } from "../copy";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
+import { isReasoningWithoutAnswerRun } from "../shared/ollama-failure";
 import {
   IconChevronDown,
   IconClock,
@@ -225,6 +226,13 @@ export default function AgentsHome() {
       resumed.mode,
     );
   }, [dueAgents, location.pathname, location.search, location.state, navigate, runScheduledBatch, scheduledAgents]);
+
+  const scheduledFailure = scheduledOnly && state.schedulerStatus?.lastWakeAt
+    ? state.runs.find((run) => run.trigger === "schedule" && run.queuedAt === state.schedulerStatus?.lastWakeAt)
+    : undefined;
+  const reasoningScheduleFailure = scheduledFailure?.status === "failed" && isReasoningWithoutAnswerRun(scheduledFailure)
+    ? scheduledFailure
+    : undefined;
 
   const sourceRows = useMemo<LibraryRow[]>(() => {
     const latestRun = (slug: string, scheduled = false) =>
@@ -593,9 +601,9 @@ export default function AgentsHome() {
         }) : null}
         {scheduledOnly && state.schedulerStatus?.lastError ? (
           <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-            <span>Latest scheduled run failed: {state.schedulerStatus.lastError}</span>
-            <Link className="shrink-0 font-medium underline underline-offset-2" to="/runs?filter=failed">
-              Open runs
+            <span>Latest scheduled run failed: {reasoningScheduleFailure ? "Model reasoned without answering." : state.schedulerStatus.lastError}</span>
+            <Link className="shrink-0 font-medium underline underline-offset-2" to={reasoningScheduleFailure ? `/runs/${encodeURIComponent(reasoningScheduleFailure.id)}` : "/runs?filter=failed"}>
+              {reasoningScheduleFailure ? "Open run" : "Open runs"}
             </Link>
           </div>
         ) : null}

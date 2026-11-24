@@ -14,7 +14,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { classifyModelFitFailure, isOllamaCloudModel, isPlaceholderModel, MODEL_FIT_RESEND, modelFitChoices, modelFitContextKey, modelSizeBillions } from "../../src/shared/model-fit.js";
-import { GEMINI_DEFAULT_MODEL } from "@openadminos/runtime";
+import { GEMINI_DEFAULT_MODEL, isReasoningWithoutAnswerError } from "@openadminos/runtime";
 import { ContextTooSmallError } from "@openadminos/agent-sdk";
 import { MODEL_FIT_OFFER_TTL_MS, ModelFitOffers, ModelOverrideError, chatModelFitFailure, guardModelFitLlm, loopFailureIssue, repeatedFailureIssue, resolveChatTurnProvider, type ModelFitOffer } from "./model-fit.js";
 import { IntuneChatService, type ChatServiceHost } from "./service.js";
@@ -191,6 +191,37 @@ describe("Model fit: classifying a failure", () => {
     assert.deepEqual([llamaCpp?.neededTokens, llamaCpp?.limitTokens], [21024, 8192]);
   });
 
+  it("reads Ollama's typed reasoning-only error through its cause, before parsing context text", () => {
+    const failure = Object.assign(new Error(ADAPTER_ERROR), { name: "OllamaReasoningWithoutAnswerError" });
+    assert.equal(isReasoningWithoutAnswerError(failure), true);
+    const context = { providerId: "ollama", model: LOCAL_MODEL, isLocal: true } as const;
+    const expected = { reason: "thinking-only", providerId: "ollama", model: LOCAL_MODEL };
+    assert.deepEqual(classifyModelFitFailure(failure, context), expected);
+    assert.deepEqual(classifyModelFitFailure(new Error("Nothing was applied.", { cause: failure }), context), expected);
+    assert.equal(classifyModelFitFailure(failure, { ...context, isLocal: false }), undefined);
+  });
+
+  it("reads only Ollama's own reasoning-only failure messages from stored text", () => {
+    const context = { providerId: "ollama", model: LOCAL_MODEL, isLocal: true } as const;
+    const messages = [
+      `Ollama stopped "${LOCAL_MODEL}" at the token limit while it was still reasoning, so there is no answer. Raise the token limit, shorten the request, or pick a model that answers without reasoning.`,
+      `Ollama returned only reasoning from "${LOCAL_MODEL}" and no answer. Retry, or pick a model that answers without reasoning.`,
+    ];
+    const wrappers = [
+      "",
+      "The plan could not be checked against the tenant before applying, so nothing was applied. ",
+      "Nothing was applied: The proposal could not be checked against the tenant before applying, so nothing was applied. ",
+    ];
+    for (const message of messages) {
+      for (const wrapper of wrappers) {
+        assert.deepEqual(classifyModelFitFailure(wrapper + message, context), { reason: "thinking-only", providerId: "ollama", model: LOCAL_MODEL });
+      }
+      assert.equal(classifyModelFitFailure(`Ollama responded with HTTP 500: ${message}`, context), undefined);
+    }
+    assert.equal(classifyModelFitFailure("Ollama stopped the request at the token limit.", context), undefined);
+    assert.equal(classifyModelFitFailure(OLLAMA_400, context)?.reason, "context-too-small");
+  });
+
   it("keeps Apple Foundation's prompt count and context size", () => {
     const apple = classifyModelFitFailure(
       "Apple Foundation context window is too small for this prompt. The prompt uses 3900 tokens before response generation; the model supports 4096 tokens total. Reduce the answer pack or switch to a larger-context provider.",
@@ -229,8 +260,17 @@ describe("Model fit: the choices", () => {
     const apple: ProviderSummary = { id: "apple-foundation", name: "Apple Intelligence", description: "", isLocal: true, status: "connected", models: ["system-language-model"], defaultModel: "system-language-model" };
     const choices = modelFitChoices({ issue: { reason: "context-too-small", providerId: "apple-foundation", model: "system-language-model", neededTokens: 40652 }, contextWindows, providers: [apple, ollama] });
     assert.deepEqual(choices.local.map((choice) => choice.model), ["gpt-oss:20b", LOCAL_MODEL]);
-    // A reasoning-only reply is about the model's size, so an unknown size still offers none.
-    assert.deepEqual(modelFitChoices({ issue: { reason: "thinking-only", providerId: "apple-foundation", model: "system-language-model" }, providers: [apple, ollama] }).local, []);
+  });
+
+  it("offers other on-device models for a reasoning-only reply without checking context or size", () => {
+    const failed = "gpt-oss:20b";
+    const provider = { ...ollama, models: [failed, "alias", "qwen:32b-cloud", "qwen:4b", "custom"], remoteModels: ["alias"] };
+    const choices = modelFitChoices({
+      issue: { reason: "thinking-only", providerId: "ollama", model: failed },
+      providers: [provider, claude, codexSignedOut],
+    });
+    assert.deepEqual(choices.local.map(({ model, contextWindow }) => [model, contextWindow]), [["qwen:4b", undefined], ["custom", undefined]]);
+    assert.deepEqual(choices.hosted.map(({ providerId }) => providerId), ["anthropic"]);
   });
 
   it("never offers an Ollama Cloud model as a model on this device", () => {

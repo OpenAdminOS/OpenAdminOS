@@ -18,7 +18,7 @@ const noun = (surface: Surface) => (surface === "run" ? "run" : "request");
 export const MODEL_FIT_COPY = {
   title(issue: ModelFitIssue, model: string, surface: Surface): string {
     if (issue.reason === "repeated-failure") return `${model} could not investigate this question`;
-    if (issue.reason === "thinking-only") return `${model} did not finish an answer`;
+    if (issue.reason === "thinking-only") return surface === "run" ? `${model} reasoned without answering` : `${model} did not finish an answer`;
     return `${model} cannot fit this ${noun(surface)}`;
   },
   /** The reason in plain numbers, where the provider gave them. */
@@ -53,7 +53,7 @@ export const MODEL_FIT_COPY = {
     `${MODEL_FIT_COPY.title(issue, model, surface)}. Choices follow.`,
   /** `answered`: Chat already answered from cached data, so the offer asks again. */
   groupLabel(issue: ModelFitIssue, surface: Surface, answered = issue.reason === "repeated-failure"): string {
-    if (surface === "run") return "Run again with";
+    if (surface === "run") return issue.reason === "thinking-only" ? "Run this agent with another model" : "Run again with";
     return answered ? "Ask this again with" : "Run this one request with";
   },
   runWith: (tool: string) => `Run with ${tool}`,
@@ -132,7 +132,11 @@ export const MODEL_FIT_COPY = {
     `OpenAdminOS could not read where ${provider} is reached, so this run cannot start. Close the review and choose the provider again.`,
   /** The run review's line when a run is started again on another provider after a fit failure. */
   runReason(issue: ModelFitIssue, model: string, tool: string): string {
-    const why = issue.reason === "context-too-small" ? `${model} could not fit the last run` : `${model} could not finish the last run`;
+    const why = issue.reason === "context-too-small"
+      ? `${model} could not fit the last run`
+      : issue.reason === "thinking-only"
+        ? `${model} reasoned without answering on the last run`
+        : `${model} could not finish the last run`;
     return `${why}, so this run uses ${tool}. This run only: the agent keeps its model for later runs.`;
   },
 } as const;
