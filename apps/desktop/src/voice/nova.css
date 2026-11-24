@@ -580,3 +580,16 @@
   margin: 0;
   padding: 0;
 }
+
+.nova-bubble[data-screen-preview="true"] {
+  overflow: hidden;
+}
+
+.nova-bubble[data-screen-preview="true"] > :is(.nova-bubble-header, .nova-bubble-context) {
+  flex: none;
+}
+
+.nova-bubble[data-screen-preview="true"] > .nova-screen-controls {
+  min-height: 0;
+  overflow: auto;
+}

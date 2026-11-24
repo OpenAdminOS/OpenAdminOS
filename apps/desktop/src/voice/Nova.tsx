@@ -1345,7 +1345,7 @@ export function Nova({
       void api?.novaWindow(action, route ?? transcript).catch(error => setError(voiceErrorMessage(error)));
     };
     return (
-      <section className="nova-bubble" aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
+      <section className="nova-bubble" data-screen-preview={screenResult?.status === "preview"} aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
         onKeyDown={event => {
           if (event.key === "Escape") { event.preventDefault(); windowAction("hide"); }
           if (event.key !== "Tab") return;
