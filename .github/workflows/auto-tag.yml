@@ -96,14 +96,12 @@ jobs:
 
       - name: Dispatch release workflow
         if: ${{ steps.decision.outputs.channel == 'stable' }}
-        # Release runs only on dispatch. Use a fully qualified tag ref to
-        # avoid selecting a branch with the same name.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: v${{ steps.decision.outputs.version }}
         run: |
           set -euo pipefail
-          gh workflow run release.yml --ref "refs/tags/$TAG"
+          gh workflow run release.yml --ref "$TAG"
           echo "Dispatched release.yml for $TAG."
 
       - name: Dispatch nightly build
