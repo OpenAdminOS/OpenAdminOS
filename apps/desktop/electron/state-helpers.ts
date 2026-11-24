@@ -1153,6 +1153,7 @@ export async function fetchGraphCachePages(
   const thorough = complete || limited;
   const rowCap = limited ? rowLimit : complete ? Infinity : GRAPH_CACHE_ROW_LIMIT;
   const pageCap = thorough ? Infinity : GRAPH_CACHE_PAGE_LIMIT;
+  const countRequested = request.query?.["$count"] === "true" || /[?&]\$count=true(?:&|$)/i.test(request.path);
 
   while (nextRequest && pages < pageCap && rows.length < rowCap) {
     signal?.throwIfAborted();
@@ -1167,7 +1168,9 @@ export async function fetchGraphCachePages(
     });
     signal?.throwIfAborted();
     const page = unwrapGraphCollectionPage(response);
-    if (totalCount === undefined && page.totalCount !== undefined) {
+    // Some Intune collections (mobileApps) return an unsolicited
+    // `@odata.count` of 0. Only a count the request asked for is a total.
+    if (countRequested && totalCount === undefined && page.totalCount !== undefined) {
       totalCount = page.totalCount;
     }
     pages += 1;
@@ -1215,7 +1218,8 @@ export async function fetchGraphCachePages(
     // nextLink would otherwise be reported as complete while rows were
     // dropped, which is a silent truncation.
     pageLimitReached: Boolean(pendingNextLink) || truncated,
-    ...(totalCount !== undefined ? { totalCount } : {}),
+    // A total below the rows actually received cannot be the tenant total.
+    ...(totalCount !== undefined && totalCount >= rows.length ? { totalCount } : {}),
   };
 }
 
