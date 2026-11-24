@@ -4873,12 +4873,6 @@ function validateResetSelfTrainingInput(value: unknown): ResetSelfTrainingInput 
 }
 
 function installSecurityGuards(): void {
-  if (process.platform === "linux") {
-    // TODO(ugur): Restore Linux spellchecking when dictionaries can be supplied offline.
-    // Electron can still download the configured dictionaries with spellcheck disabled.
-    session.defaultSession.setSpellCheckerLanguages([]);
-  }
-
   // Only trusted app frames may request microphone audio. Camera and all
   // unrelated browser permissions remain denied.
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
@@ -7560,7 +7554,24 @@ if (!gotLock) {
       app.exit(1);
     }
   }
-  app.on("second-instance", (_event, argv) => {
+
+  // A second instance can request a window while startup is still loading the store.
+  const readyForWindows = app.whenReady().then(() => {
+    if (process.platform === "linux") {
+      // TODO(ugur): Restore Linux spellchecking when dictionaries can be supplied offline.
+      // Electron can still download the configured dictionaries with spellcheck disabled.
+      try {
+        session.defaultSession.setSpellCheckerLanguages?.([]);
+      } catch (error) {
+        console.warn("[startup] could not clear Linux spellchecker dictionaries", error);
+      }
+    }
+    if (!localResetYielding) installSecurityGuards();
+  });
+
+  app.on("second-instance", async (_event, argv) => {
+    await readyForWindows;
+    if (localResetYielding) return;
     if (localResetReport?.status === "incomplete") {
       if (argv.includes(BACKGROUND_SCHEDULER_ARG)) return;
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -7599,7 +7610,7 @@ if (!gotLock) {
     mainWindow.focus();
   });
 
-  void app.whenReady().then(async () => {
+  void readyForWindows.then(async () => {
     debugStartupLog("app ready");
     chatDateTimeLocale.locale = supportedChatLocale(app.getLocale()) ?? "en-US";
     // In dev the app runs from the unsigned `electron` binary, so macOS
@@ -7625,7 +7636,6 @@ if (!gotLock) {
         return;
       }
       showDockForInteractiveSession();
-      installSecurityGuards();
       // Nothing else runs in this mode, so closing the window quits, on macOS too.
       app.on("window-all-closed", () => app.quit());
       // No window state is saved: the temporary profile is removed on the way out.
@@ -7783,7 +7793,6 @@ if (!gotLock) {
     // the local runtime's own store before the admin chose anything again.
     if (localResetReport?.status !== "completed") void store.autoInstallEmbeddingModel();
     debugStartupLog("registered ipc handlers");
-    installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
     const companionOnlyLaunch =
       isMenuBarLaunch || isMacosLoginItemLaunch || wasOpenedByMacosLoginItem();

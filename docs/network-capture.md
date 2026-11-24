@@ -45,6 +45,9 @@ dictionary download active. macOS uses native spellchecking. Electron
 spellchecking by default for supported languages and can fall back to
 Hunspell. The captures ran on Linux. [Electron 42.8.1 spellchecker guide](https://github.com/electron/electron/blob/v42.8.1/docs/tutorial/spellchecker.md) · [Electron session implementation](https://github.com/electron/electron/blob/v42.8.1/shell/browser/api/electron_api_session.cc#L1449) · [Chromium Windows path](https://github.com/chromium/chromium/blob/148.0.7778.280/chrome/browser/spellchecker/spellcheck_service.cc#L430)
 
+Follow-up: capture startup on Windows with a UI language unsupported by native
+spellchecking, where Chromium may fall back to Hunspell.
+
 ## Repeat the capture
 
 Install dependencies with `npm ci`. From the repository root, build Electron

@@ -2,14 +2,40 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
+const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+
+describe("Linux window startup", () => {
+  it("clears spellchecker languages as soon as Electron is ready", () => {
+    assert.match(
+      main,
+      /const readyForWindows = app\.whenReady\(\)\.then\(\(\) => \{\s*if \(process\.platform === "linux"\) \{\s*(?:\/\/[^\n]*\n\s*)*try \{\s*session\.defaultSession\.setSpellCheckerLanguages\?\.\(\[\]\);/,
+    );
+  });
+
+  it("waits for window readiness before opening the normal or reset recovery window", () => {
+    const startup = main.split('app.on("second-instance"')[1];
+    assert.ok(startup);
+    const normalStartup = startup.split("void readyForWindows.then(async () => {")[1];
+    assert.ok(normalStartup);
+    assert.match(normalStartup, /createWindow\(\{ show: true, route: LOCAL_RESET_INCOMPLETE_ROUTE/);
+    assert.match(normalStartup, /createWindow\(\{\s*show: true,\s*\.\.\.\(smokeRoute/);
+  });
+
+  it("waits for window readiness before handling a second instance", () => {
+    const secondInstance = main.split("void readyForWindows.then(async () => {")[0];
+    assert.match(
+      secondInstance,
+      /app\.on\("second-instance", async \(_event, argv\) => \{\s*await readyForWindows;[\s\S]*createWindow\(/,
+    );
+  });
+});
+
 /**
  * The Windows title-bar overlay is painted by the OS, not by CSS, so its
  * colors come from the tested native appearance map. If main.ts bypasses
  * that map, the window-control strip can drift from the app chrome.
  */
 describe("windows title bar overlay", () => {
-  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
-
   it("paints the overlay in the renderer's background color", () => {
     assert.match(
       main,
