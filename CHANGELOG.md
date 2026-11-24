@@ -6,43 +6,24 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Document when the app contacts external services, what it sends, and how to pause automatic requests.
-- Settings > Privacy controls automatic app update checks, registry refreshes, documentation index and embedding model downloads, and registry install counts. IT can lock automatic requests and install counts with policy.json.
-
 ### Changed
-
-- Clarify local model data handling and disclose app traffic in Connections, including in its screen-reader description.
-- Update the website privacy notice with the services involved, what they process, how long they keep it, log retention, booking fields, call hosting, and the safeguards for international transfers.
-- The website stores install counts and abuse limits in an EU-hosted database without storing raw IP addresses.
-- The website's server functions run in Vercel's Frankfurt region.
-
-- Public registry install counts send only the agent slug, app version, and platform. OpenAdminOS records one attempt per agent and UTC year on the device, including failed requests. About shows counts as paused when automatic requests are off and the count preference is on.
 
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
 - CI, documentation, and release workflows opt out of build-tool telemetry.
 
 ### Removed
 
-- Removed the unused usage telemetry setting and its local install identifier.
-
 ### Fixed
-
-- Website install counts recover after an interrupted flush, even when a legacy flush ran in between.
-
-- Manual update checks still work while automatic checks are paused. Turning off automatic network requests cancels in-flight automatic registry refreshes.
 
 - An approved stable release can be retried from Auto-tag when its tag is on the current main commit and publication has not completed.
 
 ### Security
 
-- The website uses a nonce-based Content Security Policy, blocks framing and unused browser permissions, and sends a one-year HSTS policy for the responding host.
-- Linux no longer downloads spelling dictionaries from Google. Built-in spellchecking is disabled on Linux.
-- Public support reports require an exact preview when diagnostics are included. Diagnostics use count ranges, relative ages, UTC report dates, and error categories. They identify only confirmed public registry agents and omit run identifiers. If the server rejects a preview or its diagnostics are too large, the form explains how to update the app or submit without diagnostics.
-
-## [0.8.0] - 2026-11-24
+## [0.8.0] - 2026-11-25
 
 ### Highlights
 
+- Settings > Privacy controls the app's background requests: update checks, registry refreshes, documentation index and embedding model downloads, and registry install counts. IT can lock them with `policy.json`. Install counts no longer carry an identifier, support reports with diagnostics show an exact preview before anything is published, and a new Network calls page documents each request.
 - Ask Chat for a complete list, such as every Windows app available in Company Portal. When more than 50 cached rows match, the full list (up to 10,000 rows) is attached to the answer as a table with CSV export, and the model only receives the count and a preview.
 - Browse the active organization's cached rows in Settings > Data or from a Chat answer. Search and page through rows, see cache coverage, and open an individual JSON preview. Open previews refresh with the cache, and the browser closes when you switch organizations.
 - Connect Sophos Central (Preview) to read endpoint, alert, SIEM, firewall and account health data in Chat and review endpoint isolation, release or scan requests before applying them. Connections and Chat show the Sophos regional host.
@@ -71,6 +52,8 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Added
 
+- Document when the app contacts external services, what it sends, and how to pause automatic requests.
+- Settings > Privacy controls automatic app update checks, registry refreshes, documentation index and embedding model downloads, and registry install counts. IT can lock automatic requests and install counts with policy.json.
 - Conditional Access explainer 1.2.0 (needs 0.7.3-nightly.20261123094040 or later) sends one compact record per policy, so a typical set of about 100 policies fits OpenAdmin 8B's 16k context, and the review now leads with concrete recommended changes, maps coverage and explains what each group of policies does.
 - When an on-device model reasons without answering during an agent run, the failed run offers other on-device models and configured hosted providers, including for older failures from script agents. Hosted retries require a run review that names where prompts and data go.
 
@@ -121,6 +104,11 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Changed
 
+- Clarify local model data handling and disclose app traffic in Connections, including in its screen-reader description.
+- Update the website privacy notice with the services involved, what they process, how long they keep it, log retention, booking fields, call hosting, and the safeguards for international transfers.
+- The website stores install counts and abuse limits in an EU-hosted database without storing raw IP addresses.
+- The website's server functions run in Vercel's Frankfurt region.
+- Public registry install counts send only the agent slug, app version, and platform. OpenAdminOS records one attempt per agent and UTC year on the device, including failed requests. About shows counts as paused when automatic requests are off and the count preference is on.
 - The homepage banner highlights Organizations and Connections, Chat without Microsoft sign-in, and hosted model locations when 0.8.0 becomes the latest stable release.
 - Refresh the homepage screenshots in light and dark, with Marketplace, the Connections reach map, and an Offboarding agent waiting for typed approval in the hero.
 - Before sending to an on-device Ollama model from Chat, agent runs, schedules, Agent Team, or Nova, OpenAdminOS checks that the model still runs on this device and stops if it cannot confirm that.
@@ -146,12 +134,15 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Removed
 
+- Removed the unused usage telemetry setting and its local install identifier.
 - Marketplace: Splashtop API Reference (docs.splashtop.com/mcp) is removed. Existing installs of the API Reference are dropped.
 - Pilot mode and its sample data: the sample tenant and organization, the built-in fictional Graph data, prepared Chat prompts and answers, pilot agent text, the pilot banner and production-only pages. Updating from a version with pilot mode removes the sample tenant once, with its runs, conversations, cache and organization, and says so in one line.
 - Remove the GitBook sync config now that docs.openadminos.com is served by the self-hosted docs site.
 
 ### Fixed
 
+- Website install counts recover after an interrupted flush, even when a legacy flush ran in between.
+- Manual update checks still work while automatic checks are paused. Turning off automatic network requests cancels in-flight automatic registry refreshes.
 - Chat no longer stops at 50 rows when asked to list cached data: it states the exact count and attaches every matching row, the expanded table shows the first 200, and CSV export holds them all. Cached app data now includes assignment intent, so Chat can list apps available in Company Portal (available or required assignments); refresh the app cache once after updating. MCP gateway clients can page through cached rows.
 - Sophos Central and Splashtop changes that stop or are refused show the reason, how many actions were accepted, and links to prepare the change again or check the target in the vendor console, instead of a generic failure panel.
 
@@ -227,6 +218,9 @@ With a model running on this device, prompts sent to that model stay on this dev
 
 ### Security
 
+- The website uses a nonce-based Content Security Policy, blocks framing and unused browser permissions, and sends a one-year HSTS policy for the responding host.
+- Linux no longer downloads spelling dictionaries from Google. Built-in spellchecking is disabled on Linux.
+- Public support reports require an exact preview when diagnostics are included. Diagnostics use count ranges, relative ages, UTC report dates, and error categories. They identify only confirmed public registry agents and omit run identifiers. If the server rejects a preview or its diagnostics are too large, the form explains how to update the app or submit without diagnostics.
 - The local documentation lookup connects only to a loopback address, directly: a `localhost` name is never resolved, and no environment proxy is used, so the question cannot leave the device through either.
 - Ollama, LM Studio and Lemonade on this device never have a redirect followed: a check, a chat request, Start or a local documentation lookup that gets one fails with the reason, so no model-list read, prompt or question goes to the address it points to.
 - The audit log is an append-only SQLite table written when each event happens, hash chained on insert, with triggers that refuse changes and early deletes; every Microsoft Graph write, Outlook and Teams sends included, is recorded in the audit log before it leaves the device and refused if the audit log cannot record it, the Graph adapter refuses writes without an audit sink, run retention and Disconnect no longer remove audit history, runs record who started them, the export verifies the stored chain and can be limited to runs no person started, and CSV cells that a spreadsheet would run as a formula are prefixed with a quote.
