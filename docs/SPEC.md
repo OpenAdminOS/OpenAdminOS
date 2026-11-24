@@ -477,7 +477,8 @@ handled, so the output is never parsed for it, and every matching failure must
 be this cause; that recorded failure also decides before the output is read
 for a context size refusal). The failure panel keeps the
 "Model reasoned without answering" card alongside the reasoning-only
-model fit offer for an on-device run. Chat's compact loop fails the
+model fit offer for an on-device run. The card points to the model choices
+when they are available and to provider settings otherwise. Chat's compact loop fails the
 message with the cause instead of falling back to cached data. Chat shows a failed message with the
 cause, also when the model writing an MCP query reasoned without answering
 (other query writer failures stay tool results); a multi-tenant answer keeps its tenant results and fails only for this

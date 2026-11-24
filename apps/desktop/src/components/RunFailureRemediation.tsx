@@ -151,7 +151,13 @@ function contextTooSmallSuggestion(failure: ContextTooSmallFailure): Suggestion 
   };
 }
 
-export function RunFailureRemediation({ run }: { run: RunRecord }) {
+export function RunFailureRemediation({
+  run,
+  hasReasoningModelFitOffer = false,
+}: {
+  run: RunRecord;
+  hasReasoningModelFitOffer?: boolean;
+}) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
   // A typed reason is exact, so it comes first and replaces the guesses.
@@ -220,7 +226,9 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
                     {suggestion.title}
                   </div>
                   <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
-                    {typeof suggestion.body === "function" ? suggestion.body(run.error!) : suggestion.body}
+                    {hasReasoningModelFitOffer && suggestion.match === isOllamaReasoningWithoutAnswerMessage
+                      ? "The model spent its output on reasoning and wrote no answer, so there is no report. Raise the step's maxTokens, narrow the agent's scope, or run it with another model below."
+                      : typeof suggestion.body === "function" ? suggestion.body(run.error!) : suggestion.body}
                   </p>
                 </div>
               ))}

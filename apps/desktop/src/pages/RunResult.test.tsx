@@ -945,6 +945,8 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
 
     const notice = await screen.findByRole("region", { name: "llama3.1 reasoned without answering" });
     expect(screen.getByText("Model reasoned without answering")).toBeInTheDocument();
+    expect(screen.getByText(/run it with another model below/)).toBeInTheDocument();
+    expect(screen.queryByText(/pick a model that answers without reasoning in Settings/)).not.toBeInTheDocument();
     expect(within(notice).getByText("Run this agent with another model")).toBeInTheDocument();
     expect(within(notice).getByRole("button", { name: "Use qwen:4b" })).toBeInTheDocument();
     expect(within(notice).getByRole("button", { name: "Use custom" })).toBeInTheDocument();
@@ -995,7 +997,22 @@ describe("Run with another provider after a model fit failure (mockup 36, sectio
     const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
     renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
     expect(await screen.findByText("Model reasoned without answering")).toBeInTheDocument();
+    expect(screen.getByText(/pick a model that answers without reasoning in Settings → LLM Providers, then re-run/)).toBeInTheDocument();
+    expect(screen.queryByText(/run it with another model below/)).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "llama3.1 reasoned without answering" })).toBeNull();
+  });
+
+  it("keeps the full reasoning recovery when no other model is available", async () => {
+    const run = createAwaitingConfirmationRun({
+      status: "failed", plan: undefined, providerId: "ollama", model: "llama3.1", error: REASONING_ERROR,
+    });
+    const providers = mockProviders.filter((provider) => provider.id === "ollama");
+    const bridge = makeMockBridge({}, createMockAppState({ providers, runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+    const notice = await screen.findByRole("region", { name: "llama3.1 reasoned without answering" });
+    expect(within(notice).queryByText("Run this agent with another model")).not.toBeInTheDocument();
+    expect(screen.getByText(/pick a model that answers without reasoning in Settings/)).toBeInTheDocument();
   });
 
   it("shows one recovery for a typed context failure: the notice, not also the remediation text", async () => {

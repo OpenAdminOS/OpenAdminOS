@@ -567,7 +567,12 @@ function RunPage({
             />
           ) : null}
 
-          {!modelFit || modelFit.issue.reason === "thinking-only" ? <RunFailureRemediation run={run} /> : null}
+          {!modelFit || modelFit.issue.reason === "thinking-only" ? (
+            <RunFailureRemediation
+              run={run}
+              hasReasoningModelFitOffer={!!modelFit && (modelFit.choices.local.length > 0 || modelFit.choices.hosted.length > 0)}
+            />
+          ) : null}
           {modelFit ? (
             <ModelFitNotice
               issue={modelFit.issue}
