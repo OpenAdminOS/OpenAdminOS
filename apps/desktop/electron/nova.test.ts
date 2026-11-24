@@ -984,6 +984,34 @@ it("keeps hosted voice consent and instructions free of organization context wit
   assert.doesNotMatch(body.session.instructions, /Northwind|tenant-a|Verified app connection/);
 });
 
+it("ends hosted public voice if navigation cannot verify its settings", async () => {
+  const { state, secrets } = fixture();
+  delete state.activeTenantId;
+  let unreadable = false;
+  const nova = new NovaService(secrets, async () => state,
+    async () => { throw new Error("Unexpected tenant access"); },
+    async () => Response.json({ transport: { sdp: "answer" } }),
+    {
+      profile: async scope => {
+        assert.equal(scope, null);
+        if (unreadable) throw new Error("Settings disk unavailable");
+        return defaultNovaSettings();
+      },
+      activeTenantId: async () => undefined,
+      connectors: async () => [],
+      send: async () => { throw new Error("Unexpected send"); },
+      startRun: async () => { throw new Error("Unexpected run"); },
+      recordVoiceConsent: () => {},
+    },
+  );
+  await nova.handle({ action: "configure", apiKey: "test-key" });
+  const { sessionId } = await nova.handle({ action: "start", mode: "openai", consent: true, sdp: "v=0" });
+  assert.ok(sessionId);
+  unreadable = true;
+  await assert.rejects(nova.handle({ action: "answer", sessionId, text: "Open Settings" }), { message: NOVA_SETTINGS_UNREADABLE });
+  await assert.rejects(nova.handle({ action: "answer", sessionId, text: "Open Settings" }), /changed|stopped/);
+});
+
 it("keeps a no-organization session on the public docs path and invalidates it on a switch", async () => {
   const { state, secrets } = fixture();
   const tenantId = state.activeTenantId!;

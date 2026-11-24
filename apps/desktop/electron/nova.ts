@@ -479,6 +479,10 @@ export class NovaService {
         this.endedCard = undefined;
         throw new Error(card ? `${NOVA_SESSION_CONTEXT_CHANGED} ${novaEndedCardOutcome(card.preview.kind)}` : NOVA_SESSION_CONTEXT_CHANGED);
       }
+      if (!fresh && session.hostedProfile) {
+        this.invalidate();
+        throw new Error(NOVA_SETTINGS_UNREADABLE);
+      }
       // The hosted voice prompt cannot be taken back. When what it was given
       // changed or was removed, the session ends instead of using it further.
       if (session.hostedProfile && hostedProfileChanged(session.hostedProfile, fresh)) {
