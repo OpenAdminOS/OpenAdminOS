@@ -2054,12 +2054,14 @@ client cannot initialize from `SUPABASE_URL` and `SUPABASE_SECRET_KEY`.
    rejects the request before proceeding.
 3. Check that `GET /api/health` returns HTTP 200 with `{"ok":true}`.
 
-Migration history (2026-11-24). The final legacy flush preserved existing
-lifetime totals before the switch to Supabase and aggregate-only install
-counts. The new rolling total started from Supabase's own UTC daily rows.
-The same day, the one-year install hashes, seven-day hash sets, and pending
-counters were deleted from Upstash. It no longer processes OpenAdminOS data
-and the account is being closed.
+The website stats migration was completed on 2026-11-24. The final legacy
+flush preserved existing lifetime totals before the switch to Supabase and
+aggregate-only install counts. The new rolling total started from Supabase's
+own UTC daily rows.
+The same day, the legacy install hashes, hash sets, and pending counters
+were deleted from Upstash, and the Upstash environment variables were removed
+from Vercel. Deletion of the empty Upstash database and account was handed off
+to the maintainer.
 
 Settings > Privacy offers Automatic network requests, on by default. Turning it
 off stops background app update checks, startup, focus and periodic registry
