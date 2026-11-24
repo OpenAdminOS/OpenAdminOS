@@ -906,8 +906,17 @@ still release the microphone. A combined Stop followed by a question retains the
 question. Completion labels describe backend retrieval, not speech delivery; completed
 results are re-supplied when the user asks whether an already-finished task is running.
 OpenAI instructions request speech interruption while the application separately gates
-playback and backend work. Local voice remains recording-based, rather than an always
-listening barge-in session.
+playback and backend work. Local voice defaults to hands-free after the admin starts a session. The panel
+and floating window show when the microphone is live. A pinned Silero VAD model
+runs on device in an Electron utility process. Speech detected during playback immediately stops audio and synthesis,
+using a higher detection threshold during playback. Escape, close, organization or
+provider changes, backgrounding and inactivity release the microphone. Settings >
+Nova can change the 800 ms end-of-speech silence and 120 second inactivity timeout,
+switch to Hold to talk, and reveal per-turn timings. The global shortcut toggles
+recording in Hold to talk because Electron only reports key presses. The warm
+small-talk target is under two seconds from end of speech to first audio on M5.
+
+<!-- TODO(ugur): Measure warm and cold small-talk audio on an M5 Mac and record the system load. -->
 
 Data lives in **Settings > Data**, with all 45 supported read-resource types
 selected by default. Browse opens a read-only view of the active organization's
@@ -1100,7 +1109,10 @@ Electron utility process without a listening port. Nova plays each chunk as it
 is synthesized, beginning with a short clause. Stop or asking another question
 cancels synthesis and playback. English speech uses a Microsoft administration
 lexicon and a rule-based fallback for unfamiliar words.
-Recordings are at most one minute and require explicit submission. Nova trims
+A local utterance is at most one minute. In hands-free mode Nova submits it
+automatically, merging speech that resumes within 1.2 seconds of submission until
+an answer appears. Hold to talk submits when the button is released or the global
+shortcut is pressed again. Nova trims
 quiet edges before transcription and preserves pauses within the recording.
 On CPU-only builds, Small uses a padded, shorter encoder window for recordings
 up to 20 seconds. It keeps the full window for longer recordings.

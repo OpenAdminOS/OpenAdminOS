@@ -877,3 +877,80 @@ it("plays queued audio before handing just the unsynthesized remainder to the sy
   act(() => document.querySelector("audio")!.dispatchEvent(new Event("ended")));
   await waitFor(() => expect(speak).toHaveBeenCalledWith(expect.objectContaining({ text: "Try another check." })));
 });
+
+async function startHandsFreeFixture() {
+  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  vi.stubGlobal("URL", { revokeObjectURL: vi.fn(), createObjectURL: vi.fn(() => "blob:nova-hands-free") });
+  const track = { stop: vi.fn(), addEventListener: vi.fn() };
+  const getUserMedia = vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }));
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+  vi.stubGlobal("AudioContext", class {
+    resume = async () => {};
+    close = async () => {};
+    audioWorklet = { addModule: vi.fn(async () => {}) };
+    createAnalyser = () => ({ getByteTimeDomainData: (values: Uint8Array) => values.fill(128) });
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+  });
+  const port: { onmessage?: (event: { data: Float32Array }) => void } = {};
+  vi.stubGlobal("AudioWorkletNode", class { port = port; });
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (request, _activity, onAudio) => {
+      if (request.action === "speech-status") return { speech: {
+        source: "builtin", model: "small", selectedModel: "small", gpuAccelerated: false,
+        available: true, ready: true, totalBytes: 0,
+        preferences: { interaction: "hands-free", silenceMs: 800, idleSeconds: 120, showTimings: false },
+      } as const };
+      if (request.action === "vad") return { speechProbability: request.frame[0] ?? 0 };
+      if (request.action === "start") return { sessionId: "hands-free" };
+      if (request.action === "transcribe") return { text: "What can you do?" };
+      if (request.action === "answer") return { text: "I can help." };
+      if (request.action === "speak") {
+        onAudio?.(new Uint8Array([1, 2, 3]));
+        return {};
+      }
+      return {};
+    }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await openNovaForTest();
+  await user.selectOptions(screen.getByLabelText("Voice provider"), "local");
+  await screen.findByText("Models are installed on this device.");
+  return { bridge, track, getUserMedia, port, play, pause };
+}
+
+it("releases the hands-free microphone after two minutes without speech", async () => {
+  const { track } = await startHandsFreeFixture();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
+    expect(screen.getByText("Microphone live")).toBeVisible();
+    await act(async () => vi.advanceTimersByTimeAsync(120000));
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Microphone live")).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("interrupts streamed playback and keeps the hands-free microphone open", async () => {
+  const { bridge, track, port, play, pause, getUserMedia } = await startHandsFreeFixture();
+  await act(async () => screen.getByRole("button", { name: "Start Nova" }).click());
+  expect(getUserMedia).toHaveBeenCalledWith({ audio: {
+    echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1,
+  }, video: false });
+  play.mockClear();
+  const send = (score: number) => port.onmessage?.({ data: new Float32Array(512).fill(score) });
+  await act(async () => {
+    send(0.95);
+    for (let index = 0; index < 25; index++) send(0);
+  });
+  await waitFor(() => expect(play).toHaveBeenCalledOnce());
+  pause.mockClear();
+  await act(async () => send(0.95));
+  await waitFor(() => expect(pause).toHaveBeenCalledOnce());
+  expect(bridge.nova).toHaveBeenCalledWith({ action: "interrupt", sessionId: "hands-free" });
+  expect(track.stop).not.toHaveBeenCalled();
+  expect(screen.getByText("Microphone live")).toBeVisible();
+});

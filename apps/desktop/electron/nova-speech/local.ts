@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { UtilityProcess, utilityProcess } from "electron";
-import type { NovaSpeechStatus } from "@openadminos/agent-sdk";
+import type { NovaLocalVoicePreferences, NovaSpeechStatus } from "@openadminos/agent-sdk";
 import { DataFolderSealedError, dataFolderSealed } from "../data-folder-seal.js";
 import { installSpeechModels, kokoroModels, SpeechModelIntegrity, whisperModels, type ModelFile } from "./models.js";
 import { WhisperRuntime, whisperUsesMetal } from "./whisper.js";
@@ -41,6 +41,8 @@ export class LocalSpeech {
   private readonly gpuAccelerated = whisperUsesMetal;
   private selection: { source: "builtin" | "servers"; model: "auto" | "small" | "turbo" } = { source: "builtin", model: "auto" };
 
+  private preferences: NovaLocalVoicePreferences = { interaction: "hands-free", silenceMs: 800, idleSeconds: 120, showTimings: false };
+
   constructor(private readonly directory: string, private readonly binary: string, private readonly dependencies: {
     fork?: typeof utilityProcess.fork;
     fetch?: typeof fetch;
@@ -48,6 +50,7 @@ export class LocalSpeech {
   } = {}) {
     try {
       const saved = JSON.parse(readFileSync(join(directory, "settings.json"), "utf8"));
+      if (validVoicePreferences(saved.preferences)) this.preferences = saved.preferences;
       if (saved.source === "builtin" || saved.source === "servers") this.selection.source = saved.source;
       if (saved.model === "auto" || saved.model === "small" || saved.model === "turbo") this.selection.model = saved.model;
     } catch (error) {
@@ -69,7 +72,7 @@ export class LocalSpeech {
 
   status(): NovaSpeechStatus {
     return {
-      ...this.selection, selectedModel: this.model, gpuAccelerated: this.gpuAccelerated,
+      ...this.selection, preferences: this.preferences, selectedModel: this.model, gpuAccelerated: this.gpuAccelerated,
       available: existsSync(this.binary),
       repairNeeded: this.repair.has(this.target),
       unusedBytes: this.installedBytes(this.model === "small" ? "turbo" : "small"),
@@ -83,15 +86,27 @@ export class LocalSpeech {
   configure(source: unknown, model: unknown) {
     if ((source !== "builtin" && source !== "servers") || (model !== "auto" && model !== "small" && model !== "turbo"))
       throw new Error("Choose a supported local voice source and model.");
-    if (dataFolderSealed()) throw new DataFolderSealedError();
-    mkdirSync(this.directory, { recursive: true });
-    const settings = join(this.directory, "settings.json");
     const next = { source, model } as const;
-    writeFileSync(settings + ".tmp", JSON.stringify(next));
-    renameSync(settings + ".tmp", settings);
+    this.saveSettings(next, this.preferences);
     this.stop();
     this.selection = next;
     this.failure = undefined;
+  }
+
+  configurePreferences(value: unknown) {
+    if (!validVoicePreferences(value)) throw new Error("Choose a supported local voice mode and timeout.");
+    const { interaction, silenceMs, idleSeconds, showTimings } = value;
+    const next = { interaction, silenceMs, idleSeconds, showTimings };
+    this.saveSettings(this.selection, next);
+    this.preferences = next;
+  }
+
+  private saveSettings(selection: typeof this.selection, preferences: NovaLocalVoicePreferences) {
+    if (dataFolderSealed()) throw new DataFolderSealedError();
+    mkdirSync(this.directory, { recursive: true });
+    const settings = join(this.directory, "settings.json");
+    writeFileSync(settings + ".tmp", JSON.stringify({ ...selection, preferences }));
+    renameSync(settings + ".tmp", settings);
   }
 
   async install() {
@@ -283,4 +298,13 @@ export class LocalSpeech {
       else child.postMessage({ id, text });
     });
   }
+}
+
+function validVoicePreferences(value: unknown): value is NovaLocalVoicePreferences {
+  if (!value || typeof value !== "object") return false;
+  const { interaction, silenceMs, idleSeconds, showTimings } = value as NovaLocalVoicePreferences;
+  return (interaction === "hands-free" || interaction === "hold-to-talk") &&
+    Number.isInteger(silenceMs) && silenceMs >= 300 && silenceMs <= 2000 &&
+    Number.isInteger(idleSeconds) && idleSeconds >= 15 && idleSeconds <= 600 &&
+    typeof showTimings === "boolean";
 }

@@ -1,3 +1,4 @@
+import { NovaVad } from "./nova-speech/vad.js";
 import { prepareRecording } from "./nova-speech/recording.js";
 import { speechLanguage } from "./nova-speech/language.js";
 import type { LocalSpeech } from "./nova-speech/local.js";
@@ -113,6 +114,8 @@ export class NovaService {
     consent: boolean;
     name: string;
     controller: AbortController;
+    audioController?: AbortController;
+    vad?: NovaVad;
   };
   /**
    * Nova's settings and the confirmed notes of one organization, for a
@@ -249,12 +252,13 @@ export class NovaService {
       model(providerId: AppState["activeProviderId"], model: string | undefined, endpoint: string | undefined, isLocal: boolean): Promise<RunLlmApi>;
     },
     private readonly speech?: LocalSpeech,
+    private readonly vadModel?: string,
   ) {}
   async handle(input: NovaRequest, onActivity?: (activity: NovaActivity) => void, onAudio?: (wav: Uint8Array, remainingText?: string) => void): Promise<NovaResponse> {
     if (!input || typeof input !== "object")
       throw new Error("Nova request is missing.");
     if (input.action === "speech-status" || input.action === "speech-install" ||
-        input.action === "speech-cancel" || input.action === "speech-configure") {
+        input.action === "speech-cancel" || input.action === "speech-configure" || input.action === "speech-preferences") {
       if (!this.speech) return {};
       if (input.action !== "speech-status" && input.action !== "speech-cancel")
         requireVoiceModeAllowed(await this.state(), "local");
@@ -264,6 +268,7 @@ export class NovaService {
         this.speech.configure(input.source, input.model);
         if (this.session?.mode === "local") this.invalidate();
       }
+      if (input.action === "speech-preferences") this.speech.configurePreferences(input.preferences);
       return { speech: this.speech.status() };
     }
     if (input.action === "status")
@@ -284,6 +289,22 @@ export class NovaService {
     if (input.action === "stop") {
       this.invalidate();
       return {};
+    }
+    if (input.action === "vad") {
+      // The main-process window owner and local session ID authorize audio
+      // detection. Analysis touches only the on-device model. The answer and
+      // transcription actions still revalidate the current organization and provider.
+      const session = this.session;
+      if (session?.mode !== "local" || input.sessionId !== session.id)
+        throw new Error("Start a local Nova session before using the microphone.");
+      if (!this.vadModel) throw new Error("Local voice detection is unavailable. Select Hold to talk in Settings.");
+      session.vad ??= new NovaVad(this.vadModel, session.controller.signal);
+      try {
+        return { speechProbability: await session.vad.score(input.frame) };
+      } catch (error) {
+        if (session.controller.signal.aborted) return {};
+        throw error;
+      }
     }
     if (input.action === "start") this.invalidate();
     const generation = this.generation;
@@ -520,6 +541,8 @@ export class NovaService {
     if (input.action === "interrupt") {
       ++this.answerRevision;
       this.pendingAnswer?.abort();
+      session.audioController?.abort();
+      session.audioController = undefined;
       session.pendingAction = undefined;
       session.commandContext = undefined;
       return { text: "Stopped. Listening for your next question." };
@@ -876,6 +899,8 @@ export class NovaService {
     }
     if (session.mode !== "local")
       throw new Error("Local audio requires a local voice session.");
+    session.audioController ??= new AbortController();
+    const audioSignal = AbortSignal.any([session.controller.signal, session.audioController.signal]);
     if (input.action === "transcribe") {
       if (
         !Array.isArray(input.audio) ||
@@ -886,7 +911,7 @@ export class NovaService {
           "Voice recording is invalid or too long. Record at most one minute.",
         );
       if (this.speech && !this.speech.advanced) {
-        const result = await this.speech.transcribe(new Uint8Array(input.audio), session.controller.signal);
+        const result = await this.speech.transcribe(new Uint8Array(input.audio), audioSignal);
         return { text: result.text, speechLanguage: result.language };
       }
       const { wav } = prepareRecording(new Uint8Array(input.audio));
@@ -905,7 +930,7 @@ export class NovaService {
           body: form,
           redirect: "error",
           signal: AbortSignal.any([
-            session.controller.signal,
+            audioSignal,
             AbortSignal.timeout(90000),
           ]),
         },
@@ -915,7 +940,7 @@ export class NovaService {
           `Local transcription failed (HTTP ${response.status}). Check whisper-server on port 8080.`,
         );
       const result = (await response.json()) as { text?: string };
-      session.controller.signal.throwIfAborted();
+      audioSignal.throwIfAborted();
       if (typeof result.text !== "string")
         throw new Error(
           "Whisper returned no transcript. Check its model and retry.",
@@ -932,7 +957,7 @@ export class NovaService {
       const language = this.speech ? speechLanguage(input.text, input.languageHint) : "en";
       if (language && language !== "en") return { speechLanguage: language };
       if (this.speech && !this.speech.advanced)
-        return { audio: Array.from(await this.speech.speak(input.text, session.controller.signal, onAudio)) };
+        return { audio: Array.from(await this.speech.speak(input.text, audioSignal, onAudio)) };
       const response = await this.localAudioRequest(
         "Kokoro speech",
         "http://127.0.0.1:8880/v1/audio/speech",
@@ -941,7 +966,7 @@ export class NovaService {
           headers: { "Content-Type": "application/json" },
           redirect: "error",
           signal: AbortSignal.any([
-            session.controller.signal,
+            audioSignal,
             AbortSignal.timeout(90000),
           ]),
           body: JSON.stringify({
@@ -956,7 +981,7 @@ export class NovaService {
         throw new Error(
           `Local speech failed (HTTP ${response.status}). Check Kokoro on port 8880.`,
         );
-      const audio = await readSpeechAudio(response, session.controller.signal);
+      const audio = await readSpeechAudio(response, audioSignal);
       return { audio: Array.from(audio) };
     }
     throw new Error("Unknown Nova command.");

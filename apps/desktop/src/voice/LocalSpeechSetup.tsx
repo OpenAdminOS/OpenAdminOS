@@ -55,6 +55,45 @@ export function LocalSpeechSetup({ showModel = false, onChange, openSettings }: 
             <option value="servers">My own servers (advanced)</option>
           </select>
         </label>}
+        {showModel && status.preferences && <fieldset disabled={busy} className="grid gap-2">
+          <legend>Local voice controls</legend>
+          <label className="nova-field">
+            Voice mode
+            <select value={status.preferences.interaction} onChange={event => void act({
+              action: "speech-preferences",
+              preferences: { ...status.preferences!, interaction: event.target.value as "hands-free" | "hold-to-talk" },
+            })}>
+              <option value="hands-free">Hands-free</option>
+              <option value="hold-to-talk">Hold to talk</option>
+            </select>
+          </label>
+          {status.preferences.interaction === "hands-free" && <>
+            <label className="nova-field">
+              End of speech silence (milliseconds)
+              <input type="number" min={300} max={2000} step={50} key={status.preferences.silenceMs}
+                defaultValue={status.preferences.silenceMs} onBlur={event => {
+                  if (event.target.validity.valid && event.target.value && event.target.valueAsNumber !== status.preferences!.silenceMs)
+                    void act({ action: "speech-preferences", preferences: { ...status.preferences!, silenceMs: event.target.valueAsNumber } });
+                  else event.target.value = String(status.preferences!.silenceMs);
+                }} />
+            </label>
+            <label className="nova-field">
+              Microphone inactivity timeout (seconds)
+              <input type="number" min={15} max={600} key={status.preferences.idleSeconds}
+                defaultValue={status.preferences.idleSeconds} onBlur={event => {
+                  if (event.target.validity.valid && event.target.value && event.target.valueAsNumber !== status.preferences!.idleSeconds)
+                    void act({ action: "speech-preferences", preferences: { ...status.preferences!, idleSeconds: event.target.valueAsNumber } });
+                  else event.target.value = String(status.preferences!.idleSeconds);
+                }} />
+            </label>
+          </>}
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={status.preferences.showTimings} onChange={event => void act({
+              action: "speech-preferences", preferences: { ...status.preferences!, showTimings: event.target.checked },
+            })} />
+            Show timings
+          </label>
+        </fieldset>}
         {status.source === "servers" && !showModel && <p>Using your local servers. {openSettings ? <button className="underline" onClick={openSettings}>Change in Settings</button> : <Link className="underline" to="/settings/nova">Change in Settings</Link>}</p>}
         {status.source === "builtin" && <>
           {showModel && <label className="nova-field">
