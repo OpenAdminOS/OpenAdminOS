@@ -18,6 +18,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Public registry install counts send only the agent slug, app version, and platform. OpenAdminOS records one attempt per agent and UTC year on the device, including failed requests. About shows counts as paused when automatic requests are off and the count preference is on.
 
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.
+- CI, documentation, and release workflows opt out of build-tool telemetry.
 
 ### Removed
 
@@ -33,6 +34,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+- The website uses a nonce-based Content Security Policy, blocks framing and unused browser permissions, and sends a one-year HSTS policy for the responding host.
+- Linux no longer downloads spelling dictionaries from Google. Built-in spellchecking is disabled on Linux.
 - Public support reports require an exact preview when diagnostics are included. Diagnostics use count ranges, relative ages, UTC report dates, and error categories. They identify only confirmed public registry agents and omit run identifiers. If the server rejects a preview or its diagnostics are too large, the form explains how to update the app or submit without diagnostics.
 
 ## [0.8.0] - 2026-11-24

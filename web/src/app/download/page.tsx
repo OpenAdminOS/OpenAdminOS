@@ -14,8 +14,6 @@ import {
   websiteSchema,
 } from "../seo";
 
-export const revalidate = 900;
-
 const TITLE = "Download for Windows, macOS, and Linux";
 const DESCRIPTION =
   "Download OpenAdminOS for Windows, macOS, or Linux, review release notes, and inspect the open-source admin agent runtime before you connect it.";

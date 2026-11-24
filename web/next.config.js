@@ -55,6 +55,32 @@ function docsRedirects() {
 const config = {
   outputFileTracingRoot: webRoot,
   poweredByHeader: false,
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // HTML responses get a per-request policy from src/proxy.ts.
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+          },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          {
+            key: "Permissions-Policy",
+            value: [
+              "camera=()", "microphone=()", "geolocation=()", "payment=()",
+              "usb=()", "serial=()", "hid=()", "bluetooth=()", "midi=()",
+              "gyroscope=()", "accelerometer=()", "magnetometer=()",
+              "display-capture=()", "browsing-topics=()",
+            ].join(", "),
+          },
+          { key: "Strict-Transport-Security", value: "max-age=31536000" },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       {

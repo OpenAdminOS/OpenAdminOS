@@ -1,3 +1,5 @@
+import { headers } from "next/headers";
+
 import { AppCrop, AppShot, type AppScreen } from "./AppShot";
 
 type Crop = { x: number; y: number; width: number; aspect: string };
@@ -6,7 +8,7 @@ type Crop = { x: number; y: number; width: number; aspect: string };
  * A real desktop capture inside a quiet window frame. The frame is only a
  * title bar; everything inside it is the unedited screenshot.
  */
-export function AppWindow({
+export async function AppWindow({
   screen,
   alt,
   crop,
@@ -21,6 +23,8 @@ export function AppWindow({
   priority?: boolean;
   className?: string;
 }) {
+  const nonce = priority ? (await headers()).get("x-nonce") ?? undefined : undefined;
+
   return (
     <figure
       className={`overflow-hidden rounded-[12px] bg-brand-raised shadow-(--shadow-frame) ${className}`}
@@ -42,6 +46,7 @@ export function AppWindow({
           screen={screen}
           alt={alt}
           priority={priority}
+          nonce={nonce}
           className="block h-auto w-full"
         />
       )}

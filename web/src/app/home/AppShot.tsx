@@ -30,17 +30,20 @@ export function AppShot({
   className = "",
   style,
   priority = false,
+  nonce,
 }: {
   screen: AppScreen;
   alt: string;
   className?: string;
   style?: CSSProperties;
   priority?: boolean;
+  nonce?: string;
 }) {
   return (
     <>
       {priority ? (
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `(function(){var t=document.documentElement.dataset.theme==="dark"?"dark":"light";var l=document.createElement("link");l.rel="preload";l.as="image";l.href="/app/${screen}-"+t+".webp";l.setAttribute("fetchpriority","high");document.head.appendChild(l)})();`,
           }}
