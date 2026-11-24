@@ -4291,8 +4291,8 @@ function readMessage(row: MessageRow): IntuneChatMessage {
   };
 }
 
-function withoutOfferId(issue: NonNullable<IntuneChatMessage["modelFit"]>): NonNullable<IntuneChatMessage["modelFit"]> {
-  const { offerId: _offerId, ...rest } = issue;
+function withoutLiveOffer(issue: NonNullable<IntuneChatMessage["modelFit"]>): NonNullable<IntuneChatMessage["modelFit"]> {
+  const { offerId: _offerId, offerExpiresAt: _offerExpiresAt, ...rest } = issue;
   return rest;
 }
 
@@ -4307,7 +4307,7 @@ function answerMetaJson(message: IntuneChatMessage): string | null {
     ...(message.privatePrompt ? { privatePrompt: true } : {}),
     ...(message.notConnected ? { notConnected: message.notConnected } : {}),
     // The offer id is in memory only and single use; a stored answer keeps the reason, not the offer.
-    ...(message.modelFit ? { modelFit: withoutOfferId(message.modelFit) } : {}),
+    ...(message.modelFit ? { modelFit: withoutLiveOffer(message.modelFit) } : {}),
     ...(message.switchedFrom ? { switchedFrom: message.switchedFrom } : {}),
   };
   return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;

@@ -206,7 +206,7 @@ it("offers Dry run for write agents through the normal preflight", async () => {
   renderRoute(<Agents />, { path: "/agents/:slug", route: "/agents/device-offboard", bridge });
   await user.click(await screen.findByRole("button", { name: "Dry run" }));
   await user.click(await screen.findByRole("button", { name: "Start dry run" }));
-  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", expect.objectContaining({ dryRun: true, expectedOllamaCloud: false })));
 });
 
 

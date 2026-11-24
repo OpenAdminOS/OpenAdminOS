@@ -1,3 +1,4 @@
+import { providerForModel } from "@openadminos/agent-sdk";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
@@ -6,8 +7,9 @@ import { MarkdownPreview, stripMarkdownToPlainText } from "../components/Markdow
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { ModelFitNotice } from "../components/ModelFitNotice";
-import { isOnDeviceModel, modelFitChoices, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
+import { isOnDeviceModel, type ModelFitChoice, type ModelFitChoices } from "../shared/model-fit";
 import { isOllamaKeptContextFailure } from "../shared/ollama-failure";
+import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
 import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
@@ -111,10 +113,16 @@ function RunResultPage({ run }: { run: RunRecord }) {
     : undefined;
   // Fall back to the built-in catalog so a run whose provider entry was
   // later removed still reports where its data went.
-  const runProvider = run.providerId
+  const endpointProvider = run.providerId
     ? state.providers.find((provider) => provider.id === run.providerId) ??
       providerCatalog.find((provider) => provider.id === run.providerId)
     : undefined;
+  const runProvider = providerForModel(
+    endpointProvider && run.ollamaCloud !== undefined && run.model
+      ? { ...endpointProvider, isLocal: !run.ollamaCloud, remoteModels: run.ollamaCloud ? [run.model] : [] }
+      : endpointProvider,
+    run.model,
+  );
   const derivedTrust = deriveTrustState({
     provider: runProvider,
     activeTenant: runTenant,
@@ -146,9 +154,9 @@ function RunResultPage({ run }: { run: RunRecord }) {
     ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
     ...(run.dryRun && (run.requireOnDeviceModel || run.providerEndpointBinding) ? { dryRun: true } : {}),
   };
-  const fitChoices = modelFit
-    ? modelFitChoices({ issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy })
-    : undefined;
+  const { choices: fitChoices, checkingLocalContext } = useModelFitChoices({
+    issue: modelFit, providers: state.providers, activeModelByProviderId: state.activeModelByProviderId, managedPolicy: state.managedPolicy,
+  });
 
   const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
     navigate(`/agents/${encodeURIComponent(slug)}/confirm`, { state: { runChoice } });
@@ -223,8 +231,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
           ...(run.tenantId ? { tenantId: run.tenantId } : {}),
           ...(run.providerId ? { providerId: run.providerId } : {}),
           ...(run.model ? { model: run.model } : {}),
-          // Run for real of a model fit dry run keeps its safeguards through setup, so a provider
-          // picked there stays on this run and does not become the active provider.
+          // Run for real of a model fit dry run keeps its safeguards through setup.
           ...(run.requireOnDeviceModel || run.providerEndpointBinding ? { safeguards: { onDevice: run.requireOnDeviceModel === true } } : {}),
           returnTo: `/runs/${encodeURIComponent(run.id)}`,
         }),
@@ -356,7 +363,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
       run={run}
       displayName={displayName}
       tenantName={tenantName}
-      providerName={providerNameForRun(run, state.providers)}
+      providerName={runProvider?.name ?? providerNameForRun(run, state.providers)}
       providerIsLocal={runProvider?.isLocal}
       trustDetail={runTrust.detail}
       activeTenantId={state.activeTenantId}
@@ -373,11 +380,13 @@ function RunResultPage({ run }: { run: RunRecord }) {
             modelFit: {
               issue: modelFit,
               choices: fitChoices,
+              checkingLocalContext,
               onChoose: (choice: ModelFitChoice) => {
                 rerunOverrideRef.current = {
                   providerId: choice.providerId,
                   ...(choice.model ? { model: choice.model } : {}),
                   modelFit,
+                  ...(choice.isLocal ? { safeguards: { onDevice: true } } : {}),
                   ...(run.dryRun ? { dryRun: true } : {}),
                 };
                 reRun();
@@ -454,6 +463,7 @@ function RunPage({
   modelFit?: {
     issue: ModelFitIssue;
     choices: ModelFitChoices;
+    checkingLocalContext: boolean;
     onChoose: (choice: ModelFitChoice) => void;
     onOpenProviders: () => void;
   };
@@ -560,6 +570,7 @@ function RunPage({
             <ModelFitNotice
               issue={modelFit.issue}
               choices={modelFit.choices}
+              checkingLocalContext={modelFit.checkingLocalContext}
               surface="run"
               onChoose={modelFit.onChoose}
               onOpenProviders={modelFit.onOpenProviders}

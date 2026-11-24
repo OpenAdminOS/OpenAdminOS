@@ -222,7 +222,14 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const cacheKey = `${endpoint}\0${model}`;
       // The context size the latest attempt sent, none when it sent no override.
       let lastSentCtx: number | undefined;
+      let sentOnce = false;
       const send = async (numCtx: number | undefined): Promise<Response> => {
+        if (sentOnce && opts.beforeOllamaResend) {
+          await opts.beforeOllamaResend();
+          const stopped = abortError();
+          if (stopped) throw stopped;
+        }
+        sentOnce = true;
         lastSentCtx = numCtx;
         const payload = numCtx === undefined ? body : { ...body, options: { ...optionsPayload, num_ctx: numCtx } };
         let response: Response;

@@ -1,3 +1,4 @@
+import { hostedOllamaDestination, providerForModel } from "@openadminos/agent-sdk";
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import { MAX_PROMISE_NUDGES, PROMISE_REPAIR_PROMPT, announcesLookup, completeWithPromiseNudge, looksLikeUnkeptPromise } from "./unkept-promise.js";
 import type { WebSearch } from "./web-search.js";
@@ -474,6 +475,7 @@ export interface ChatServiceHost {
   listProviders(): Promise<ProviderSummary[]>;
   /** A fresh check that this provider runs this model on this device, before a model fit retry on it. */
   verifyOnDeviceModel?(providerId: ProviderId, model: string | undefined): Promise<boolean>;
+  verifyLocalOllamaModel?(model: string): Promise<boolean>;
   /** Where a provider is reached now (address, or Azure resource and deployment) and its fingerprint, from one read. */
   providerTarget?(providerId: ProviderId): Promise<{ endpoint: string | undefined; destination: string }>;
   /** With a binding, the model is built only for that endpoint (see ProviderEndpointBinding in state.ts). */
@@ -653,6 +655,20 @@ export class IntuneChatService {
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
     if (!this.host.tenantLease) return work(signal);
     return this.host.tenantLease(tenantId, (leaseSignal) => work(signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal));
+  }
+
+  private protectLocalOllama(llm: RunLlmApi, provider: ProviderSummary, model: string | undefined): RunLlmApi {
+    const verify = this.host.verifyLocalOllamaModel;
+    if (provider.id !== "ollama" || !provider.isLocal || !model || !verify) return llm;
+    return guardModelFitLlm(llm, {
+      model,
+      before: async () => {
+        if (!(await verify(model))) {
+          throw new Error(`OpenAdminOS could not confirm that ${model} still runs on this device. Refresh Ollama in Settings, Providers, then send the question again.`);
+        }
+      },
+      dispatched: () => undefined,
+    });
   }
 
   /**
@@ -1031,7 +1047,7 @@ export class IntuneChatService {
     // The job runs under the lease of every tenant it reads or writes for,
     // so Disconnect of any of them refuses, stops and drains it.
     return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async () => {
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const provider = providerForModel(this.resolveActiveProvider(providers, persisted.activeProviderId), preflight.model);
     const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
     if (provider?.isLocal === false && input.hostedProviderConsent) {
@@ -1620,12 +1636,10 @@ export class IntuneChatService {
     }
     const resources = sanitizeGraphResources([...resourceSet]);
     const providers = await this.host.listProviders();
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const endpointProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const model = resolveProviderDefaultModel(endpointProvider, persisted.activeModelByProviderId).model;
+    const provider = providerForModel(endpointProvider, model);
     const providerId = provider.id;
-    const model = resolveProviderDefaultModel(
-      provider,
-      persisted.activeModelByProviderId,
-    ).model;
     const now = new Date().toISOString();
     const tenants = persisted.tenants
       .filter((tenant) => selectedTenantSet.has(tenant.id))
@@ -1748,7 +1762,8 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<{ text: string; error?: string }> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
+    const built = await this.tenantLlm(input.providerId, input.model, input.tenantIds);
+    const llm = withTenantDataOutputFilter(input.provider ? this.protectLocalOllama(built, input.provider, input.model) : built);
     if (!llm.available) return { text: deterministic };
     try {
       const system = buildIntuneChatSystemPrompt(input.provider?.isLocal === true);
@@ -2142,12 +2157,10 @@ export class IntuneChatService {
     // A tenant send runs under the tenant's lease; Disconnect refuses and drains it. No tenant, no lease.
     return this.leasedScope(noTenant ? undefined : tenant.id, undefined, async () => {
     const providers = await this.host.listProviders();
-    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const endpointProvider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const selectedModel = resolveProviderDefaultModel(endpointProvider, persisted.activeModelByProviderId).model;
+    const provider = providerForModel(endpointProvider, selectedModel);
     const providerId = provider.id;
-    const selectedModel = resolveProviderDefaultModel(
-      provider,
-      persisted.activeModelByProviderId,
-    ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
     if (noTenant && input.workspaceContext) {
       throw new Error("Workspaces belong to an organization. Choose one to attach workspace context, or send without it.");
@@ -2382,7 +2395,8 @@ export class IntuneChatService {
       responseModel = undefined;
     } else {
       // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
-      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]), verifyConsent));
+      const built = noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]);
+      const llm = withTenantDataOutputFilter(gateHostedLlm(this.protectLocalOllama(built, provider, selectedModel), verifyConsent));
       const withMemory = conversationMemory
         ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
         : content;
@@ -2504,9 +2518,9 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            // A hosted context overflow says more about the question than the model; a local one is the model's fit.
-            // A provider that could not be reached says nothing about the model.
-            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // Track failures that reflect tool-use reliability. Context overflows apply to
+            // this request, and an unreachable provider did not attempt the tool loop.
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && agentic.reason !== "context-limit")) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
@@ -2664,7 +2678,7 @@ export class IntuneChatService {
       consent: input.hostedProviderConsent,
       nova: Boolean(options.voice || options.scope),
     });
-    const provider = turn.provider;
+    const provider = providerForModel(turn.provider, turn.model);
     const providerId = provider.id;
     // An on-device retry goes out only after a fresh check that the model runs here.
     if (turn.switchedFrom && provider.isLocal && !(await this.host.verifyOnDeviceModel?.(providerId, turn.model))) {
@@ -3207,6 +3221,7 @@ export class IntuneChatService {
           model: selectedModel,
         });
       }
+      if (!turn.switchedFrom) built = this.protectLocalOllama(built, provider, selectedModel);
       const llm = withTenantDataOutputFilter(gateHostedLlm(built, verifyConsent));
       fitModel = selectedModel ?? llm.defaultModel;
       const contextualQuestion =
@@ -3417,9 +3432,9 @@ export class IntuneChatService {
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            // A hosted context overflow says more about the question than the model; a local one is the model's fit.
-            // A provider that could not be reached says nothing about the model.
-            if (agentic.ok || (agentic.reason !== "provider-unavailable" && (agentic.reason !== "context-limit" || provider.isLocal))) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
+            // Track failures that reflect tool-use reliability. Context overflows apply to
+            // this request, and an unreachable provider did not attempt the tool loop.
+            if (agentic.ok || (agentic.reason !== "provider-unavailable" && agentic.reason !== "context-limit")) recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok, agentic.ok ? undefined : agentic.failureReason);
             if (agentic.ok) {
               modelFollowUps = agentic.followUps ?? [];
               modelTitle = agentic.title;
@@ -3589,7 +3604,7 @@ export class IntuneChatService {
         ? {
             modelFit: {
               ...modelFit,
-              offerId: this.modelFitOffers.issue({
+              ...this.modelFitOffers.issue({
                 conversationId: conversation.id,
                 tenantId: noTenant ? undefined : tenant.id,
                 content,
@@ -4059,7 +4074,7 @@ export class IntuneChatService {
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const model = resolveProviderDefaultModel(provider, persisted.activeModelByProviderId).model;
-    return this.noTenantRoute(input.content.trim(), persisted, provider, model);
+    return this.noTenantRoute(input.content.trim(), persisted, providerForModel(provider, model), model);
   }
 
   private requireHostedChatConsent(
@@ -4088,6 +4103,9 @@ export class IntuneChatService {
       throw new Error(
         "Hosted provider confirmation does not match the selected provider. Confirm the chat send again.",
       );
+    }
+    if (!scheduled && consent.ollamaDestination !== hostedOllamaDestination(provider, model)) {
+      throw new Error("The Ollama destination changed or was not confirmed. Review where the question will be sent and confirm again.");
     }
     if (tenant && consent.noTenant === true) {
       throw new Error(
@@ -4361,7 +4379,8 @@ const LOCAL_FALLBACK_UNFINISHED =
  * models and keeps re-attempting models that provably cannot emit the
  * tool schema, burning a round trip on every question before falling
  * back. Record what actually happened instead and stop retrying a model
- * that has failed repeatedly.
+ * that has failed repeatedly. A context overflow is specific to the
+ * current request, so it does not count against the model's tool use.
  *
  * Deliberately in-memory: if the user pulls a better build of the same
  * tag, or the failures were caused by a transient provider problem, a

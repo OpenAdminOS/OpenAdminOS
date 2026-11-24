@@ -24,6 +24,7 @@ export function modelFitModelName(issue: Pick<ModelFitIssue, "model" | "provider
 export function ModelFitNotice({
   issue,
   choices,
+  checkingLocalContext,
   surface,
   onChoose,
   onSplit,
@@ -38,6 +39,7 @@ export function ModelFitNotice({
   returnModel?: string;
   issue: ModelFitIssue;
   choices: ModelFitChoices;
+  checkingLocalContext?: boolean;
   surface: "chat" | "run";
   onChoose: (choice: ModelFitChoice) => void;
   onSplit?: () => void;
@@ -88,7 +90,7 @@ export function ModelFitNotice({
                     {choice.isLocal ? (
                       <>
                         <div className="text-xs text-[var(--color-success)]">{MODEL_FIT_COPY.localWhere(choice.providerName)}</div>
-                        <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface, modelSizeBillions(issue.model) !== undefined)}</div>
+                        <div className="text-xs text-[var(--color-text-muted)]">{MODEL_FIT_COPY.localNote(surface, modelSizeBillions(issue.model) !== undefined, choice.contextWindow)}</div>
                         {/* A model on this device needs no accept step, so its button sends straight away. */}
                         {surface === "chat" ? <span className="sr-only">{MODEL_FIT_COPY.localSendsNow}</span> : null}
                       </>
@@ -108,6 +110,7 @@ export function ModelFitNotice({
           </ul>
         </>
       ) : null}
+      {checkingLocalContext ? <p role="status" className="mt-2 text-xs text-[var(--color-text-muted)]">Checking context sizes for local models.</p> : null}
       {choices.hosted.length === 0 ? (
         <p className="mt-3.5 flex flex-wrap items-center gap-x-2 rounded-lg border border-dashed border-[var(--color-border-strong)] px-3 py-2 text-[var(--color-text-soft)]">
           <span>{choices.hostedBlockedByPolicy ? MODEL_FIT_COPY.policy : MODEL_FIT_COPY.noneSetUp}</span>

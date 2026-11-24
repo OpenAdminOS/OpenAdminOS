@@ -50,7 +50,7 @@ Changes to either file apply at the next launch of OpenAdminOS.
 }
 ```
 
-With this file, only Ollama and LM Studio are offered anywhere in the app, Ollama with `llama3.1:8b` is set and cannot be changed, Chat can use Microsoft Learn and KQL Search but no other public reference, and Microsoft 365 sign-in uses only the Contoso registration.
+With this file, the provider lock limits the app to Ollama, and the model lock limits it to `llama3.1:8b`. Chat can use Microsoft Learn and KQL Search, and Microsoft 365 sign-in uses only the Contoso registration.
 
 The JSON Schema is in the repository at [`schemas/policy.schema.json`](https://github.com/OpenAdminOS/OpenAdminOS/blob/main/schemas/policy.schema.json). Editors such as VS Code validate and complete the file when it names the schema in `$schema`.
 
@@ -84,7 +84,11 @@ Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `rele
 - **Unlocked provider or model.** Applies until the admin picks another one, then the admin's choice stays. A new unlocked default in a changed policy replaces only the policy's earlier default, never the admin's own choice.
 - **Unlocked app registration.** Added to the saved registrations once. If the admin removes it, it stays removed until the policy names a different registration.
 
-`allowedProviders`, `allowedPublicReferences`, `novaVoiceModes`, `novaMemory` and every `false` in `novaCapabilities` are always enforced, locked or not. The first-run scan checks only allowed providers, and with a `defaultProvider` it never selects another one for you.
+`allowedProviders`, `allowedPublicReferences`, `novaVoiceModes`, `novaMemory` and every `false` in `novaCapabilities` are always enforced, locked or not. The first-run scan checks only allowed providers, and with a `defaultProvider` it keeps that provider selected.
+
+Including `ollama` in `allowedProviders` also allows Ollama Cloud models and aliases listed by a signed-in Ollama. Each Chat send to one requires the usual hosted confirmation. When no model is pinned, OpenAdminOS prefers an installed local model.
+
+To keep Ollama and exclude its cloud models, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on the device. Include `defaultModel` in `lock` if you set that list. The lock pins the model name, so keep that name backed by a local model. To exclude Ollama entirely, leave `ollama` out of `allowedProviders`.
 
 ### Nova
 
