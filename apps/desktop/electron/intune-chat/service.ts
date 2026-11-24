@@ -181,6 +181,7 @@ import {
   startAnswerStep,
   tenantAnswerFollowUp,
   tenantTieInFollowUp,
+  toolStepFinish,
   toolStepHooks,
   type AnswerModel,
   type ChatSourcePlan,
@@ -2524,9 +2525,18 @@ export class IntuneChatService {
               modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
             } else if (provider.isLocal || roadmapQuestion) {
-              assistantStatus = "failed";
-              assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
-              assistantContent = assistantError;
+              computed = provider.isLocal && !roadmapQuestion && !accessBlock.deferred && answerPlan?.sources.kind !== "docs" && structured && planned.resources.includes(structured.resource)
+                ? this.computeStructured(store, tenant.id, structured, answerGeneratedAt) : undefined;
+              if (computed) {
+                assistantContent = answerFromComputedCache(computed, steps, toolTrace);
+                computedShown = true;
+                engineNotice = LOCAL_FALLBACK_NOTICES[agentic.failureReason];
+                responseModel = undefined;
+              } else {
+                assistantStatus = "failed";
+                assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
+                assistantContent = assistantError;
+              }
             } else {
               const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
               assistantContent = deterministic.content;
@@ -3492,9 +3502,18 @@ export class IntuneChatService {
                 // the admin chooses it.
                 if (!options.voice && !options.scope) modelFit = loopFailureIssue(agentic, provider, fitModel) ?? (agentic.reason !== "context-limit" && agentic.reason !== "provider-unavailable" && agenticModelHasFailedRepeatedly(providerId, fitModel) ? repeatedFailureIssue(provider, fitModel) : undefined);
                 if ((!options.voice && provider.isLocal) || roadmapQuestion) {
-                  assistantStatus = "failed";
-                  assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
-                  assistantContent = assistantError;
+                  computed = provider.isLocal && !roadmapQuestion && !accessBlock.deferred && answerPlan?.sources.kind !== "docs" && structured && planned.resources.includes(structured.resource)
+                    ? this.computeStructured(store, tenant.id, structured, answerGeneratedAt) : undefined;
+                  if (computed) {
+                    assistantContent = answerFromComputedCache(computed, steps, toolTrace);
+                    computedShown = true;
+                    engineNotice = LOCAL_FALLBACK_NOTICES[agentic.failureReason];
+                    responseModel = undefined;
+                  } else {
+                    assistantStatus = "failed";
+                    assistantError = incompleteChatAnswer({ steps, toolTrace, roadmapQuestion, failure: agentic.failureReason, local: provider.isLocal });
+                    assistantContent = assistantError;
+                  }
                   emitDelta(assistantContent);
                 } else {
                   await streamDeterministicAnswer(agentic.fallbackNotice);
@@ -4280,6 +4299,15 @@ export class IntuneChatService {
   }
 }
 
+
+/** Use the same computed rows for the count, the list and the timeline. */
+function answerFromComputedCache(computed: ComputedResult, steps: ChatStepRecorder, trace: IntuneChatToolTraceEntry[]): string {
+  const entry = computedTraceEntry(computed);
+  trace.push(entry);
+  const step = steps.start({ kind: "tool", title: "Counting cached data", origin: "device", originLabel: ON_DEVICE });
+  steps.finish(step, toolStepFinish(entry));
+  return computedAnswerText(computed);
+}
 
 /** Explains what happened when the investigation has no completed answer. */
 function incompleteChatAnswer(input: {

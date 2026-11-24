@@ -4754,7 +4754,8 @@ the format. Decisions:
   for a missing source or a full article runs when the model has room to request
   it and use it. If the model exhausts the budget, Chat can show a verified
   cached result only when the structured matcher matched the current question
-  and the matching snapshot is available. Otherwise Chat records a failed answer that names the
+  and the matching snapshot is available. Code renders the count and list from
+  that same result. Otherwise Chat records a failed answer that names the
   reason and which relevant checks ran, and offers retry or model fit as
   applicable. A model whose repeated failures move it off the tool loop gets
   the same relevance rule. A model too small for tools keeps the normal

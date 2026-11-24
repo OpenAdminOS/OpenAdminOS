@@ -10,6 +10,7 @@ import type { RunLlmApi } from "@openadminos/agent-sdk";
 
 import { AppStateStore } from "../state.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { LOCAL_FALLBACK_NOTICES } from "./agentic-loop.js";
 import { recordAgenticOutcome } from "./service.js";
 import { chatResultContextFor, computedTraceEntry, computeStructuredResult, deviceComplianceReasonQuery, deviceRowFilters, structuredQueryForQuestion } from "./structured-question.js";
 import { buildAnswerPack, GRAPH_CACHE_RESOURCES, planChatContext } from "./planner.js";
@@ -646,6 +647,23 @@ describe("The cache after a failed local investigation", () => {
         assert.ok(calls.every((call) => call.loop));
         assert.equal(message.status, "failed");
         assert.doesNotMatch(message.content, /4 devices|WIN-01/);
+      }
+    });
+  });
+
+  it("builds a matched fallback count and list from the same cached rows in both send paths", async () => {
+    await withHarness(async ({ store, calls, reply }) => {
+      await store.setChatInvestigationMode("always-agentic");
+      const input = { content: Q1, refreshIfStale: false };
+      for (const send of ["send", "stream"] as const) {
+        reply(({ loop }) => loop ? '```json\n{"tool": "query_ca\n```' : `Not compliant: 4. ${NONCOMPLIANT.join(", ")}.`);
+        const message = (send === "send" ? await store.sendIntuneChatMessage(input) : await store.streamIntuneChatMessage(input, () => {})).assistantMessage;
+        assert.ok(calls.length > 0 && calls.every((call) => call.loop));
+        assert.equal(message.status, "completed");
+        assert.equal(message.engineNotice, LOCAL_FALLBACK_NOTICES.malformed);
+        assert.match(message.content, /Not compliant: 6\b/);
+        assert.deepEqual(message.content.split("\n").filter((line) => line.startsWith("- ")).map((line) => line.split(" ")[1]).sort(), [...NONCOMPLIANT].sort());
+        assert.equal(message.toolTrace?.at(-1)?.resultSummary, "6 matching cached rows counted · 6 listed");
       }
     });
   });
