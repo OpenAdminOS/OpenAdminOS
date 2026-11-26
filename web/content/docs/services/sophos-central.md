@@ -1,6 +1,6 @@
 # Sophos Central (Preview)
 
-The connector was built from Sophos API documentation. Live tenant testing is pending. Sophos documentation may call the console Sophos Fusion.
+Sophos documentation may call the console Sophos Fusion.
 
 In Sophos Central, a Super Admin creates a tenant credential under **Global Settings → API Credentials**. Choose **Service Principal Read-Only** for reads or **Service Principal Management** for endpoint isolation and scans. Copy the secret when it appears. Partner, organization and MSP credentials are unsupported in this preview.
 
