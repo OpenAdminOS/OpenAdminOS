@@ -652,6 +652,7 @@ export function makeMockBridge(
     })),
     onConnectorConfirmRequest: vi.fn(() => () => undefined),
     onRegistryRefreshed: vi.fn(() => () => undefined),
+    novaWindow: vi.fn(async () => undefined),
     onAppStateChanged: vi.fn(() => () => undefined),
     respondToConnectorConfirm: vi.fn(async () => undefined),
     installAgent: vi.fn(async () => appState),

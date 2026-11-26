@@ -1,4 +1,7 @@
 import { isPlainRecord, requireBoundedString, validateSaveTextFileArgs } from "./save-text-file-args.js";
+import { handleNovaWindow, showMainWindow } from "./nova-window-ipc.js";
+import { NovaWindowSession } from "./nova-window-session.js";
+import { NovaWindowShortcut } from "./nova-window-shortcut.js";
 import { hostedOllamaDestination, providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { readModelFitContextWindow } from "./model-fit-context.js";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
@@ -44,6 +47,9 @@ import {
 import {
   app,
   BrowserWindow,
+  globalShortcut,
+  systemPreferences,
+  webContents,
   clipboard,
   dialog,
   ipcMain,
@@ -213,6 +219,10 @@ if (process.platform === "linux") {
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("disable-gpu");
   app.commandLine.appendSwitch("disable-features", "VaapiVideoDecoder,VaapiVideoEncoder");
+  // Electron 42 needs the preferred trigger feature to bind on GNOME Wayland.
+  const enabled = app.commandLine.getSwitchValue("enable-features").split(",").filter(Boolean);
+  enabled.push("GlobalShortcutsPortalPreferredTrigger");
+  app.commandLine.appendSwitch("enable-features", [...new Set(enabled)].join(","));
 }
 // Do not let Chromium initialize macOS Keychain for the default
 // Electron profile. We don't store passwords/cookies in the renderer,
@@ -364,6 +374,7 @@ function chatDateTimeArguments(): string[] {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let mainWindowLoad: Promise<void> | undefined;
 let companionWindow: BrowserWindow | null = null;
 let menuBarTray: Tray | null = null;
 let store: AppStateStore;
@@ -5140,14 +5151,16 @@ function navigate(path: string): void {
 async function openMainWindow(route?: string): Promise<void> {
   showDockForInteractiveSession();
   const safeRoute = routeHash(route);
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    await createWindow({ show: true, route: safeRoute });
-    return;
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.isLoadingMainFrame()) {
+    try {
+      await mainWindowLoad;
+    } catch {
+      throw new Error("OpenAdminOS could not load its main window. Try again.");
+    }
   }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  if (safeRoute) navigate(safeRoute);
+  await showMainWindow(mainWindow,
+    () => createWindow({ show: true, route: safeRoute, waitForLoad: true }),
+    () => { if (safeRoute) navigate(safeRoute); });
 }
 
 function buildAppMenu(): Menu {
@@ -5348,7 +5361,7 @@ function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void
 
 let officeWindowMode: ReturnType<typeof officeFullscreen> | undefined;
 
-async function createWindow({ show = true, route, persistState = true }: { show?: boolean; route?: string; persistState?: boolean } = {}) {
+async function createWindow({ show = true, route, persistState = true, waitForLoad = false }: { show?: boolean; route?: string; persistState?: boolean; waitForLoad?: boolean } = {}) {
   const persisted = await loadWindowState();
   const initialThemeColors =
     NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
@@ -5433,7 +5446,7 @@ async function createWindow({ show = true, route, persistState = true }: { show?
     mainWindow.setFullScreen(true);
   }
 
-  armMainWindowRevealFallback(mainWindow, show);
+  if (!waitForLoad) armMainWindowRevealFallback(mainWindow, show);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);
@@ -5449,36 +5462,184 @@ async function createWindow({ show = true, route, persistState = true }: { show?
     openExternalUrl(url);
   });
 
-  if (app.isPackaged) {
-    const loadPromise = mainWindow.loadFile(join(app.getAppPath(), "dist/index.html"), {
-      ...(routeHash(route) ? { hash: routeHash(route) } : {}),
-    });
-    if (isIntuneChatSmokeLaunch) {
-      void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
+  const createdWindow = mainWindow;
+  createdWindow.once("closed", () => {
+    if (mainWindow === createdWindow) {
+      mainWindow = null;
+      mainWindowLoad = undefined;
     }
-    if (isReportIssueSmokeLaunch) {
-      void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
+  });
+  const novaOwnerId = mainWindow.webContents.id;
+  const releaseNovaOwner = () => novaWindowSession.release(novaOwnerId, () => { void novaService?.handle({ action: "stop" }); });
+  mainWindow.webContents.once("destroyed", releaseNovaOwner);
+  mainWindow.webContents.on("render-process-gone", releaseNovaOwner);
+  mainWindow.webContents.on("did-start-navigation", ({ isSameDocument, isMainFrame }) => {
+    if (!isSameDocument && isMainFrame) {
+      novaMainReadyId = undefined;
+      releaseNovaOwner();
     }
-    if (isScreenshotCaptureLaunch) {
-      void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
+  });
+  const initialRoute = routeHash(route);
+  const loadPromise = mainWindowLoad = app.isPackaged
+    ? createdWindow.loadFile(join(app.getAppPath(), "dist/index.html"), initialRoute ? { hash: initialRoute } : {})
+    : createdWindow.loadURL(initialRoute ? `${devServerUrl}/#${initialRoute}` : devServerUrl);
+  if (isIntuneChatSmokeLaunch) void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
+  if (isReportIssueSmokeLaunch) void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
+  if (isScreenshotCaptureLaunch) void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
+  if (waitForLoad) {
+    try {
+      await loadPromise;
+    } catch (error) {
+      if (!createdWindow.isDestroyed()) createdWindow.destroy();
+      console.warn("[window] Could not open OpenAdminOS", error);
+      throw new Error("OpenAdminOS could not load its main window. Try again.");
     }
   } else {
-    const initialRoute = routeHash(route);
-    const loadPromise = mainWindow.loadURL(
-      initialRoute ? `${devServerUrl}/#${initialRoute}` : devServerUrl,
-    );
-    if (isIntuneChatSmokeLaunch) {
-      void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
-    }
-    if (isReportIssueSmokeLaunch) {
-      void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
-    }
-    if (isScreenshotCaptureLaunch) {
-      void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
-    }
+    void loadPromise.catch(error => console.warn("[window] Could not load OpenAdminOS", error));
   }
 
-  return mainWindow;
+  if (process.platform !== "darwin") createdWindow.once("closed", () => novaBubble?.destroy());
+  return createdWindow;
+}
+
+let novaBubble: BrowserWindow | undefined;
+let novaBubbleOpening = false;
+let novaBubbleReady = false;
+let novaTransferredConversation: string | undefined;
+let novaMainReadyId: number | undefined;
+let novaMainOpenPending = false;
+let novaBubbleTogglePending = false;
+const novaUsesWayland = process.platform === "linux" &&
+  app.commandLine.getSwitchValue("ozone-platform") !== "x11" &&
+  (process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY));
+const novaWindowShortcut = new NovaWindowShortcut(globalShortcut, () => { void showOrToggleNovaBubble(); }, novaUsesWayland);
+let novaStartupNotification: Notification | undefined;
+let novaRegistrationRevision = 0;
+const novaWindowSession = new NovaWindowSession();
+
+function sendNovaWindowEvent(window: BrowserWindow | null | undefined, reason: string) {
+  if (window && !window.isDestroyed()) window.webContents.send("openadminos:app-state-changed", { reason });
+}
+
+function hideNovaBubble() {
+  novaBubbleTogglePending = false;
+  sendNovaWindowEvent(novaBubble, "nova-bubble-hidden");
+  novaBubble?.hide();
+}
+
+async function showOrToggleNovaBubble() {
+  if (novaBubbleOpening) return;
+  if (novaBubble?.isVisible()) {
+    sendNovaWindowEvent(novaBubble, "nova-bubble-toggle");
+    return;
+  }
+  novaBubbleOpening = true;
+  novaBubbleTogglePending = true;
+  try {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const { x, y, width, height } = display.workArea;
+    const w = Math.min(width, 360), h = Math.min(height, 420);
+    const path = join(app.getPath("userData"), `nova-bubble-${display.id}.json`);
+    let position = { x: x + width - w - 16, y: y + height - h - 16 };
+    try {
+      const saved = JSON.parse(await readFile(path, "utf8"));
+      if (Number.isInteger(saved.x) && Number.isInteger(saved.y)) position = saved;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn("[nova] Could not read bubble position", error);
+    }
+    const bounds = {
+      x: Math.max(x, Math.min(x + width - w, position.x)),
+      y: Math.max(y, Math.min(y + height - h, position.y)),
+      width: w, height: h,
+    };
+    if (!novaBubble) {
+      const bubble = novaBubble = new BrowserWindow({
+        ...bounds, title: "Nova", show: false, frame: false, alwaysOnTop: true,
+        resizable: false, skipTaskbar: true, backgroundColor: "#1c1917",
+        ...(process.platform === "darwin" ? { type: "panel" as const } : {}),
+        webPreferences: {
+          preload: join(currentDir, "nova-bubble-preload.cjs"), contextIsolation: true,
+          nodeIntegration: false, sandbox: true, devTools: !app.isPackaged, webviewTag: false,
+        },
+      });
+      if (process.platform === "darwin") bubble.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+      bubble.setContentProtection(true);
+      bubble.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      bubble.webContents.on("will-navigate", (event, url) => {
+        if (!isAllowedAppNavigation(url)) event.preventDefault();
+      });
+      bubble.webContents.on("before-input-event", (event, input) => {
+        if (input.type === "keyDown" && input.key === "Escape") {
+          event.preventDefault();
+          hideNovaBubble();
+        }
+      });
+      const id = bubble.webContents.id;
+      const release = () => novaWindowSession.release(id, () => { void novaService?.handle({ action: "stop" }); });
+      bubble.webContents.once("destroyed", release);
+      bubble.webContents.on("render-process-gone", () => bubble.destroy());
+      bubble.webContents.on("did-start-navigation", ({ isSameDocument, isMainFrame }) => {
+        if (!isSameDocument && isMainFrame) {
+          novaBubbleReady = false;
+          release();
+        }
+      });
+      let positionSave: ReturnType<typeof setTimeout> | undefined;
+      bubble.on("move", () => {
+        clearTimeout(positionSave);
+        const { x, y } = bubble.getBounds();
+        const destination = screen.getDisplayMatching(bubble.getBounds());
+        positionSave = setTimeout(() => {
+          void writeFile(join(app.getPath("userData"), `nova-bubble-${destination.id}.json`), JSON.stringify({ x, y }))
+            .catch(error => console.warn("[nova] Could not save bubble position", error));
+        }, 300);
+      });
+      bubble.on("closed", () => { novaBubble = undefined; novaBubbleReady = false; });
+      if (app.isPackaged) await bubble.loadFile(join(app.getAppPath(), "dist/index.html"), { hash: "/nova-bubble" });
+      else await bubble.loadURL(`${devServerUrl}/#/nova-bubble`);
+    }
+    const bubble = novaBubble;
+    if (!bubble) return;
+    bubble.setBounds(bounds);
+    bubble.show();
+    if (novaBubbleReady && novaBubbleTogglePending) {
+      novaBubbleTogglePending = false;
+      sendNovaWindowEvent(bubble, "nova-bubble-toggle");
+    }
+  } catch (error) {
+    novaBubble?.destroy();
+    console.warn("[nova] Could not open the floating window", error);
+    new Notification({ title: "Nova", body: "The floating window could not open. Open Nova from the OpenAdminOS command palette." }).show();
+  } finally {
+    novaBubbleOpening = false;
+  }
+}
+
+async function registerNovaKey(startup = false, saved?: import("@openadminos/agent-sdk").NovaProfileView) {
+  const revision = ++novaRegistrationRevision;
+  try {
+    const view = saved ?? await store?.handleNovaProfile({ action: "get" });
+    if (revision !== novaRegistrationRevision) return;
+    if (view) novaWindowShortcut.update(view.effective.globalShortcut);
+  } catch (error) {
+    if (revision !== novaRegistrationRevision) return;
+    console.warn("[nova] Could not update the shortcut", error);
+    novaWindowShortcut.error = "Nova could not read or apply the shortcut. Open Settings, Nova, to try again.";
+  }
+  sendNovaWindowEvent(mainWindow, "nova-shortcut-registration");
+  sendNovaWindowEvent(novaBubble, "nova-shortcut-registration");
+  if (!startup || !novaWindowShortcut.error || novaStartupNotification) return;
+  const changeShortcut = () => {
+    void openMainWindow("/settings/nova?target=nova-system-shortcut").catch(error => console.warn("[nova] Could not open shortcut settings", error));
+  };
+  novaStartupNotification = new Notification({
+    title: "Nova shortcut unavailable",
+    body: novaWindowShortcut.error,
+    actions: [{ type: "button", text: "Change shortcut" }],
+  });
+  novaStartupNotification.on("click", changeShortcut);
+  novaStartupNotification.on("action", changeShortcut);
+  novaStartupNotification.show();
 }
 
 async function createCompanionWindow(): Promise<BrowserWindow> {
@@ -6122,7 +6283,7 @@ function registerIpcHandlers() {
     "openadminos:get-companion-launch-settings",
     handleTrusted(() => getCompanionLaunchSettings()),
   );
-  ipcMain.handle("openadminos:get-app-state", handleTrusted(() => store.getAppState()));
+  ipcMain.handle("openadminos:get-app-state", handleTrusted(async () => ({ ...await store.getAppState(), novaRegisteredShortcut: novaWindowShortcut.activeKey })));
   ipcMain.handle(
     "openadminos:get-scheduler-launch-settings",
     handleTrusted(() => getSchedulerLaunchSettings()),
@@ -6522,12 +6683,77 @@ function registerIpcHandlers() {
     },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
+    if (!input || typeof input !== "object") throw new Error("Nova request is missing.");
+    if (event.sender === novaBubble?.webContents && ["configure", "decide-action"].includes(input.action))
+      throw new Error("Open the main OpenAdminOS window to change voice credentials or review a proposed action.");
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
+    const id = event.sender.id;
+    if (input.action === "stop") {
+      novaWindowSession.release(id, () => { void nova.handle(input); });
+      return {};
+    }
+    if (!["status", "check", "configure"].includes(input.action) && novaWindowSession.owner !== id)
+      throw new Error("Start Nova in this window before continuing.");
     return nova.handle(input, activity => {
       if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
     });
   }));
-  ipcMain.handle("openadminos:nova-profile", handleTrusted((_event, request: unknown) => store.handleNovaProfile(request)));
+  ipcMain.handle("openadminos:nova-window", handleTrusted((event, action: unknown, payload?: unknown) =>
+    handleNovaWindow(event.sender, action, payload, {
+      bubble: novaBubble?.webContents,
+      main: mainWindow?.webContents,
+      visible: () => novaBubble?.isVisible() ?? false,
+      claim: async (id, microphone) => {
+        if (microphone && process.platform === "darwin" && ["denied", "restricted"].includes(systemPreferences.getMediaAccessStatus("microphone")))
+          throw new Error("Microphone access was denied. Allow OpenAdminOS in your system microphone privacy settings, then start Nova again.");
+        await novaWindowSession.claim(id, owner => {
+          webContents.fromId(owner)?.send("openadminos:app-state-changed", { reason: "nova-window-handoff" });
+        });
+      },
+      openMain: openMainWindow,
+      transfer: (conversation) => {
+        novaTransferredConversation = conversation;
+        novaMainOpenPending = novaMainReadyId !== mainWindow?.webContents.id;
+        if (!novaMainOpenPending) sendNovaWindowEvent(mainWindow, "nova-open-main");
+      },
+      hide: hideNovaBubble,
+      other: async (action, fromBubble) => {
+        if (action === "shortcut-error" && !fromBubble) return novaWindowShortcut.error;
+        if (action === "microphone-settings" && process.platform === "darwin") {
+          await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+          return;
+        }
+        if (action === "ready" && fromBubble) {
+          novaBubbleReady = true;
+          if (novaBubble?.isVisible() && novaBubbleTogglePending) {
+            novaBubbleTogglePending = false;
+            sendNovaWindowEvent(novaBubble, "nova-bubble-toggle");
+          }
+          return;
+        }
+        if (action === "hide" && fromBubble) { hideNovaBubble(); return; }
+        if (action === "ready-main" && !fromBubble) {
+          novaMainReadyId = event.sender.id;
+          if (novaMainOpenPending) {
+            novaMainOpenPending = false;
+            sendNovaWindowEvent(mainWindow, "nova-open-main");
+          }
+          return;
+        }
+        if (action === "take-conversation" && !fromBubble) {
+          const transferred = novaTransferredConversation;
+          novaTransferredConversation = undefined;
+          return transferred;
+        }
+        throw new Error("Unknown Nova window action.");
+      },
+    }),
+  ));
+  ipcMain.handle("openadminos:nova-profile", handleTrusted(async (_event, request: unknown) => {
+    const view = await store.handleNovaProfile(request);
+    if (isPlainRecord(request) && request.action === "save") await registerNovaKey(false, view);
+    return view;
+  }));
   ipcMain.handle("openadminos:nova-records", handleTrusted((_event, request: unknown) => store.handleNovaRecords(request)));
   ipcMain.handle("openadminos:start-graph-cache-preload", handleTrusted((_event, options?: unknown) => store.startGraphCachePreload(validateRefreshGraphCacheOptions(options))));
   ipcMain.handle("openadminos:cancel-graph-cache-preload", handleTrusted((_event, tenantId: unknown) => store.cancelGraphCachePreload(requireBoundedString(tenantId, "tenantId", 256))));
@@ -7416,9 +7642,14 @@ function registerIpcHandlers() {
   // closes its audio itself when the active organization changes; for the
   // other changes it is told.
   const afterNovaContextChange = async <T,>(state: T, options: { tellPanel: boolean }): Promise<T> => {
+    novaTransferredConversation = undefined;
+    sendNovaWindowEvent(novaBubble, "nova-context-changed");
     try {
       const ended = await novaService?.sessionContextChanged();
-      if (ended && options.tellPanel) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_CONTEXT_ENDED_REASON });
+      if (ended && options.tellPanel) {
+        sendNovaWindowEvent(mainWindow, NOVA_SESSION_CONTEXT_ENDED_REASON);
+        sendNovaWindowEvent(novaBubble, NOVA_SESSION_CONTEXT_ENDED_REASON);
+      }
     } catch (error) {
       console.warn("[nova] the voice session could not be checked after a change of organization, connection or provider", error);
     }
@@ -7973,15 +8204,22 @@ if (!gotLock) {
       },
       onStateChanged: (info) => {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
+        sendNovaWindowEvent(novaBubble, info.reason);
         if (info.reason === TENANT_CLOSING_REASON) {
           void novaService?.sessionContextChanged().then((ended) => {
-            if (ended) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_CONTEXT_ENDED_REASON });
+            if (ended) {
+              sendNovaWindowEvent(mainWindow, NOVA_SESSION_CONTEXT_ENDED_REASON);
+              sendNovaWindowEvent(novaBubble, NOVA_SESSION_CONTEXT_ENDED_REASON);
+            }
           }, (error: unknown) => console.warn("[nova] the voice session could not be checked after a Disconnect", error));
         }
         // A hosted voice session given instructions or notes that changed ends now, not at its next question.
         if (info.reason === "nova-profile-changed" || info.reason === "nova-records-changed") {
           void novaService?.revalidateHostedSession().then((ended) => {
-            if (ended) mainWindow?.webContents.send("openadminos:app-state-changed", { reason: NOVA_SESSION_ENDED_REASON });
+            if (ended) {
+              sendNovaWindowEvent(mainWindow, NOVA_SESSION_ENDED_REASON);
+              sendNovaWindowEvent(novaBubble, NOVA_SESSION_ENDED_REASON);
+            }
           }, (error: unknown) => console.warn("[nova] the voice session could not be checked after a settings change", error));
         }
       },
@@ -8017,6 +8255,7 @@ if (!gotLock) {
     await store.recoverInterruptedRuns();
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
+    if (!isScreenshotCaptureLaunch) void registerNovaKey(true).catch(error => console.warn("[nova] Could not report shortcut startup status", error));
     void store.processPendingRunDeliveries();
     debugStartupLog("registered ipc handlers");
     void store.processPendingRunDeliveries();
@@ -8163,7 +8402,10 @@ if (!gotLock) {
   });
 }
 
-app.on("will-quit", () => store?.stopEmbeddingModelDownload());
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  store?.stopEmbeddingModelDownload();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

@@ -1,3 +1,4 @@
+import { Nova } from "./voice/Nova";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
@@ -34,7 +35,7 @@ if (window.location.hash.startsWith(LOCAL_RESET_INCOMPLETE_HASH)) {
         <ToastProvider>
           <HashRouter>
             <SetupFlowProvider>
-              <App />
+              {window.location.hash === "#/nova-bubble" ? <Nova bubble /> : <App />}
             </SetupFlowProvider>
           </HashRouter>
         </ToastProvider>

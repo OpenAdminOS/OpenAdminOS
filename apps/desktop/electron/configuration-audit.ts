@@ -548,6 +548,7 @@ function novaSeeds(
   // An unset voice mode is the default; setting the default changes nothing Nova does.
   if ((previous?.voiceMode ?? "openai") !== (next?.voiceMode ?? "openai")) changed.push("voiceMode");
   if ((previous?.greetingName ?? "") !== (next?.greetingName ?? "")) changed.push("greetingName");
+  if (previous?.globalShortcut !== next?.globalShortcut) changed.push("globalShortcut");
   if (changed.length > 0) {
     seeds.push({
       type: "nova.settings-changed",

@@ -1,3 +1,4 @@
+import { novaKeyLabel } from "../shared/nova-keyboard";
 import { providerForModel } from "@openadminos/agent-sdk";
 import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION, NOVA_PUBLIC_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
@@ -18,7 +19,7 @@ import {
   type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
-import { NOVA_CHECK_DOCUMENTATION, NOVA_INSTALL_DOCUMENTATION, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
+import { NOVA_CHECK_DOCUMENTATION, NOVA_DOCUMENTATION_SETTINGS, NOVA_INSTALL_DOCUMENTATION, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
 import "./nova.css";
 
 /** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
@@ -46,13 +47,22 @@ const NOVA_ACTION_CONFIRM: Record<NovaActionPreview["kind"], string> = {
 
 export function Nova({
   onHostedChange,
+  bubble = false,
 }: {
+  bubble?: boolean;
   onHostedChange?: (active: boolean) => void;
 }) {
-  const { state, refresh } = useAppState();
+  const { state, refresh, loading } = useAppState();
   const location = useLocation(),
     navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(bubble);
+  const [question, setQuestion] = useState("");
+  const bubbleTalk = useRef<HTMLButtonElement>(null);
+  const bubbleConsent = useRef<HTMLInputElement>(null);
+  const bubbleTrustId = useId();
+  const startRequested = useRef(false);
+  const [startSignal, setStartSignal] = useState(0);
+  const bubbleAction = useRef<(reason: string) => void>(() => {});
   // Voice mode and greeting name live in Nova's settings in the main process.
   const profile = state.novaProfile;
   const allowedModes = profile?.allowedVoiceModes ?? ["openai", "local"];
@@ -78,6 +88,13 @@ export function Nova({
   const [phase, setPhase] = useState("idle"), [error, setError] = useState("");
   const [conversationItems, setConversationItems] = useState<NovaConversationItem[]>([]);
   const itemSequence = useRef(0);
+  const historyClipped = useRef(false);
+  const [incomingTransfer, setIncomingTransfer] = useState<string>();
+  const [transferNotice, setTransferNotice] = useState("");
+  const appendItem = useCallback((items: NovaConversationItem[], item: NovaConversationItem) => {
+    if (items.length >= 80) historyClipped.current = true;
+    return [...items.slice(-79), item];
+  }, []);
   const conversationToggle = useRef<HTMLButtonElement>(null);
   const appendSpeech = useCallback((role: "user" | "assistant", text: string, startMs?: number, endMs?: number) => {
     const id = `speech-${++itemSequence.current}`;
@@ -88,9 +105,9 @@ export function Nova({
         (Number.isFinite(startMs) && last.endMs !== undefined && startMs! >= last.endMs && startMs! - last.endMs < 1200));
       if (continues && last?.kind === "speech")
         return current.map(item => item.id === last.id ? { ...last, endMs, text: (last.text + text).slice(-8000) } : item);
-      return [...current, { id, kind: "speech", role, text, endMs } as NovaConversationItem].slice(-80);
+      return appendItem(current, { id, kind: "speech", role, text, endMs });
     });
-  }, []);
+  }, [appendItem]);
   const recordActivity = useCallback((id: string, activity: NovaActivity, result?: string) => {
     setConversationItems(current => {
       const previous = current.find(item => item.id === id && item.kind === "activity");
@@ -98,9 +115,9 @@ export function Nova({
       const item: NovaConversationItem = { id, kind: "activity",
         status: activity.kind === "answer" ? activity.status : "running",
         steps: (steps.at(-1)?.message === activity.message ? steps : [...steps, activity]).slice(-8), result };
-      return previous ? current.map(row => row.id === id ? item : row) : [...current, item].slice(-80);
+      return previous ? current.map(row => row.id === id ? item : row) : appendItem(current, item);
     });
-  }, []);
+  }, [appendItem]);
   const endActivities = useCallback((status: "stopped" | "replaced" | "failed") => {
     setConversationItems(current => current.map(item =>
       item.kind === "activity" && item.status === "running" ? { ...item, status } : item));
@@ -120,8 +137,19 @@ export function Nova({
   ).model;
   const reasoning = providerForModel(reasoningEndpoint, reasoningModel);
   const hostedReasoningDisclosure = reasoning && !reasoning.isLocal
-    ? `Your question, recent turns and documentation passages go to ${reasoning.name} for reasoning.` : "";
+    ? state.activeTenantId
+      ? `Your question and relevant tenant context go to ${reasoning.name} for reasoning.`
+      : `Your question, recent turns and documentation passages go to ${reasoning.name} for reasoning.`
+    : "";
   const publicHostedDisclosure = ["Audio and Nova’s instructions go to OpenAI.", hostedReasoningDisclosure, "No organization data is shared."].filter(Boolean).join(" ");
+  const trustDisclosure = mode === "openai"
+    ? state.activeTenantId
+      ? ["Hosted voice · Audio, relevant tenant context, public web searches, Nova instructions and confirmed notes go to OpenAI.", hostedReasoningDisclosure].filter(Boolean).join(" ")
+      : `Hosted voice · ${publicHostedDisclosure}`
+    : ["Local voice · audio stays on this device", hostedReasoningDisclosure].filter(Boolean).join(" ");
+  const consentDisclosure = state.activeTenantId
+    ? `Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too. ${hostedReasoningDisclosure}`.trim()
+    : `Allow hosted processing for this session. ${publicHostedDisclosure}`;
   const reasoningReady =
     reasoning?.status === "connected" &&
     (mode !== "local" || reasoning.isLocal);
@@ -158,7 +186,7 @@ export function Nova({
     context = useRef<AudioContext | null>(null),
     output = useRef<HTMLAudioElement | null>(null);
   const frame = useRef(0),
-    orb = useRef<HTMLButtonElement>(null),
+    orb = useRef<HTMLElement>(null),
     recorder = useRef<MediaRecorder | null>(null),
     sessionId = useRef("");
   const completedResult = useRef<string | undefined>(undefined);
@@ -208,6 +236,18 @@ export function Nova({
       return false;
     }
   };
+  function showAnswerLinks(answer: { links?: NovaAnswerLink[]; route?: string }) {
+    const links = answer.links ?? [];
+    if (bubble && answer.route && !links.some(link => link.route === answer.route)) {
+      setLinks([...links, { label: "", route: answer.route }]);
+      return;
+    }
+    setLinks(links);
+    if (!bubble && answer.route) {
+      setExpanded(false);
+      navigate(answer.route);
+    }
+  }
   const decideAction = async (approved: boolean) => {
     if (!pendingAction || actionBusy || !api) return;
     const token = generation.current;
@@ -227,7 +267,7 @@ export function Nova({
         for (const content of novaCommentaryChunks(answer.text || "No action result returned."))
           dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content }));
       }
-      if (answer.route) { setExpanded(false); navigate(answer.route); }
+      showAnswerLinks(answer);
     } catch (error) {
       if (token === generation.current && revision === actionRevision.current) {
         setPendingAction(undefined);
@@ -250,12 +290,13 @@ export function Nova({
   };
   const stop = useCallback(() => {
     generation.current++;
+    phaseRef.current = "idle";
     ++actionRevision.current;
     setActionBusy(false);
     setPendingAction(undefined);
     interruptCurrent.current = () => {};
     askTyped.current = () => {};
-    setLinks([]);
+    if (!bubble) setLinks([]);
     endActivities("stopped");
     liveReady.current = false;
     setConsent(false);
@@ -288,7 +329,11 @@ export function Nova({
           /* Ignore malformed finalization events. */
         }
       });
-      closingChannel.send(JSON.stringify({ type: "session.close" }));
+      try {
+        closingChannel.send(JSON.stringify({ type: "session.close" }));
+      } catch {
+        finalize();
+      }
     } else {
       closingChannel?.close();
       closingPeer?.close();
@@ -313,7 +358,7 @@ export function Nova({
     orb.current?.style.setProperty("--voice-level", "0");
     void api?.nova({ action: "stop" }).catch(() => {});
     setPhase("idle");
-  }, [api, endActivities]);
+  }, [api, bubble, endActivities]);
   // The main process ends a hosted voice session when its instructions or
   // notes change, and any session when its organization, connection or
   // provider changes; the audio and the connection to OpenAI close here at once.
@@ -332,7 +377,9 @@ export function Nova({
     setConnectionCheck("");
     setCacheStatus(undefined);
     setConversation(undefined);
+    setLinks([]);
     setConversationItems([]);
+    historyClipped.current = false;
   }, [
     state.activeTenantId,
     state.activeProviderId,
@@ -418,11 +465,11 @@ export function Nova({
       if (shortcut) requestShortcut.current(shortcut);
     };
     const keydown = (e: KeyboardEvent) => {
-      if (e.altKey && e.code === "KeyV") {
+      if (!bubble && e.key === "Escape") stop();
+      if (!bubble && e.code === "KeyV" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.defaultPrevented) {
         e.preventDefault();
-        openPanel();
+        if (!e.repeat) openPanel();
       }
-      if (e.key === "Escape") stop();
     };
     const hidden = () => {
       if (document.hidden) stop();
@@ -438,13 +485,31 @@ export function Nova({
       window.removeEventListener("pagehide", stop);
       stop();
     };
-  }, [stop]);
-  async function start() {
-    if (!api) return;
+  }, [bubble, stop]);
+  useEffect(() => {
+    if (!api?.novaWindow || !api.onAppStateChanged) return;
+    const unsubscribe = api.onAppStateChanged(({ reason }) => bubbleAction.current(reason));
+    void api.novaWindow(bubble ? "ready" : "ready-main").catch(error => setError(voiceErrorMessage(error)));
+    return unsubscribe;
+  }, [api, bubble]);
+
+  async function start(typed?: string) {
+    if (!api || phaseRef.current !== "idle") return;
+    if (!reasoningReady || voiceOff || (mode === "openai" && (!hasKey || !consent))) {
+      if (bubble) {
+        const needsConsent = reasoningReady && !voiceOff && mode === "openai" && hasKey && !consent;
+        setError(needsConsent ? "Confirm hosted sharing for this session, then select Talk or Ask." :
+          "Review voice and provider setup in OpenAdminOS.");
+        if (needsConsent) bubbleConsent.current?.focus();
+      }
+      return;
+    }
     stop();
+    phaseRef.current = "connecting";
     const token = generation.current;
     setError("");
-    setConversationItems([]);
+    setLinks([]);
+    if (!bubble) { setConversationItems([]); historyClipped.current = false; }
     setPhase("connecting");
     const fail = (e: unknown) => {
       if (generation.current === token) {
@@ -456,7 +521,9 @@ export function Nova({
     try {
       await api.nova({ action: "check", mode, connectivity: false });
       if (token !== generation.current) return;
-      const stream = await navigator.mediaDevices.getUserMedia({
+      await api.novaWindow?.(typed ? "claim-typed" : "claim");
+      if (token !== generation.current) return;
+      const stream = typed ? new MediaStream() : await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
         video: false,
       });
@@ -471,7 +538,7 @@ export function Nova({
       if (token !== generation.current) return;
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
-      audioContext.createMediaStreamSource(stream).connect(analyser);
+      if (!typed) audioContext.createMediaStreamSource(stream).connect(analyser);
       const samples = new Uint8Array(analyser.fftSize);
       const playbackSamples = new Uint8Array(512);
       let level = 0,
@@ -543,7 +610,7 @@ export function Nova({
         sessionId.current = result.sessionId!;
         setSessionNotice(result.notice ?? "");
         const recorded: Blob[] = [];
-        const rec = new MediaRecorder(stream);
+        const rec = new MediaRecorder(typed ? audioContext.createMediaStreamDestination().stream : stream);
         recorder.current = rec;
         rec.ondataavailable = (e) => {
           if (e.data.size) recorded.push(e.data);
@@ -627,11 +694,7 @@ export function Nova({
           appendSpeech("assistant", answer.text || "No answer returned.");
           recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Answer ready") }, answer.displayText || answer.text);
           setConversation(answer.conversationId);
-          setLinks(answer.links ?? []);
-          if (answer.route) {
-            setExpanded(false);
-            navigate(answer.route);
-          }
+          showAnswerLinks(answer);
           const speech = await api.nova({
             action: "speak",
             sessionId: sessionId.current,
@@ -655,21 +718,29 @@ export function Nova({
             if (token !== generation.current) return;
             if (answer.pendingAction) { setPhase("listening"); return; }
             // The session ends with the speech; the answer's links stay until the next answer or organization.
-            const kept = answer.links ?? [];
+            const kept = bubble ? [] : answer.links ?? [];
             stop();
             if (kept.length > 0) setLinks(kept);
           };
           await output.current!.play();
         };
-        const queued = queuedShortcut.current;
+        const queued = typed || (queuedShortcut.current && `Run shortcut ${queuedShortcut.current}`);
         if (queued) {
           // A shortcut picked before the session started runs instead of a recording.
           queuedShortcut.current = undefined;
           setShortcutNotice("");
           setPhase("thinking");
-          void respond(`Run shortcut ${queued}`).catch(fail);
+          void respond(queued).catch(fail);
           return;
         }
+        if (bubble) askTyped.current = (text) => {
+          rec.onstop = null;
+          if (rec.state === "recording") rec.stop();
+          stream.getTracks().forEach(track => track.stop());
+          clearTimeout(timeout.current);
+          setPhase("thinking");
+          void respond(text).catch(fail);
+        };
         rec.start();
         setPhase("listening");
         timeout.current = setTimeout(() => {
@@ -689,6 +760,7 @@ export function Nova({
         playbackAnalyser.current = meter;
         void output.current!.play().catch(() => setPlayBlocked(true));
       };
+      if (typed) pc.addTransceiver("audio", { direction: "recvonly" });
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       const dc = pc.createDataChannel("oai-events");
       channel.current = dc;
@@ -797,11 +869,7 @@ export function Nova({
           setPendingAction(answer.pendingAction);
           setError(answer.answerError || "");
           setConversation(answer.conversationId);
-          setLinks(answer.links ?? []);
-          if (answer.route) {
-            setExpanded(false);
-            navigate(answer.route);
-          }
+          showAnswerLinks(answer);
           const result =
             answer.text || "No answer available. Open Chat for details.";
           completedResult.current = result;
@@ -823,7 +891,7 @@ export function Nova({
         if (token !== generation.current || dc.readyState !== "open") return;
         appendSpeech("user", text);
         dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: null,
-          content: "The admin ran a saved shortcut from the app. Wait for its result, then speak it. Do not start a second lookup." }));
+          content: "The admin typed a request in the app. Wait for its result, then speak it. Do not start a second lookup." }));
         deliver(null, `typed-${++itemSequence.current}`, text, []);
       };
       const scheduleRequest = (id: string | null, anchor: string) => {
@@ -857,11 +925,11 @@ export function Nova({
             liveReady.current = true;
             clearTimeout(timeout.current);
             setPhase("listening");
-            const queued = queuedShortcut.current;
+            const queued = typed || (queuedShortcut.current && `Run shortcut ${queuedShortcut.current}`);
             if (queued) {
               queuedShortcut.current = undefined;
               setShortcutNotice("");
-              askTyped.current(`Run shortcut ${queued}`);
+              askTyped.current(queued);
             }
           } else if (
             event.type === "session.input_transcript.delta" ||
@@ -961,6 +1029,66 @@ export function Nova({
     }
   }
   const active = phase !== "idle";
+  bubbleAction.current = (reason) => {
+    if (reason === "nova-window-handoff") {
+      stop();
+      setError("Nova moved to the other window. Start it here to move it back.");
+    } else if (bubble && reason === "nova-context-changed" && phaseRef.current !== "idle") {
+      stop();
+      setError(NOVA_SESSION_CONTEXT_CHANGED);
+    } else if (bubble && reason === "nova-bubble-hidden") {
+      startRequested.current = false;
+      stop();
+    } else if (bubble && reason === "nova-bubble-toggle") {
+      if (startRequested.current || phaseRef.current !== "idle") {
+        startRequested.current = false;
+        stop();
+      } else {
+        bubbleTalk.current?.focus();
+        startRequested.current = true;
+        setStartSignal(value => value + 1);
+      }
+    } else if (!bubble && reason === "nova-open-main") {
+      setOpen(true);
+      toggleConversation(true);
+      setTransferNotice("");
+      void api?.novaWindow("take-conversation").then(setIncomingTransfer)
+        .catch(() => setTransferNotice("Conversation could not carry over. Try opening it again from the bubble."));
+    }
+  };
+  useEffect(() => {
+    if (!incomingTransfer || loading) return;
+    setIncomingTransfer(undefined);
+    try {
+      const moved = JSON.parse(incomingTransfer) as {
+        notice?: string; clipped?: boolean; organizationId?: string; tenantId?: string;
+        providerId?: string; model?: string; items: NovaConversationItem[]; conversation?: string;
+      };
+      if (moved.notice) { setTransferNotice(moved.notice); return; }
+      if (moved.organizationId !== state.activeOrganizationId || moved.tenantId !== state.activeTenantId ||
+        moved.providerId !== state.activeProviderId || moved.model !== reasoningModel) {
+        setTransferNotice("Conversation could not carry over because the organization, provider or model changed.");
+        return;
+      }
+      setConversationItems(moved.items.slice(-80).map(item => ({ ...item, id: `transferred-${item.id}` })));
+      setConversation(moved.conversation);
+      if (moved.clipped || moved.items.length > 80) setTransferNotice("Showing the last 80 conversation items.");
+    } catch {
+      setTransferNotice("Conversation could not carry over. Try opening it again from the bubble.");
+    }
+  }, [incomingTransfer, loading, reasoningModel, state.activeOrganizationId, state.activeProviderId, state.activeTenantId]);
+  const startFromShortcut = useRef(start);
+  startFromShortcut.current = start;
+  useEffect(() => {
+    if (loading || !startRequested.current) return;
+    startRequested.current = false;
+    void startFromShortcut.current();
+  }, [loading, startSignal]);
+  const microphoneHelp = api?.platform === "macos" && error.startsWith("Microphone access was denied.") ? (
+    <Button size="sm" onClick={() => void api?.novaWindow("microphone-settings").catch(error => setError(voiceErrorMessage(error)))}>
+      Open Microphone Settings
+    </Button>
+  ) : null;
   requestShortcut.current = (shortcut: string) => {
     setShortcutNotice("");
     if (!active) {
@@ -1029,6 +1157,115 @@ export function Nova({
     !playBlocked &&
     phase !== "connecting" &&
     !(mode === "local" && phase === "listening");
+  const toggleMute = () => {
+    const next = !mutedRef.current;
+    mic.current?.getAudioTracks().forEach(track => { track.enabled = !next; });
+    mutedRef.current = next;
+    setMuted(next);
+  };
+  if (bubble) {
+    const result = conversationItems.filter(item => item.kind === "activity" && item.result).at(-1);
+    const activity = conversationItems.filter(item => item.kind === "activity").at(-1);
+    const activityText = activity?.kind === "activity" &&
+      (activity.status === "running" || activity.status === "completed" || activity.status === "failed")
+      ? activity.steps.at(-1)?.message : undefined;
+    const spoken = conversationItems.filter(item => item.kind === "speech" && item.role === "assistant").at(-1);
+    const answer = (result?.kind === "activity" ? result.result : undefined) || (spoken?.kind === "speech" ? spoken.text : "");
+    const organization = state.organizations?.find(item => item.id === state.activeOrganizationId)?.name
+      || state.tenants.find(item => item.id === state.activeTenantId)?.displayName || "No organization";
+    const windowAction = (action: "hide" | "open-main" | "open-page", route?: string) => {
+      const transcript = action === "open-main" && conversationItems.length ? JSON.stringify({
+        organizationId: state.activeOrganizationId,
+        tenantId: state.activeTenantId,
+        providerId: state.activeProviderId,
+        model: reasoningModel,
+        clipped: historyClipped.current,
+        items: conversationItems.slice(-80).map(item => item.kind === "activity" && item.status === "running"
+          ? { ...item, status: "stopped" } : item),
+        conversation,
+      }) : undefined;
+      void api?.novaWindow(action, route ?? transcript).catch(error => setError(voiceErrorMessage(error)));
+    };
+    return (
+      <section className="nova-bubble" aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
+        onKeyDown={event => {
+          if (event.key === "Escape") { event.preventDefault(); windowAction("hide"); }
+          if (event.key !== "Tab") return;
+          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), a[href], [tabindex='0']"));
+          const target = event.shiftKey ? controls[0] : controls.at(-1);
+          if (document.activeElement === target) {
+            event.preventDefault();
+            (event.shiftKey ? controls.at(-1) : controls[0])?.focus();
+          }
+        }}>
+        <header className="nova-bubble-header">
+          <strong>Nova</strong>
+          <Button size="sm" variant="ghost" onClick={() => windowAction("hide")}>Close</Button>
+        </header>
+        <div className="nova-bubble-context">
+          <div>{organization}</div>
+          <div id={bubbleTrustId}>{trustDisclosure}</div>
+        </div>
+        <div className="nova-bubble-voice">
+          <span ref={element => { orb.current = element; }} className="nova-orb" data-phase={error ? "error" : muted ? "muted" : phase} aria-hidden="true">
+            <span className="nova-orb-core"><NovaOrbArtwork /></span>
+            <span className="nova-orb-ring" />
+          </span>
+          <div className="nova-bubble-voice-controls">
+            <div role="status">{error ? error.startsWith("Microphone access was denied.") ? "Microphone denied" : "Needs attention"
+              : muted ? "Microphone muted" : phase === "idle" ? "Ready" : phase === "connecting" ? "Connecting"
+              : phase === "listening" ? "Listening" : phase === "thinking" ? "Working on an answer" : "Speaking"}</div>
+            <div className="nova-bubble-actions">
+              <button type="button" className="nova-bubble-talk" ref={bubbleTalk} autoFocus onClick={() => active ? stop() : void start()}>
+                {active ? "Stop" : "Talk"}
+              </button>
+              {state.novaRegisteredShortcut && <kbd>{novaKeyLabel(state.novaRegisteredShortcut)}</kbd>}
+              {active && phase !== "connecting" && (mode === "openai" || phase === "listening") &&
+                <Button size="sm" variant="ghost" aria-pressed={muted} onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</Button>}
+              {mode === "local" && phase === "listening" && recorder.current?.state === "recording" &&
+                <Button size="sm" variant="secondary" onClick={() => recorder.current?.stop()}>Finish speaking</Button>}
+            </div>
+          </div>
+        </div>
+        {error && <div className="nova-bubble-error" role="alert">{error} {microphoneHelp}</div>}
+        {!active && mode === "openai" && hasKey &&
+          <label className="nova-bubble-consent">
+            <input ref={bubbleConsent} aria-describedby={bubbleTrustId} type="checkbox" checked={consent} onChange={event => {
+              setConsent(event.target.checked);
+              setError("");
+            }} /> Allow hosted processing for this session
+          </label>}
+        {sessionNotice && <div role="status">{sessionNotice}</div>}
+        {activityText && <div className="nova-bubble-activity" role="status">{activityText}</div>}
+        {answer && <div className="nova-bubble-answer" role="region" aria-label="Latest answer" tabIndex={0}>
+          <MarkdownPreview source={answer} numberedSections={false} className="nova-markdown" />
+        </div>}
+        {links.length > 0 && <div className="nova-bubble-actions" aria-label="Pages in this answer">
+          {links.map(link => <Button key={link.route} size="sm" variant="secondary" onClick={() => windowAction("open-page", link.route)}>{novaBubbleLinkLabel(link)}</Button>)}
+        </div>}
+        {pendingAction && <div>Review this request in OpenAdminOS. Start a new session there to prepare the action for approval.</div>}
+        <footer className="nova-bubble-footer">
+          <form className="nova-bubble-question" onSubmit={event => {
+            event.preventDefault();
+            const text = question.trim();
+            if (!text) return;
+            if (!active && (!reasoningReady || voiceOff || (mode === "openai" && (!hasKey || !consent)))) {
+              void start(text);
+              return;
+            }
+            setQuestion("");
+            if (active) askTyped.current(text);
+            else void start(text);
+          }}>
+            <input aria-label="Ask Nova" placeholder="Ask Nova" value={question} maxLength={12000} onChange={event => setQuestion(event.target.value)} />
+            <Button size="sm" type="submit" disabled={!question.trim() || active && (phase !== "listening" || mode === "local" && recorder.current?.state !== "recording")}>Ask</Button>
+          </form>
+          <Button size="sm" variant="secondary" onClick={() => windowAction("open-main")}>Open in OpenAdminOS</Button>
+        </footer>
+        <audio ref={output} autoPlay />
+      </section>
+    );
+  }
   return createPortal(
     <div
       ref={root}
@@ -1115,11 +1352,7 @@ export function Nova({
             · {location.pathname.split("/")[1] || "Chat"}
           </p>
           <p className="nova-trust text-xs text-[var(--color-accent)]">
-            {mode === "openai"
-              ? state.activeTenantId
-                ? "Hosted voice + web search · audio, shared context and searches go to OpenAI"
-                : `Hosted voice · ${publicHostedDisclosure}`
-              : "Local voice · audio stays on this device"}
+            {trustDisclosure}
           </p>
           {!active && (
             <>
@@ -1177,7 +1410,7 @@ export function Nova({
             </>
           )}
           <button
-            ref={orb}
+            ref={element => { orb.current = element; }}
             className="nova-orb"
             data-phase={
               error ? "error" : muted && phase === "listening" ? "muted" : phase
@@ -1220,14 +1453,7 @@ export function Nova({
                   (mode === "local" && phase !== "listening")
                 }
                 aria-pressed={muted}
-                onClick={() => {
-                  const next = !mutedRef.current;
-                  mic.current?.getAudioTracks().forEach((track) => {
-                    track.enabled = !next;
-                  });
-                  mutedRef.current = next;
-                  setMuted(next);
-                }}
+                onClick={toggleMute}
               >
                 {muted ? "Unmute mic" : "Mute mic"}
               </Button>
@@ -1342,6 +1568,7 @@ export function Nova({
             </div>
           )}
           {shortcutNotice && <p role="status" className="text-xs text-center">{shortcutNotice}</p>}
+          {transferNotice && <p role="status" className="text-xs text-center">{transferNotice}</p>}
           {sessionNotice && <p role="status" className="text-xs text-center">{sessionNotice}</p>}
           {migrationError && (
             <div role="alert" className="text-xs text-center">
@@ -1397,11 +1624,7 @@ export function Nova({
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
               />{" "}
-              {state.activeTenantId ? (
-                <>Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too. {hostedReasoningDisclosure}</>
-              ) : (
-                <>Allow hosted processing for this session. {publicHostedDisclosure}</>
-              )}
+              {consentDisclosure}
             </label>
           )}
           {!active && (settings || (mode === "openai" && !hasKey)) && (
@@ -1473,12 +1696,13 @@ export function Nova({
                 </p>
               )}
               <p className="text-xs text-[var(--color-text-muted)]">
-                Microphone starts only when clicked. “Hey Nova” works during an
+                The microphone starts when you select Talk or press the system shortcut. “Hey Nova” works during an
                 active conversation; background wake-word detection is not
                 enabled. Writes require visual review.
               </p>
             </div>
           )}
+          {microphoneHelp}
           <p className="nova-footnote">
             {active
               ? "Esc ends the session and releases your microphone."
@@ -1489,6 +1713,16 @@ export function Nova({
     </div>,
     document.body,
   );
+}
+
+function novaBubbleLinkLabel(link: NovaAnswerLink): string {
+  const pages: Record<string, string> = {
+    "/connections": "Connections", "/chat": "Chat", "/agents": "Agents", "/office": "Agent Team",
+    "/changes": "Changes", "/settings": "Settings", "/settings/data": "Data settings",
+    [NOVA_DOCUMENTATION_SETTINGS]: "documentation settings",
+  };
+  const page = pages[link.route] ?? (link.route.startsWith("/runs/") ? "run" : link.label || "page");
+  return `Open ${page} in OpenAdminOS`;
 }
 
 function voiceErrorMessage(error: unknown): string {

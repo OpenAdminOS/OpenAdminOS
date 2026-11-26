@@ -21,6 +21,7 @@ export const SETTINGS_ITEMS = {
   "local-reset": { section: "data", title: "Reset OpenAdminOS", description: "Remove all local data and sign-ins, then start again at first run.", keywords: ["reset", "wipe", "uninstall", "remove", "sign out", "keychain", "start over"] },
   "periodic-cache-refresh": { section: "data", title: "Periodic cache refresh", description: "Schedule local cache refreshes while signed in.", keywords: ["schedule", "interval"] },
   "local-self-training": { section: "chat", title: "Local self-training", description: "Review local agent suggestions and learning files.", keywords: ["learning", "suggestions"] },
+  "nova-system-shortcut": { section: "nova", title: "System-wide shortcut", description: "Open Nova over your current app. Press the shortcut again to stop or start listening.", keywords: ["hotkey", "keyboard", "bubble", "voice"] },
   "nova-voice": { section: "nova", title: "Voice and greeting", description: "Choose the voice provider and the name Nova greets you with.", keywords: ["openai", "local", "whisper", "kokoro", "name"] },
   "nova-instructions": { section: "nova", title: "Standing instructions", description: "Tell Nova how to answer in every conversation.", keywords: ["preferences", "language", "tone", "prompt"] },
   "nova-organization-addendum": { section: "nova", title: "Organization instructions for Nova", description: "Add instructions that apply in the active organization only.", keywords: ["tenant", "addendum", "organization"] },

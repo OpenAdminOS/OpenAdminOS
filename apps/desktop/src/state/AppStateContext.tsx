@@ -6,6 +6,7 @@ import {
   useMemo,
   useState,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 
 import {
@@ -177,9 +178,18 @@ function getOpenAdminOSApi(): OpenAdminOSApi | undefined {
 const AppStateContext = createContext<AppStateContextValue | undefined>(undefined);
 
 export function AppStateProvider({ children }: AppStateProviderProps) {
-  const [state, setState] = useState<AppState>(() =>
+  const [state, setStateSnapshot] = useState<AppState>(() =>
     createFallbackState(fallbackActiveProviderId),
   );
+  const setState = useCallback((next: SetStateAction<AppState>) => {
+    setStateSnapshot(current => {
+      const updated = typeof next === "function" ? next(current) : next;
+      // Mutation replies can omit the main process shortcut status.
+      if (updated.novaRegisteredShortcut === undefined && current.novaRegisteredShortcut !== undefined)
+        return { ...updated, novaRegisteredShortcut: current.novaRegisteredShortcut };
+      return updated;
+    });
+  }, []);
   const [registryAgents, setRegistryAgents] = useState<RegistryAgentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);

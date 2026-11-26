@@ -461,3 +461,63 @@
 .nova-markdown ul { list-style: disc; padding-left: 20px; }
 .nova-markdown ol { list-style: decimal; padding-left: 20px; }
 .nova-markdown a:focus-visible, .nova-markdown [tabindex]:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.nova-bubble {
+  height: 100dvh;
+  box-sizing: border-box;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+}
+.nova-bubble-header, .nova-bubble-voice, .nova-bubble-question {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nova-bubble-header { justify-content: space-between; -webkit-app-region: drag; }
+.nova-bubble-header button { -webkit-app-region: no-drag; }
+.nova-bubble-context { color: var(--color-text-muted); }
+.nova-bubble-voice { flex-wrap: wrap; }
+.nova-bubble .nova-orb { width: 60px; height: 60px; margin: 0; }
+.nova-bubble-answer, .nova-bubble-error {
+  min-height: 36px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--color-bg-raised);
+}
+.nova-bubble-error { color: var(--color-danger); }
+.nova-bubble-question input {
+  min-width: 0;
+  flex: 1;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.nova-bubble > :not(.nova-bubble-answer, .nova-bubble-voice) { flex-shrink: 0; }
+.nova-bubble:not(:has(.nova-bubble-answer)) .nova-bubble-voice { flex: 1 0 auto; }
+.nova-bubble-voice-controls { flex: 1; min-width: 0; }
+.nova-bubble-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.nova-bubble-actions kbd { color: var(--color-text-muted); font-size: 11px; }
+.nova-bubble-talk {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+}
+.nova-bubble-talk:focus-visible,
+.nova-bubble-answer:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.nova-bubble-consent { color: var(--color-text-soft); }
+.nova-bubble-activity { font-size: 12px; color: var(--color-text-muted); }
+.nova-bubble-answer { flex: 1 1 auto; min-height: 0; }
+.nova-bubble-footer { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }

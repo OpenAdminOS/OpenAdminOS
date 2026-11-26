@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -52,6 +52,17 @@ function setup(initial: NovaProfileView, connectors: ConnectorSummary[] = []) {
 }
 
 describe("Settings, Nova", () => {
+  it("blocks a reserved shortcut and records the next valid combination", async () => {
+    const { novaProfile } = setup(view());
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Record shortcut" }));
+    await user.keyboard("{Control>}v{/Control}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("reserved for editing or system shortcuts");
+    expect(novaProfile).not.toHaveBeenCalledWith(expect.objectContaining({ action: "save" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Press a key combination" }), { key: "F9", code: "F9", ctrlKey: true, altKey: true });
+    await waitFor(() => expect(novaProfile).toHaveBeenCalledWith({ action: "save", patch: { globalShortcut: "Control+Alt+F9" } }));
+  });
+
   it("saves standing instructions and refuses text over the limit", async () => {
     const { novaProfile } = setup(view());
     const user = userEvent.setup();

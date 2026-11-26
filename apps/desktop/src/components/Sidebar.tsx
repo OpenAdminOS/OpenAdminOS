@@ -1,3 +1,4 @@
+import { novaHint } from "../shared/nova-keyboard";
 import {
   useEffect,
   useMemo,
@@ -563,6 +564,7 @@ function AccountRow({
   organizationCount: number;
   nightly: boolean;
 }) {
+  const { state } = useAppState();
   const navigate = useNavigate();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const initials = activeTenant?.username
@@ -600,7 +602,7 @@ function AccountRow({
         items={[
           { id: "settings", label: `Settings (${shortcutLabel("settings")})`, icon: <IconSettings size={12} />, onSelect: () => navigate("/settings") },
           { id: "connections", label: "Connections", icon: <IconConnectors size={12} />, onSelect: () => navigate("/connections") },
-          { id: "voice", label: "Voice (Alt+V)", icon: <IconSparkle size={12} />, onSelect: openNovaPanel },
+          { id: "voice", label: `Voice (${novaHint(state.novaRegisteredShortcut)})`, icon: <IconSparkle size={12} />, onSelect: openNovaPanel },
           { id: "shortcuts", label: "Keyboard shortcuts", icon: <IconCommand size={12} />, onSelect: () => setShortcutsOpen(true) },
           { type: "separator", id: "about-separator" },
           { id: "about", label: nightly ? "About and updates · Nightly" : "About and updates", icon: <IconRefresh size={12} />, onSelect: () => navigate("/settings/about") },
@@ -617,7 +619,7 @@ function AccountRow({
           ))}
           <div className="flex items-center justify-between gap-4 py-3 text-sm">
             <span className="text-[var(--color-text-soft)]">Open Voice</span>
-            <Kbd>Alt+V</Kbd>
+            <Kbd>{novaHint(state.novaRegisteredShortcut)}</Kbd>
           </div>
         </div>
       </Modal>

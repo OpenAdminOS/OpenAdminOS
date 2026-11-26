@@ -1,3 +1,4 @@
+import { novaHint } from "../shared/nova-keyboard";
 import { formatCacheRefreshTime, formatChatDateTime, formatDeviceSyncDate } from "../shared/chat-date-time";
 import { hasRememberedHostedChatConsent, rememberHostedChatConsent } from "../shared/hosted-chat-consent";
 import { OLLAMA_CLOUD_NAME, hostedOllamaDestination, type HostedOllamaDestination, isOnDeviceModel, isRemoteBackedModel, providerForModel, resolveRunModel } from "@openadminos/agent-sdk";
@@ -2638,6 +2639,7 @@ function ChatComposer({
   suggestion?: string;
   onDismissSuggestion?: () => void;
 }) {
+  const novaShortcut = useAppState().state.novaRegisteredShortcut;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [disclosureOpen, setDisclosureOpen] = useState(false);
   const disclosureId = `hosted-disclosure-${placement}`;
@@ -2912,7 +2914,7 @@ function ChatComposer({
             size="sm"
             label="Voice"
             tooltip="Voice"
-            shortcut="Alt+V"
+            shortcut={novaHint(novaShortcut)}
             icon={<IconMicrophone size={14} />}
             disabled={disabled}
             onClick={openNovaPanel}
