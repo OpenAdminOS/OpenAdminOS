@@ -344,6 +344,16 @@ html {
   border-radius: var(--radius-sm);
 }
 
+.composer-privacy-panel {
+  position-area: top span-all;
+  justify-self: anchor-center;
+  position-try-fallbacks: flip-block;
+  inset: auto;
+  margin: 8px 0;
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: min(24rem, 45vh);
+}
+
 .intune-chat-composer textarea:focus,
 .intune-chat-composer textarea:focus-visible {
   outline: none;

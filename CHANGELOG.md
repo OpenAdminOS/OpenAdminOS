@@ -26,6 +26,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Keep Chat’s privacy footer on one line and show model destinations, tool hosts, and privacy details on demand.
 - Nova keeps a live session while the floating window awaits consent, recovers when its global shortcut is unavailable, and reopens the main window for answer links and conversations.
 - Nova can repair corrupt local voice models and uses more reliable language detection for short answers.
 

@@ -10,7 +10,6 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
 import {
   IconCloud,
-  IconShield,
   IconCopy,
   IconArrowDown,
   IconArrowUp,
@@ -97,7 +96,6 @@ import {
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
 import { appendOnlySteps, currentStepTitle, renumberCitations, tenantNotUsed, usedTenantEvidence } from "../shared/chat-steps";
-import { hostedDisclosureKey, readHostedDisclosures, recordHostedDisclosure, showFullHostedDisclosure } from "../shared/hosted-disclosure";
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
@@ -107,7 +105,7 @@ import { MODEL_FIT_COPY } from "../copy/model-fit";
 import { MODEL_FIT_RESEND, modelFitChoices, type ModelFitChoice } from "../shared/model-fit";
 import { useModelFitChoices } from "../state/use-model-fit-choices";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
-import { Badge, DataTable, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
+import { Badge, DataTable, IconButton, Menu, SegmentedControl } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
@@ -370,7 +368,6 @@ function IntuneChatContent() {
   const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
   const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
-  const [hostedDisclosures, setHostedDisclosures] = useState(readHostedDisclosures);
   const followLatestRef = useRef(true);
   const restoreConversationScrollRef = useRef<string | null>(null);
 
@@ -1877,29 +1874,6 @@ function IntuneChatContent() {
   const composerSuggestion = latestFollowUp && `${latestAssistant!.id}:${latestFollowUp}` !== dismissedSuggestion
     ? { text: latestFollowUp, key: `${latestAssistant!.id}:${latestFollowUp}` }
     : undefined;
-  // The full hosted sentence shows on a conversation's first message and
-  // after the provider, model or MCP hosts change; otherwise an icon.
-  const disclosureKey = hostedDisclosureKey({
-    providerId: state.activeProviderId,
-    ...(activeModel ? { model: activeModel } : {}),
-    ...(dataBoundary.kind === "hosted" && dataBoundary.toolHostsNote ? { toolHosts: dataBoundary.toolHostsNote } : {}),
-  });
-  const hostedDisclosureFull = showFullHostedDisclosure({
-    hosted: dataBoundary.kind === "hosted",
-    currentKey: disclosureKey,
-    conversationId: activeConversationId,
-    messages: displayedMessages,
-    acknowledged: hostedDisclosures,
-    providerId: state.activeProviderId,
-    ...(activeModel ? { model: activeModel } : {}),
-  });
-  useEffect(() => {
-    // A message sent with this provider, model and hosts: later messages show the icon only.
-    // Only the conversation whose answer is running: switching chats mid-run records nothing.
-    if (!runInProgress || !progressMessageVisible || !activeConversationId || dataBoundary.kind !== "hosted") return;
-    if (hostedDisclosures[activeConversationId] === disclosureKey) return;
-    setHostedDisclosures((current) => recordHostedDisclosure(current, activeConversationId, disclosureKey));
-  }, [runInProgress, progressMessageVisible, activeConversationId, dataBoundary.kind, disclosureKey, hostedDisclosures]);
   const fillComposer = (value: string) => {
     setInput(value);
     writeChatDraft(activeConversationId, value);
@@ -2044,7 +2018,6 @@ function IntuneChatContent() {
       onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
       onOpenProviders={() => navigate("/settings/providers")}
       dataBoundary={dataBoundary}
-      hostedDisclosureFull={hostedDisclosureFull}
       suggestion={composerSuggestion?.text}
       onDismissSuggestion={() => composerSuggestion && setDismissedSuggestion(composerSuggestion.key)}
     />
@@ -2615,7 +2588,6 @@ function ChatComposer({
   onModelSelect,
   onOpenProviders,
   dataBoundary,
-  hostedDisclosureFull,
   suggestion,
   onDismissSuggestion,
 }: {
@@ -2639,16 +2611,12 @@ function ChatComposer({
   onModelSelect: (providerId: ProviderId, model: string) => void;
   onOpenProviders: () => void;
   dataBoundary: DataBoundary;
-  /** Show the hosted sentence in full under the composer; otherwise its icon carries it. */
-  hostedDisclosureFull: boolean;
   /** A follow-up shown as ghost text while the composer is empty. Tab fills it; nothing is sent. */
   suggestion?: string;
   onDismissSuggestion?: () => void;
 }) {
   const novaShortcut = useAppState().state.novaRegisteredShortcut;
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [disclosureOpen, setDisclosureOpen] = useState(false);
-  const disclosureId = `hosted-disclosure-${placement}`;
   const showSuggestion = Boolean(suggestion) && value === "" && !disabled && !sending;
   const suggestionHintId = `chat-suggestion-${placement}`;
   const [activePickerIndex, setActivePickerIndex] = useState(0);
@@ -2709,14 +2677,6 @@ function ChatComposer({
       ? FIRST_RUN_CHAT_COPY.placeholderNoModel
       : FIRST_RUN_CHAT_COPY.placeholderNoTenant;
   const activeProvider = providerForModel(providers.find((provider) => provider.id === activeProviderId), activeModel);
-  // The same sentence as Connections; the shield's tooltip adds what the location depends on.
-  const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
-  const locationDetail = activeProvider ? providerDataLocationDetail(activeProvider) : undefined;
-  // The detail follows the destination sentence, before the reference disclosure.
-  const toolHostsNote = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
-  const hostedTooltip = locationDetail && toolHostsNote && hostedSentence.endsWith(toolHostsNote)
-    ? `${hostedSentence.slice(0, -toolHostsNote.length)} ${locationDetail}${toolHostsNote}`
-    : `${hostedSentence}${locationDetail ? ` ${locationDetail}` : ""}`;
 
   return (
     <div className="relative">
@@ -2894,20 +2854,6 @@ function ChatComposer({
             }}
           />
           <span className="min-w-2 flex-1" />
-          {dataBoundary.kind === "hosted" ? (
-            <Tooltip content={hostedTooltip} panelClassName="max-w-72">
-              <button
-                type="button"
-                aria-label="Where data goes"
-                aria-expanded={hostedDisclosureFull || disclosureOpen}
-                aria-controls={disclosureId}
-                onClick={() => setDisclosureOpen((open) => !open)}
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] text-[var(--color-warning)] transition-colors hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
-              >
-                <IconShield size={13} />
-              </button>
-            </Tooltip>
-          ) : null}
           <ComposerModelPopover
             providers={providers}
             activeProviderId={activeProviderId}
@@ -2946,19 +2892,61 @@ function ChatComposer({
             Set up a model
           </button>
         </div>
-      ) : dataBoundary.kind === "local" ? (
-        <div className="mt-2.5 flex items-center justify-center gap-1.5 text-center text-xs text-[var(--color-text-muted)]">
-          <span>
-            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : activeTenant ? LOCAL_BOUNDARY_COPY.plain : LOCAL_BOUNDARY_COPY.noTenant}
-            {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
-          </span>
-        </div>
       ) : (
-        // The destination, stated once under the composer (mockup 32, section C); the top bar chip carries it too.
-        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center justify-center text-center text-xs text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""}`}>
-          <span>{hostedSentence}</span>
-        </div>
+        <ComposerPrivacy boundary={dataBoundary} provider={activeProvider} hasOrganization={Boolean(activeTenant)} />
       )}
+    </div>
+  );
+}
+
+function ComposerPrivacy({ boundary, provider, hasOrganization }: {
+  boundary: Exclude<DataBoundary, { kind: "none" }>;
+  provider: ProviderSummary | undefined;
+  hasOrganization: boolean;
+}) {
+  const panelId = useId();
+  const { toolHostsNote, ...modelBoundary } = boundary;
+  const hosted = modelBoundary.kind === "hosted";
+  const summary = hosted
+    ? modelBoundary.label
+    : toolHostsNote ? "Local model · Tool queries can leave this device" : "Local model · Processing stays on this device";
+  const modelDetail = hosted
+    ? hostedComposerSentence(modelBoundary, provider, hasOrganization)
+    : toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : hasOrganization ? LOCAL_BOUNDARY_COPY.plain : LOCAL_BOUNDARY_COPY.noTenant;
+  const locationDetail = hosted && provider ? providerDataLocationDetail(provider) : undefined;
+  const detailsLabel = hosted && toolHostsNote ? "Tool & privacy details" : "Privacy details";
+
+  return (
+    <div className="mt-1.5 flex justify-center text-xs">
+      <button
+        type="button"
+        popoverTarget={panelId}
+        aria-label={`${summary}. ${detailsLabel}`}
+        title={summary}
+        className={`flex min-h-[24px] min-w-0 max-w-full items-center gap-2 rounded-md px-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-hover)] ${focusRingClass}`}
+      >
+        <span className={`truncate ${hosted ? "text-[var(--color-warning)]" : ""}`}>{summary}</span>
+        <span aria-hidden="true">·</span>
+        <span className={`shrink-0 whitespace-nowrap underline underline-offset-2 ${toolHostsNote ? "text-[var(--color-warning)]" : ""}`}>
+          {detailsLabel}
+        </span>
+      </button>
+      <section
+        id={panelId}
+        popover="auto"
+        aria-labelledby={`${panelId}-title`}
+        tabIndex={-1}
+        onToggle={(event) => {
+          if (event.newState === "open") event.currentTarget.focus({ preventScroll: true });
+        }}
+        className={`composer-privacy-panel space-y-2 overflow-y-auto rounded-xl bg-[var(--color-raised)] p-4 text-sm leading-5 text-[var(--color-text-soft)] shadow-[var(--shadow-pop)] ring-1 ring-[var(--color-border-soft)] ${focusRingClass}`}
+      >
+        <h2 id={`${panelId}-title`} className="font-semibold text-[var(--color-text)]">Where data goes</h2>
+        <p>{modelDetail}</p>
+        {locationDetail ? <p>{modelBoundary.isVoiceHosted ? "Chat model. " : ""}{locationDetail}</p> : null}
+        {hosted && modelBoundary.modelNote ? <p>{modelBoundary.modelNote}.</p> : null}
+        {toolHostsNote ? <p className="[overflow-wrap:anywhere]">{toolHostsNote}</p> : null}
+      </section>
     </div>
   );
 }

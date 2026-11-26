@@ -94,7 +94,10 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(screen.getByText("Questions go to www.kqlsearch.com")).toBeInTheDocument();
     expect(screen.queryByText("Questions go to www.intuneautomation.com")).toBeNull();
     expect(screen.getByText(/4 more in the/)).toBeInTheDocument();
-    expect(screen.getByText(LOCAL_NO_TENANT)).toBeInTheDocument();
+    const privacy = screen.getByRole("button", { name: "Local model · Processing stays on this device. Privacy details" });
+    const panel = document.getElementById(privacy.getAttribute("popovertarget")!);
+    expect(panel).toHaveTextContent(LOCAL_NO_TENANT);
+    expect(privacy).not.toHaveTextContent(LOCAL_NO_TENANT);
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveAttribute("placeholder", FIRST_RUN_CHAT_COPY.placeholderNoTenant);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(bridge.installMcpServer).not.toHaveBeenCalled();
@@ -419,9 +422,6 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
-    expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts leave this device through Codex; location set by your account while this model is selected. No organization is active, so no tenant data is included.",
-    );
     await user.type(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
     await user.click(screen.getByRole("button", { name: "Send" }));
     // Inline above the composer, so the typed question stays visible (design round, D).
@@ -1042,46 +1042,44 @@ describe("IntuneChat hosted-provider disclosure", () => {
     { id: "a-h", conversationId: conversation.id, role: "assistant" as const, content: "Two devices are stale.", status: "completed" as const, createdAt: conversation.updatedAt, providerId: "openai" as const, model },
   ]);
 
-  it("folds the sentence into an icon once the conversation sent with this model, keeping it reachable by keyboard and screen reader", async () => {
-    const user = userEvent.setup();
+  it.each(["gpt-5", "gpt-4.1"])("keeps the hosted destination visible after a conversation used %s", async (previousModel) => {
     const bridge = makeMockBridge(
-      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered(previousModel) },
       createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
     );
-    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
     expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
-    const icon = screen.getByRole("button", { name: "Where data goes" });
-    // The tooltip adds what the location depends on; the line under the composer stays short.
-    expect(icon).toHaveAccessibleDescription(`${sentence} ${CODEX_LOCATION_DETAIL}`);
-    expect(icon).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("note")).toBeNull();
-    // The status strip pill is unchanged; the composer icon opens the full sentence on demand.
-    await user.click(icon);
-    expect(icon).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("note")).toHaveTextContent(sentence);
-    await user.click(icon);
-    expect(screen.queryByRole("note")).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Hosted · Codex · location set by your account. Privacy details" });
+    const panel = document.getElementById(trigger.getAttribute("popovertarget")!);
+    expect(panel).toHaveAttribute("popover", "auto");
+    expect(panel).toHaveTextContent(sentence);
+    expect(panel).toHaveTextContent(CODEX_LOCATION_DETAIL);
+    expect(trigger).not.toHaveTextContent(sentence);
   });
 
-  it("shows the sentence in full again after switching the model", async () => {
-    const bridge = makeMockBridge(
-      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-4.1") },
-      createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
-    );
-    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
-    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent(sentence);
-    expect(screen.getByRole("button", { name: "Where data goes" })).toHaveAttribute("aria-expanded", "true");
-  });
   it("says no tenant data is sent with a hosted model and no organization (design round review, Muse D)", async () => {
     const { activeTenantId: _none, ...state } = createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } });
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge: makeMockBridge({}, state) });
-    const note = await screen.findByRole("note");
+    const note = (await screen.findByText(/^Prompts leave this device through Codex/)).closest("[popover]");
     expect(note).toHaveTextContent("Prompts leave this device through Codex; location set by your account while this model is selected. No organization is active, so no tenant data is included.");
     expect(note).not.toHaveTextContent("tenant data go to");
   });
 
-  it("adds the MCP disclosure to the hosted sentence and the shield tooltip when MCP servers are on", async () => {
+  it("includes the Copilot Fusion prompt-visibility disclosure", async () => {
+    const copilot: ProviderSummary = {
+      id: "copilot", name: "GitHub Copilot CLI", isLocal: false, status: "connected",
+      description: "", models: ["fusion-high"], defaultModel: "fusion-high",
+    };
+    const bridge = makeMockBridge({}, createMockAppState({
+      providers: [...mockProviders, copilot], activeProviderId: "copilot",
+    }));
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, { path: "/chat", route: "/chat", bridge });
+    const trigger = await screen.findByRole("button", { name: "Hosted · GitHub Copilot CLI · location not stated. Privacy details" });
+    const panel = document.getElementById(trigger.getAttribute("popovertarget")!);
+    expect(panel).toHaveTextContent("Several models may see each prompt.");
+  });
+
+  it("keeps the hosted destination visible and lists MCP details in the popover", async () => {
     const bridge = makeMockBridge(
       { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
       createMockAppState({
@@ -1091,12 +1089,12 @@ describe("IntuneChat hosted-provider disclosure", () => {
     );
     renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
     expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
-    const full = `${sentence} MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.`;
-    // The shield carries the full text and opens the same line.
-    const icon = screen.getByRole("button", { name: "Where data goes" });
-    expect(icon).toHaveAccessibleDescription(full.replace(sentence, `${sentence} ${CODEX_LOCATION_DETAIL}`));
-    await userEvent.setup().click(icon);
-    expect(screen.getByRole("note")).toHaveTextContent(full);
+    const trigger = screen.getByRole("button", { name: "Hosted · Codex · location set by your account. Tool & privacy details" });
+    const panel = document.getElementById(trigger.getAttribute("popovertarget")!);
+    expect(panel).toHaveTextContent(sentence);
+    expect(panel).toHaveTextContent(CODEX_LOCATION_DETAIL);
+    expect(panel).toHaveTextContent("MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.");
+    expect(trigger).not.toHaveTextContent("learn.microsoft.com");
   });
 });
 
@@ -1182,10 +1180,6 @@ describe("IntuneChat hosted-provider consent", () => {
       name: "Ask about your Microsoft 365 tenant",
     });
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("Prompts and tenant data go to");
-    // A new conversation shows the hosted sentence in full under the composer.
-    expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.",
-    );
 
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -1317,26 +1311,34 @@ describe("IntuneChat trust presentation", () => {
     await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("Ollama");
     expect(screen.queryByText("Local provider")).not.toBeInTheDocument();
-    expect(screen.getByText("Local model. Tenant data and prompts stay on this device.")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Local model · Processing stays on this device. Privacy details" });
+    const panel = document.getElementById(trigger.getAttribute("popovertarget")!);
+    expect(panel).toHaveTextContent("Local model. Tenant data and prompts stay on this device.");
+    expect(panel).not.toHaveTextContent("MCP queries");
   });
 
-  it("names the MCP hosts in the local boundary footnote when MCP servers are on", async () => {
+  it("flags tool queries in the local footer and names the enabled hosts in the popover", async () => {
     renderRoute(
       <DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>,
       {
         path: "/chat/:conversationId?",
         route: "/chat",
         bridge: makeMockBridge({}, createMockAppState({
-          mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: true } }),
+          mcpServers: createMockMcpServers({
+            "microsoft-learn": { installed: true, enabled: true },
+            "kql-search": { installed: true, enabled: true },
+            "intuneautomation": { installed: true, enabled: false },
+          }),
         })),
       },
     );
     await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
-    // With MCP tools on, the local line keeps the claim for the model and the tenant data only.
-    expect(screen.getByText(/^Local model\. Graph and cache data stay on this device\./)).toHaveTextContent(
-      "Local model. Graph and cache data stay on this device. MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.",
-    );
-    expect(screen.queryByText(/Tenant data and prompts stay on this device/)).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Local model · Tool queries can leave this device. Privacy details" });
+    const panel = document.getElementById(trigger.getAttribute("popovertarget")!);
+    expect(panel).toHaveTextContent("Local model. Graph and cache data stay on this device.");
+    expect(panel).toHaveTextContent("MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.");
+    expect(panel).not.toHaveTextContent("intuneautomation.com");
+    expect(trigger).not.toHaveTextContent("learn.microsoft.com");
   });
 
   it("activates the provider when picking another provider's model", async () => {
