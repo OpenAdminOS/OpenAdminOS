@@ -7,7 +7,16 @@ const api: BubbleApi = {
   platform: platform.includes("mac os") ? "macos" : platform.includes("windows") ? "windows" : platform.includes("linux") ? "linux" : "unknown",
   getAppState: () => ipcRenderer.invoke("openadminos:get-app-state"),
   getGraphCacheStatus: (tenantId) => ipcRenderer.invoke("openadminos:get-graph-cache-status", tenantId),
-  nova: (input, onActivity) => {
+  nova: (input, onActivity, onAudio) => {
+    if (input.action === "speak" && onAudio) {
+      const streamId = crypto.randomUUID();
+      const handler = (_event: unknown, payload: { streamId: string; wav: Uint8Array; remainingText?: string }) => {
+        if (payload.streamId === streamId) onAudio(payload.wav, payload.remainingText);
+      };
+      ipcRenderer.on("openadminos:nova-audio", handler);
+      return ipcRenderer.invoke("openadminos:nova", input, streamId)
+        .finally(() => ipcRenderer.removeListener("openadminos:nova-audio", handler));
+    }
     if (!onActivity || input.action !== "answer") return ipcRenderer.invoke("openadminos:nova", input);
     const streamId = crypto.randomUUID();
     const handler = (_event: unknown, payload: { streamId: string; activity: NovaActivity }) => {

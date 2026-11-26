@@ -1,6 +1,8 @@
 import { novaScreenQuestion } from "../shared/nova-command";
 import type { NovaScreenResponse } from "@openadminos/agent-sdk";
 import { novaKeyLabel } from "../shared/nova-keyboard";
+import { systemVoices } from "./system-voices";
+import { LocalSpeechSetup } from "./LocalSpeechSetup";
 import { providerForModel } from "@openadminos/agent-sdk";
 import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION, NOVA_PUBLIC_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
@@ -21,6 +23,7 @@ import {
   type NovaActivity,
   type NovaActionPreview,
   type NovaAnswerLink,
+  type NovaSpeechStatus,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
 import { NOVA_CHECK_DOCUMENTATION, NOVA_DOCUMENTATION_SETTINGS, NOVA_INSTALL_DOCUMENTATION, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
@@ -78,7 +81,13 @@ export function Nova({
   const allowedModes = profile?.allowedVoiceModes ?? ["openai", "local"];
   const voiceOff = allowedModes.length === 0;
   const [modeOverride, setModeOverride] = useState<"openai" | "local">();
-  const mode: "openai" | "local" = modeOverride ?? profile?.voiceMode ?? allowedModes[0] ?? "local";
+  const [typedLocal, setTypedLocal] = useState(false);
+  const mode: "openai" | "local" = typedLocal ? "local" : modeOverride ?? profile?.voiceMode ?? allowedModes[0] ?? "local";
+  const [localSpeech, setLocalSpeech] = useState<NovaSpeechStatus>();
+  const waitingForLocalSpeech = mode === "local" && localSpeech?.source === "builtin" &&
+    (!localSpeech.ready || !localSpeech.available);
+  const [typedQuestion, setTypedQuestion] = useState("");
+  const [deviceVoice, setDeviceVoice] = useState("");
   const name = profile?.greetingName ?? "";
   const [nameDraft, setNameDraft] = useState<string>();
   const [links, setLinks] = useState<NovaAnswerLink[]>([]);
@@ -156,7 +165,9 @@ export function Nova({
     ? state.activeTenantId
       ? ["Hosted voice · Audio, relevant tenant context, public web searches, Nova instructions and confirmed notes go to OpenAI.", hostedReasoningDisclosure].filter(Boolean).join(" ")
       : `Hosted voice · ${publicHostedDisclosure}`
-    : ["Local voice · audio stays on this device.", hostedReasoningDisclosure].filter(Boolean).join(" ");
+    : localSpeech?.source === "servers"
+      ? "Local voice · audio goes to your loopback services."
+      : "Local voice · audio stays on this device.";
   const consentDisclosure = state.activeTenantId
     ? `Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too. ${hostedReasoningDisclosure}`.trim()
     : `Allow hosted processing for this session. ${publicHostedDisclosure}`;
@@ -306,6 +317,9 @@ export function Nova({
     setPendingAction(undefined);
     interruptCurrent.current = () => {};
     askTyped.current = () => {};
+    window.speechSynthesis?.cancel();
+    setDeviceVoice("");
+    setTypedLocal(false);
     if (!bubble) setLinks([]);
     endActivities("stopped");
     liveReady.current = false;
@@ -463,7 +477,7 @@ export function Nova({
       }
     } catch (error) {
       if (token === generation.current)
-        setError(error instanceof Error ? error.message : String(error));
+        setError(voiceErrorMessage(error));
     } finally {
       if (token === generation.current) setChecking(false);
     }
@@ -634,7 +648,8 @@ export function Nova({
       return;
     }
     if (!api || phaseRef.current !== "idle") return;
-    if (!reasoningReady || voiceOff || (mode === "openai" && (!hasKey || !consent))) {
+    const useTypedLocal = Boolean(typed && reasoning?.isLocal && allowedModes.includes("local") && (!bubble || mode === "local"));
+    if (!reasoningReady || voiceOff || (!useTypedLocal && mode === "openai" && (!hasKey || !consent))) {
       if (bubble) {
         const needsConsent = reasoningReady && !voiceOff && mode === "openai" && hasKey && !consent;
         setError(needsConsent ? "Confirm hosted sharing for this session, then select Talk or Ask." :
@@ -649,6 +664,8 @@ export function Nova({
     setError("");
     setLinks([]);
     if (!bubble) { setConversationItems([]); historyClipped.current = false; }
+    setDeviceVoice("");
+    setTypedLocal(useTypedLocal);
     setPhase("connecting");
     const fail = (e: unknown) => {
       if (generation.current === token) {
@@ -657,7 +674,128 @@ export function Nova({
         setError(voiceErrorMessage(e));
       }
     };
+    const respond = async (text: string, languageHint?: string) => {
+      appendSpeech("user", text);
+      const activityId = `local-${++itemSequence.current}`;
+      const answer = await api.nova({
+        action: "answer",
+        sessionId: sessionId.current,
+        text,
+      }, event => { if (token === generation.current) recordActivity(activityId, event); });
+      if (token !== generation.current) return;
+      if (answer.screenQuestion) {
+        stop();
+        setScreenQuestion(answer.screenQuestion);
+        return;
+      }
+      setPendingAction(answer.pendingAction);
+      setError(answer.answerError || "");
+      appendSpeech("assistant", answer.text || "No answer returned.");
+      recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || answer.text);
+      setConversation(answer.conversationId);
+      setLinks(answer.links ?? []);
+      showAnswerLinks(answer);
+      const finish = () => {
+        if (token !== generation.current) return;
+        if (answer.pendingAction) { setPhase("listening"); return; }
+        stop();
+        if (answer.links?.length) setLinks(answer.links);
+      };
+      const speakWithSystem = async (text: string, language?: string) => {
+        const synth = window.speechSynthesis;
+        const requested = language || "en";
+        const label = language ? new Intl.DisplayNames(["en"], { type: "language" }).of(language) : undefined;
+        const voices = synth ? await systemVoices(synth) : [];
+        if (token !== generation.current) return;
+        const voice = voices.find(candidate =>
+          candidate.localService && candidate.lang.toLowerCase().split("-")[0] === requested);
+        if (!voice || !synth || !text) {
+          finish();
+          if (label) setError(`Install a system voice for ${label} to hear this answer, or read it in the conversation.`);
+          return;
+        }
+        setDeviceVoice(label ? `Speaking with the system voice for ${label}` : "Speaking with your device's voice");
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+        utterance.onend = finish;
+        const playbackFailed = () => {
+          if (token !== generation.current) return;
+          finish();
+          setError("Device voice could not play. Read Nova's answer in the conversation.");
+        };
+        utterance.onerror = playbackFailed;
+        setPhase("speaking");
+        try {
+          synth.speak(utterance);
+        } catch {
+          playbackFailed();
+        }
+      };
+      const queue: Uint8Array[] = [];
+      let playing = false;
+      let finished = false;
+      let remainingText = (answer.text || "").slice(0, 5000);
+      let fallbackText = "";
+      const playNext = () => {
+        if (token !== generation.current || playing) return;
+        const wav = queue.shift();
+        if (!wav) {
+          if (finished) {
+            if (fallbackText) {
+              const remainder = fallbackText;
+              fallbackText = "";
+              void speakWithSystem(remainder).catch(fail);
+            } else finish();
+          }
+          return;
+        }
+        const player = output.current;
+        if (!player) return;
+        playing = true;
+        if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
+        blobUrl.current = URL.createObjectURL(new Blob([new Uint8Array(wav)], { type: "audio/wav" }));
+        player.src = blobUrl.current;
+        setPhase("speaking");
+        player.onended = () => { playing = false; playNext(); };
+        player.onerror = () => fail(new Error("Local speech could not play. Check your audio device, then retry."));
+        void player.play().catch(fail);
+      };
+      const enqueue = (wav: Uint8Array, remaining?: string) => {
+        if (token !== generation.current || !wav.byteLength) return;
+        if (remaining !== undefined) remainingText = remaining;
+        queue.push(wav);
+        playNext();
+      };
+      try {
+        const speech = await api.nova({
+          action: "speak", sessionId: sessionId.current, text: (answer.text || "").slice(0, 5000), languageHint,
+        }, undefined, enqueue);
+        if (token !== generation.current) return;
+        if (speech.speechLanguage) { await speakWithSystem(answer.text || "", speech.speechLanguage); return; }
+        if (speech.audio?.length) enqueue(new Uint8Array(speech.audio));
+        finished = true;
+        playNext();
+      } catch (error) {
+        if (token !== generation.current) return;
+        setError(voiceErrorMessage(error));
+        fallbackText = remainingText;
+        finished = true;
+        playNext();
+      }
+    };
     try {
+      if (typed && useTypedLocal) {
+        await api.novaWindow?.("claim-typed");
+        if (token !== generation.current) return;
+        const result = await api.nova({ action: "start", mode: "local", tenantId: state.activeTenantId, consent: false, name });
+        if (token !== generation.current) return;
+        sessionId.current = result.sessionId!;
+        setPhase("thinking");
+        toggleConversation(true);
+        await respond(typed);
+        return;
+      }
       await api.nova({ action: "check", mode, connectivity: false });
       if (token !== generation.current) return;
       await api.novaWindow?.(typed ? "claim-typed" : "claim");
@@ -815,58 +953,8 @@ export function Nova({
               throw new Error(
                 "No speech recognized. Try again closer to the microphone.",
               );
-            await respond(heard.text);
+            await respond(heard.text, heard.speechLanguage);
           })().catch(fail);
-        };
-        // A typed request answered and spoken once, then the session ends as after speech.
-        const respond = async (text: string) => {
-          appendSpeech("user", text);
-          const activityId = `local-${++itemSequence.current}`;
-          const answer = await api.nova({
-            action: "answer",
-            sessionId: sessionId.current,
-            text,
-          }, event => { if (token === generation.current) recordActivity(activityId, event); });
-          if (token !== generation.current) return;
-          if (answer.screenQuestion) {
-            stop();
-            setScreenQuestion(answer.screenQuestion);
-            return;
-          }
-          setPendingAction(answer.pendingAction);
-          setError(answer.answerError || "");
-          appendSpeech("assistant", answer.text || "No answer returned.");
-          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Answer ready") }, answer.displayText || answer.text);
-          setConversation(answer.conversationId);
-          showAnswerLinks(answer);
-          const speech = await api.nova({
-            action: "speak",
-            sessionId: sessionId.current,
-            text: (answer.text || "").slice(0, 5000),
-          });
-          if (token !== generation.current) return;
-          blobUrl.current = URL.createObjectURL(
-            new Blob([new Uint8Array(speech.audio || [])], {
-              type: "audio/wav",
-            }),
-          );
-          output.current!.src = blobUrl.current;
-          setPhase("speaking");
-          output.current!.onerror = () =>
-            fail(
-              new Error(
-                "Local speech could not be played. Check Kokoro's WAV output and your audio device, then retry.",
-              ),
-            );
-          output.current!.onended = () => {
-            if (token !== generation.current) return;
-            if (answer.pendingAction) { setPhase("listening"); return; }
-            // The session ends with the speech; the answer's links stay until the next answer or organization.
-            const kept = bubble ? [] : answer.links ?? [];
-            stop();
-            if (kept.length > 0) setLinks(kept);
-          };
-          await output.current!.play();
         };
         const queued = typed || (queuedShortcut.current && `Run shortcut ${queuedShortcut.current}`);
         if (queued) {
@@ -1375,7 +1463,7 @@ export function Nova({
               : muted ? "Microphone muted" : phase === "idle" ? "Ready" : phase === "connecting" ? "Connecting"
               : phase === "listening" ? "Listening" : phase === "thinking" ? "Working on an answer" : "Speaking"}</div>
             <div className="nova-bubble-actions">
-              <button type="button" className="nova-bubble-talk" ref={bubbleTalk} autoFocus onClick={() => active ? stop() : void start()}>
+              <button type="button" className="nova-bubble-talk" ref={bubbleTalk} autoFocus disabled={!active && waitingForLocalSpeech} onClick={() => active ? stop() : void start()}>
                 {active ? "Stop" : "Talk"}
               </button>
               {state.novaRegisteredShortcut && <kbd>{novaKeyLabel(state.novaRegisteredShortcut)}</kbd>}
@@ -1403,6 +1491,8 @@ export function Nova({
           {links.map(link => <Button key={link.route} size="sm" variant="secondary" onClick={() => windowAction("open-page", link.route)}>{novaBubbleLinkLabel(link)}</Button>)}
         </div>}
         {pendingAction && <div>Review this request in OpenAdminOS. Start a new session there to prepare the action for approval.</div>}
+        {mode === "local" && allowedModes.includes("local") && !active && <LocalSpeechSetup onChange={setLocalSpeech} openSettings={() => windowAction("open-page", "/settings/nova")} />}
+        {deviceVoice && <p role="status">{deviceVoice}</p>}
         <footer className="nova-bubble-footer">
           <form className="nova-bubble-question" onSubmit={event => {
             event.preventDefault();
@@ -1544,7 +1634,7 @@ export function Nova({
                   }}
                 >
                   {allowedModes.includes("openai") && <option value="openai">OpenAI · GPT-Live-1</option>}
-                  {allowedModes.includes("local") && <option value="local">Local · whisper.cpp + Kokoro</option>}
+                  {allowedModes.includes("local") && <option value="local">Local (on this device)</option>}
                 </select>
               </label>
               )}
@@ -1559,11 +1649,7 @@ export function Nova({
                     ? state.activeTenantId ? "Ready to retrieve permitted tenant data." : "Ready to answer public Microsoft product questions."
                     : "Connect a reasoning provider in Settings before starting voice."}
                 </p>
-                <p>
-                  {mode === "openai"
-                    ? "The voice key powers speech. Answers use the reasoning provider above."
-                    : "Whisper recognizes speech and Kokoro speaks the answer. Answers use the local reasoning provider above."}
-                </p>
+                {mode === "openai" && <p>The voice key powers speech. Tenant answers use the reasoning provider above.</p>}
                 {!reasoningReady && (
                   <Button
                     size="sm"
@@ -1579,7 +1665,25 @@ export function Nova({
             </>
           )}
           {screenControls}
+          <form className="nova-question grid gap-2" onSubmit={event => {
+            event.preventDefault();
+            const text = typedQuestion.trim();
+            if (!text) return;
+            setTypedQuestion("");
+            if (active) askTyped.current(text);
+            else void start(text);
+          }}>
+            <label className="nova-field">
+              Type a question
+              <input value={typedQuestion} maxLength={12000} onChange={event => setTypedQuestion(event.target.value)} />
+            </label>
+            <Button type="submit" disabled={!typedQuestion.trim() ||
+              (active ? mode !== "openai" || !liveReady.current : (!reasoningReady || !reasoning?.isLocal || !allowedModes.includes("local")))}>Ask Nova</Button>
+            {deviceVoice && <p role="status">{deviceVoice}</p>}
+          </form>
+          {mode === "local" && allowedModes.includes("local") && !active && <LocalSpeechSetup onChange={setLocalSpeech} />}
           <button
+            hidden={!active && waitingForLocalSpeech}
             ref={element => { orb.current = element; }}
             className="nova-orb"
             data-phase={
@@ -1592,6 +1696,7 @@ export function Nova({
                 voiceOff ||
                 checking ||
                 savingKey ||
+                waitingForLocalSpeech ||
                 (mode === "openai" && (!hasKey || !consent)))
             }
             aria-label={active ? "Stop Nova" : "Start Nova"}
@@ -1603,7 +1708,7 @@ export function Nova({
           </button>
           <div role="status" className="nova-status text-center text-sm">
             {phase === "idle"
-              ? "Start a conversation. Say “Hey Nova”."
+              ? waitingForLocalSpeech ? "Download the models to start a voice conversation." : "Start a conversation. Say “Hey Nova”."
               : phase === "connecting"
                 ? "Checking setup and connecting microphone…"
                 : phase === "listening"
@@ -1616,7 +1721,7 @@ export function Nova({
           </div>
           {active && (
             <div className="nova-session-controls flex justify-center gap-2">
-              <Button
+              {!typedLocal && <Button
                 variant="secondary"
                 disabled={
                   phase === "connecting" ||
@@ -1626,12 +1731,14 @@ export function Nova({
                 onClick={toggleMute}
               >
                 {muted ? "Unmute mic" : "Mute mic"}
-              </Button>
+              </Button>}
               {mode === "openai" && <Button variant="secondary" onClick={() => interruptCurrent.current()}>Stop answer</Button>}
+              {mode === "local" && phase === "speaking" && !waitingForLocalSpeech &&
+                <Button variant="secondary" onClick={() => void start()}>Ask another question</Button>}
               <Button variant="secondary" onClick={stop}>
                 Stop
               </Button>
-              {mode === "local" && phase === "listening" && (
+              {mode === "local" && !typedLocal && phase === "listening" && (
                 <Button onClick={() => recorder.current?.stop()}>
                   Finish speaking
                 </Button>

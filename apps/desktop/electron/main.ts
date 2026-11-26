@@ -4,6 +4,7 @@ import { createNovaScreenHandler } from "./nova-screen.js";
 import { handleNovaWindow, showMainWindow } from "./nova-window-ipc.js";
 import { NovaWindowSession } from "./nova-window-session.js";
 import { NovaWindowShortcut } from "./nova-window-shortcut.js";
+import { LocalSpeech, novaVoiceFetch } from "./nova-speech/local.js";
 import { hostedOllamaDestination, providerForModel, resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import { readModelFitContextWindow } from "./model-fit-context.js";
 import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
@@ -6672,11 +6673,17 @@ function registerIpcHandlers() {
       store.getMultiTenantAgentBatch(requireBoundedString(id, "batchId", 128)),
     ),
   );
+  const whisperBinary = process.platform === "win32" ? "whisper-server.exe" : "whisper-server";
+  const localSpeech = new LocalSpeech(join(app.getPath("userData"), "nova-speech"), app.isPackaged
+    ? join(process.resourcesPath, "native", "nova-speech", whisperBinary)
+    : join(app.getAppPath(), "build", "nova-speech", whisperBinary));
+  app.once("will-quit", () => localSpeech.stop());
+  process.once("exit", () => localSpeech.stop());
   const nova = novaService = new NovaService(
     new SafeStorageProviderSecretStore(join(app.getPath("userData"), "providers", "secrets")).forProvider("nova"),
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
-    fetch,
+    novaVoiceFetch,
     { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), providerEndpoint: (providerId) => store.novaProviderEndpoint(providerId), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work), profile: (tenantId) => store.novaProfile(tenantId), applyProfileProposal: (patch, assertUnchanged) => store.applyNovaProfileProposal(patch, assertUnchanged), recordVoiceConsent: input => store.recordNovaVoiceConsent(input), notes: store.novaNotesHost(), followUps: store.novaFollowUpsHost() },
     chatDateTimeLocale,
     {
@@ -6684,6 +6691,7 @@ function registerIpcHandlers() {
       retrieve: (question) => store.retrieveDocumentation(question),
       model: (...args) => store.novaPublicModel(...args),
     },
+    localSpeech,
   );
   const screenWindows = () => [mainWindow, novaBubble];
   const novaScreen = createNovaScreenHandler(store, screenWindows, novaScreenCapture(screenWindows, join(
@@ -6694,7 +6702,7 @@ function registerIpcHandlers() {
     novaScreen(event.sender, request)));
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     if (!input || typeof input !== "object") throw new Error("Nova request is missing.");
-    if (event.sender === novaBubble?.webContents && ["configure", "decide-action"].includes(input.action))
+    if (event.sender === novaBubble?.webContents && ["configure", "decide-action", "speech-configure"].includes(input.action))
       throw new Error("Open the main OpenAdminOS window to change voice credentials or review a proposed action.");
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
     const id = event.sender.id;
@@ -6702,11 +6710,13 @@ function registerIpcHandlers() {
       novaWindowSession.release(id, () => { void nova.handle(input); });
       return {};
     }
-    if (!["status", "check", "configure"].includes(input.action) && novaWindowSession.owner !== id)
+    if (!["status", "check", "configure", "speech-status", "speech-install", "speech-cancel", "speech-configure"].includes(input.action) && novaWindowSession.owner !== id)
       throw new Error("Start Nova in this window before continuing.");
     return nova.handle(input, activity => {
       if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
-    });
+    }, input.action === "speak" && safeStreamId ? (wav, remainingText) => {
+      if (!event.sender.isDestroyed()) event.sender.send("openadminos:nova-audio", { streamId: safeStreamId, wav, remainingText });
+    } : undefined);
   }));
   ipcMain.handle("openadminos:nova-window", handleTrusted((event, action: unknown, payload?: unknown) =>
     handleNovaWindow(event.sender, action, payload, {

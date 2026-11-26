@@ -2455,8 +2455,25 @@ export type NovaScreenResponse =
   | { status: "cancelled" | "permission" }
   | { status: "answered"; text: string }
   | { status: "preview"; id: string; thumbnail: string; text: string; destination: string; consentProvider?: string; emptyOcr?: boolean };
+export interface NovaSpeechStatus {
+  source: "builtin" | "servers";
+  model: "auto" | "small" | "turbo";
+  selectedModel: "small" | "turbo";
+  gpuAccelerated: boolean;
+  repairNeeded?: boolean;
+  unusedBytes?: number;
+  available: boolean;
+  ready: boolean;
+  totalBytes: number;
+  receivedBytes?: number;
+  error?: string;
+}
 
 export type NovaRequest =
+  | { action: "speech-status" }
+  | { action: "speech-install" }
+  | { action: "speech-cancel" }
+  | { action: "speech-configure"; source: NovaSpeechStatus["source"]; model: NovaSpeechStatus["model"] }
   | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
   | { action: "status" }
   | { action: "stop" }
@@ -2472,10 +2489,11 @@ export type NovaRequest =
       sdp?: string;
     }
   | { action: "answer"; sessionId: string; text: string; history?: NovaConversationTurn[] }
-  | { action: "speak"; sessionId: string; text: string }
+  | { action: "speak"; sessionId: string; text: string; languageHint?: string }
   | { action: "transcribe"; sessionId: string; audio: number[] };
 export interface NovaResponse {
   screenQuestion?: string;
+  speech?: NovaSpeechStatus;
   /** Full local result for visual review; never sent to the speech model automatically. */
   displayText?: string;
   pendingAction?: NovaActionPreview;
@@ -2489,6 +2507,7 @@ export interface NovaResponse {
   sdp?: string;
   text?: string;
   audio?: number[];
+  speechLanguage?: string;
   conversationId?: string;
   /** Something the admin should know about this session, for example that notes could not be read. */
   notice?: string;
@@ -3714,7 +3733,7 @@ export interface OpenAdminOSApi {
   ): Promise<QueueMultiTenantAgentBatchResult>;
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
-  nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
+  nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void, onAudio?: (wav: Uint8Array, remainingText?: string) => void): Promise<NovaResponse>;
   novaScreen(request: NovaScreenRequest): Promise<NovaScreenResponse>;
   novaWindow(
     action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings" | "draft-screen-question" | "take-screen-question",

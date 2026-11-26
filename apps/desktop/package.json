@@ -20,13 +20,14 @@
     "build:apple-foundation-helper": "node ../../scripts/build-apple-foundation-helper.mjs",
     "build:packages": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/runtime",
     "build:electron": "node ../../scripts/clean-desktop-electron-build.mjs && tsc -p tsconfig.electron.json",
-    "dist": "npm run build && electron-builder",
+    "dist": "node scripts/dist-desktop.mjs",
     "preview": "vite preview",
     "pretest": "node -e \"require('electron')\"",
     "test": "node --import tsx --test \"electron/**/*.test.ts\"",
     "pretest:renderer": "npm run build -w @openadminos/agent-sdk",
     "test:renderer": "vitest run --config vitest.config.ts",
-    "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.electron.test.json --noEmit"
+    "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.electron.test.json --noEmit",
+    "build:nova-speech": "node scripts/build-whisper.mjs"
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
@@ -39,9 +40,11 @@
     "@openadminos/connector-whatsapp-web": "0.8.0",
     "@openadminos/runtime": "0.8.0",
     "electron-updater": "^6.6.2",
+    "onnxruntime-node": "1.22.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router": "^8.3.0"
+    "react-router": "^8.3.0",
+    "tinyld": "1.3.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
@@ -74,7 +77,12 @@
       "dist-electron/**/*",
       "!dist-electron/**/*.test.js",
       "!dist-electron/**/*.test.js.map",
+      "!**/node_modules/onnxruntime-node/bin/napi-v6/!(${platform})/**/*",
+      "!**/node_modules/onnxruntime-node/bin/napi-v6/${platform}/!(${arch})/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/onnxruntime-node/bin/**/*"
     ],
     "extraResources": [
       {
@@ -104,6 +112,10 @@
       {
         "from": "build/menu-bar-iconTemplate@2x.png",
         "to": "menu-bar-iconTemplate@2x.png"
+      },
+      {
+        "from": "build/nova-speech",
+        "to": "native/nova-speech"
       }
     ],
     "publish": [
@@ -121,7 +133,8 @@
       "binaries": [
         "Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper",
         "Contents/Resources/native/mxc-sdk/bin/arm64/mxc-exec-mac",
-        "Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app/Contents/MacOS/OpenAdminOS Menu Bar Helper"
+        "Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app/Contents/MacOS/OpenAdminOS Menu Bar Helper",
+        "Contents/Resources/native/nova-speech/whisper-server"
       ],
       "extraFiles": [
         {

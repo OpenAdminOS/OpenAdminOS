@@ -11,7 +11,7 @@ import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw }
  * and a loopback address missing from NO_PROXY would then reach the proxy,
  * question included. This connects with a fresh agent per request, which
  * reads no proxy setting. A redirect is never followed: a 3xx is returned
- * as it came. Bodies are strings only, which is all retrieval sends. As with
+ * as it came. Bodies may be strings or byte arrays. As with
  * fetch, a gzip, deflate (zlib-wrapped or raw) or br body is decoded, and a connection idle for
  * `loopbackTransport.idleTimeoutMs` (5 minutes, fetch's own headers and body
  * timeouts) fails with a TimeoutError, before the headers or while the body
@@ -19,8 +19,8 @@ import { createBrotliDecompress, createGunzip, createInflate, createInflateRaw }
  */
 export function directFetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
   const url = new URL(input instanceof Request ? input.url : String(input));
-  if (init.body !== undefined && init.body !== null && typeof init.body !== "string") {
-    return Promise.reject(new TypeError("directFetch sends string bodies only."));
+  if (init.body != null && typeof init.body !== "string" && !(init.body instanceof Uint8Array)) {
+    return Promise.reject(new TypeError("directFetch sends strings and byte arrays."));
   }
   const body = init.body ?? undefined;
   const headers: Record<string, string> = Object.fromEntries(new Headers(init.headers).entries());

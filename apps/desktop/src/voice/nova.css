@@ -594,3 +594,25 @@
   min-height: 0;
   overflow: auto;
 }
+
+.nova-local-setup select,
+.nova-question input {
+  width: 100%;
+  min-width: 0;
+}
+.nova-orb[hidden] {
+  display: none;
+}
+.nova-panel-expanded[data-active="true"] > .nova-question {
+  position: absolute;
+  left: 24px;
+  bottom: 104px;
+  width: min(350px, calc(50% - 40px));
+}
+@media (max-width: 600px) {
+  .nova-panel-expanded[data-active="true"] > .nova-question {
+    left: 12px;
+    bottom: 88px;
+    width: calc(100% - 24px);
+  }
+}

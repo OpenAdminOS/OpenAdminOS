@@ -758,3 +758,122 @@ it("releases the bubble microphone when the organization changes", async () => {
   expect(track.stop).toHaveBeenCalledOnce();
   expect(screen.getByRole("button", { name: "Talk" })).toBeVisible();
 });
+
+it("keeps a typed fallback local when the selected voice provider is hosted", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const onHostedChange = vi.fn();
+  const bridge = makeMockBridge({
+    nova: vi.fn(async request => {
+      if (request.action === "start") return { sessionId: "typed-local" };
+      if (request.action === "answer") return { text: "The sample device is ready." };
+      if (request.action === "speak") throw new Error("Set up local voice to use Kokoro.");
+      return {};
+    }),
+  });
+  renderRoute(<Nova onHostedChange={onHostedChange} />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await openNovaForTest();
+  const question = screen.getByLabelText("Type a question");
+  await user.type(question, "What needs attention?");
+  await user.click(screen.getByRole("button", { name: "Ask Nova" }));
+  expect((await screen.findAllByText("The sample device is ready."))[0]).toBeVisible();
+  expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "start", mode: "local" }));
+  expect(onHostedChange).not.toHaveBeenCalledWith(true);
+});
+
+it("plays a local speech chunk before synthesis finishes and ignores chunks after Stop", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  vi.stubGlobal("URL", { revokeObjectURL: vi.fn(), createObjectURL: vi.fn(() => "blob:sample") });
+  let receiveAudio: ((audio: Uint8Array) => void) | undefined;
+  let resolveSpeech: (() => void) | undefined;
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (request, _activity, onAudio) => {
+      if (request.action === "start") return { sessionId: "local-stream" };
+      if (request.action === "answer") return { text: "The sample device is ready." };
+      if (request.action === "speak") {
+        receiveAudio = onAudio;
+        await new Promise<void>(resolve => { resolveSpeech = resolve; });
+      }
+      return {};
+    }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await openNovaForTest();
+  await user.type(screen.getByLabelText("Type a question"), "What needs attention?");
+  await user.click(screen.getByRole("button", { name: "Ask Nova" }));
+  await waitFor(() => expect(receiveAudio).toBeDefined());
+  act(() => receiveAudio?.(new Uint8Array([1, 2, 3])));
+  expect(play).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "Stop" }));
+  act(() => {
+    receiveAudio?.(new Uint8Array([4, 5, 6]));
+    resolveSpeech?.();
+  });
+  expect(play).toHaveBeenCalledTimes(1);
+  expect(bridge.nova).toHaveBeenCalledWith({ action: "stop" });
+});
+
+it("waits for system voices, selects German locally and reports an utterance error", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const voices = new EventTarget();
+  const getVoices = vi.fn((): Array<{ localService: boolean; lang: string }> => []);
+  const speak = vi.fn<(utterance: SpeechSynthesisUtterance) => void>();
+  vi.stubGlobal("speechSynthesis", Object.assign(voices, { getVoices, speak, cancel: vi.fn() }));
+  vi.stubGlobal("SpeechSynthesisUtterance", class { constructor(readonly text: string) {} });
+  const bridge = makeMockBridge({
+    nova: vi.fn(async request => {
+      if (request.action === "start") return { sessionId: "typed-local" };
+      if (request.action === "answer") return { text: "Zwei Geräte brauchen einen Neustart." };
+      if (request.action === "speak") return { speechLanguage: "de" };
+      return {};
+    }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await openNovaForTest();
+  await user.type(screen.getByLabelText("Type a question"), "Welche Geräte?");
+  await user.click(screen.getByRole("button", { name: "Ask Nova" }));
+  await waitFor(() => expect(getVoices).toHaveBeenCalled());
+  expect(speak).not.toHaveBeenCalled();
+  act(() => {
+    getVoices.mockReturnValue([{ lang: "de-DE", localService: false }, { lang: "de-AT", localService: true }]);
+    voices.dispatchEvent(new Event("voiceschanged"));
+  });
+  expect(await screen.findByText("Speaking with the system voice for German")).toBeVisible();
+  const utterance = speak.mock.calls[0]![0];
+  expect(utterance).toMatchObject({ lang: "de-AT", text: "Zwei Geräte brauchen einen Neustart." });
+  act(() => utterance.onerror?.(new Event("error") as SpeechSynthesisErrorEvent));
+  expect(await screen.findByText("Device voice could not play. Read Nova's answer in the conversation.")).toBeVisible();
+
+});
+
+it("plays queued audio before handing just the unsynthesized remainder to the system voice", async () => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  vi.stubGlobal("URL", { revokeObjectURL: vi.fn(), createObjectURL: vi.fn(() => "blob:sample") });
+  const speak = vi.fn();
+  vi.stubGlobal("speechSynthesis", { speak, cancel: vi.fn(), getVoices: () => [{ localService: true, lang: "en-US" }] });
+  vi.stubGlobal("SpeechSynthesisUtterance", class { constructor(readonly text: string) {} });
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (request, _activity, onAudio) => {
+      if (request.action === "start") return { sessionId: "typed-local" };
+      if (request.action === "answer") return { text: "Intune is ready. Try another check." };
+      if (request.action === "speak") {
+        onAudio?.(new Uint8Array([1, 2, 3]), "Try another check.");
+        throw new Error("Built-in Kokoro could not speak.");
+      }
+      return {};
+    }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await openNovaForTest();
+  await user.type(screen.getByLabelText("Type a question"), "Check devices");
+  await user.click(screen.getByRole("button", { name: "Ask Nova" }));
+  expect(await screen.findByText("Built-in Kokoro could not speak.")).toBeVisible();
+  expect(speak).not.toHaveBeenCalled();
+  act(() => document.querySelector("audio")!.dispatchEvent(new Event("ended")));
+  await waitFor(() => expect(speak).toHaveBeenCalledWith(expect.objectContaining({ text: "Try another check." })));
+});

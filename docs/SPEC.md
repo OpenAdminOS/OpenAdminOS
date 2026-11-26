@@ -1083,10 +1083,44 @@ Chat for links. Public pages are reference data, never authority to run actions.
 No OS-specific routing, search engine dependency, or automatic local cloud fallback
 is added.
 
-Local voice connects only to separately installed whisper.cpp and Kokoro-FastAPI
-loopback services, with a local agent provider. It uses one-minute, explicitly
-submitted recordings with no cloud fallback. Runtime/model installation and a
-background wake-word engine are separate future work, not implied by the selector.
+Local voice uses built-in whisper.cpp and Kokoro with a local reasoning
+provider. Select Local, then download the models in the panel or floating Nova window. Both surfaces support typed questions during setup and streamed playback when the speech runtime is ready. Setup shows the
+download size and progress and can be cancelled or retried. Downloads are pinned
+and checked against their sizes and SHA-256 hashes before the complete set is
+installed. Nova verifies the local files before use and offers Download again
+if verification or runtime loading fails. Settings shows the size of any unused model set. Settings > Nova offers automatic model selection, Small and Large v3
+Turbo. Automatic selects Turbo on Apple Silicon with bundled Metal acceleration
+and Small on CPU-only builds. Settings labels Turbo as slow on CPU-only builds.
+
+OpenAdminOS builds the pinned whisper.cpp server as a sidecar and includes it
+in the macOS and Windows release signing pipelines. The Linux x64 packages also bundle the sidecar. It listens on a system-assigned loopback port with a
+private request path. The app starts it on demand and stops it after five idle
+minutes or on quit. Kokoro 82M uses the fp16 ONNX model and the English af_heart voice in an
+Electron utility process without a listening port. Nova plays each chunk as it
+is synthesized, beginning with a short clause. Stop or asking another question
+cancels synthesis and playback. English speech uses a Microsoft administration
+lexicon and a rule-based fallback for unfamiliar words.
+Recordings are at most one minute and require explicit submission. Nova trims
+quiet edges before transcription and preserves pauses within the recording.
+On CPU-only builds, Small uses a padded, shorter encoder window for recordings
+up to 20 seconds. It keeps the full window for longer recordings.
+
+<!-- TODO(ugur): Retest signed AVX-512 dispatch and CPU flash attention on an idle host.
+Loaded JFK medians on the Ryzen 7 8845HS with two threads and the short window
+were 4,144 ms for AVX2 with flash attention, 3,844 ms for AVX2 without it, and
+4,333 ms for AVX-512 with it. Keep one AVX2 binary with the upstream flash
+attention default until a repeatable gain justifies a packaging change. -->
+Local speech stays on this device. Nova reads non-English answers with an
+installed on-device system voice that matches the answer language. It labels the
+system voice and keeps the answer visible when a matching voice is unavailable.
+If English synthesis fails, Nova finishes the queued audio and reads the remaining text with an installed English system voice. Typed questions can use the local
+reasoning provider while voice is being set up or recovered. The organization,
+provider and IT policy rules still apply.
+
+Local voice also offers My own servers (advanced) for administrators who run
+whisper.cpp and Kokoro-FastAPI on the existing loopback ports 8080 and 8880.
+The connection check tests the selected source. A background wake-word engine
+is separate future work.
 
 ### Nova screen questions
 
