@@ -712,6 +712,24 @@ jobs:
           fi
           "$whisper" --help
 
+      - name: Verify Nova call capture helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Helpers/openadminos-nova-call-capture' -type f -print -quit)"
+          test -n "$helper"
+          test -x "$helper"
+          file "$helper" | grep -q arm64
+          /usr/libexec/PlistBuddy -c 'Print NSAudioCaptureUsageDescription' "${helper%/Helpers/*}/Info.plist"
+          if [ -n "${CSC_LINK:-}" ]; then
+            codesign --verify --strict --verbose=2 "$helper"
+            entitlements="$(codesign -d --entitlements - "$helper")"
+            if [[ "$entitlements" == *com.apple.security.device.audio-input* ]]; then
+              echo "::error::Nova call capture helper has the microphone entitlement."
+              exit 1
+            fi
+          fi
+
       - name: Verify Apple Foundation helper was packaged
         shell: bash
         run: |
