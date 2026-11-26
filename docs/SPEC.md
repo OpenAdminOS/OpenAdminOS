@@ -1163,10 +1163,18 @@ that the selected reasoning model runs on device before starting capture and
 before every answer. It displays text without invoking voice synthesis, chat
 history, files, tools, or tenant services.
 
-**Stop**, closing or hiding the bubble, Mac sleep, quit, losing audio
+**Stop**, closing or hiding the bubble, locking or sleeping the Mac, quit, losing audio
 permission, or switching the organization or provider ends the session and
 clears its data. Capture also stops after five minutes without speech or one
 hour total. Start a fresh session to capture again after any of these events.
+
+Call assist is off by default. On supported Macs, turn it on in Settings >
+Nova. The floating bubble asks for confirmation before every start and
+explains that Nova can hear playback from other apps and tabs. Start requires
+confirmation that the user may capture the call and has informed participants.
+The bubble keeps capture status and **Stop** visible while suggestions are being
+prepared or read. Suggestions appear as plain text within the bubble.
+
 
 ### Nova screen questions
 

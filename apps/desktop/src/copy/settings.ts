@@ -22,6 +22,7 @@ export const SETTINGS_ITEMS = {
   "periodic-cache-refresh": { section: "data", title: "Periodic cache refresh", description: "Schedule local cache refreshes while signed in.", keywords: ["schedule", "interval"] },
   "local-self-training": { section: "chat", title: "Local self-training", description: "Review local agent suggestions and learning files.", keywords: ["learning", "suggestions"] },
   "nova-system-shortcut": { section: "nova", title: "System-wide shortcut", description: "Open Nova over your current app. Press the shortcut again to stop or start listening.", keywords: ["hotkey", "keyboard", "bubble", "voice"] },
+  "nova-call-assist": { section: "nova", title: "Call assist", description: "Show call assist in the Nova bubble. It uses Mac playback and requires an on-device model.", keywords: ["call", "system audio", "playback", "bubble"] },
   "nova-voice": { section: "nova", title: "Voice and greeting", description: "Choose the voice provider and the name Nova greets you with.", keywords: ["openai", "local", "whisper", "kokoro", "name"] },
   "nova-instructions": { section: "nova", title: "Standing instructions", description: "Tell Nova how to answer in every conversation.", keywords: ["preferences", "language", "tone", "prompt"] },
   "nova-organization-addendum": { section: "nova", title: "Organization instructions for Nova", description: "Add instructions that apply in the active organization only.", keywords: ["tenant", "addendum", "organization"] },

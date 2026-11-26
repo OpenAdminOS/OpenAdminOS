@@ -1,3 +1,4 @@
+import { NovaCallAssist } from "./NovaCallAssist";
 import { LocalTurns, localPcmWav } from "./local-turns";
 // Keep the module same-origin in the production Content Security Policy.
 import micWorklet from "./nova-mic.worklet.js?url&no-inline";
@@ -68,12 +69,19 @@ export function Nova({
     navigate = useNavigate();
   const [open, setOpen] = useState(bubble);
   const [question, setQuestion] = useState("");
+  const [callPanel, setCallPanel] = useState(false);
+  const callAssistEnabled = bubble && state.novaCallAssistAvailable && state.novaProfile?.callAssist === true;
+  const showCallPanel = callAssistEnabled && callPanel;
+  useEffect(() => {
+    if (!callAssistEnabled) setCallPanel(false);
+  }, [callAssistEnabled]);
   const [screenQuestion, setScreenQuestion] = useState("");
   const [screenResult, setScreenResult] = useState<NovaScreenResponse>();
   const [screenConsent, setScreenConsent] = useState(false);
   const [screenBusy, setScreenBusy] = useState(false);
   const [screenError, setScreenError] = useState("");
   const screenRevision = useRef(0);
+  const bubbleRoot = useRef<HTMLElement>(null);
   const bubbleTalk = useRef<HTMLButtonElement>(null);
   const bubbleConsent = useRef<HTMLInputElement>(null);
   const bubbleTrustId = useId();
@@ -1466,10 +1474,12 @@ export function Nova({
       stop();
       setError(NOVA_SESSION_CONTEXT_CHANGED);
     } else if (bubble && reason === "nova-bubble-hidden") {
+      setCallPanel(false);
       discardScreen();
       startRequested.current = false;
       stop();
     } else if (bubble && reason === "nova-bubble-toggle") {
+      if (showCallPanel) return;
       if (holdMode && (phaseRef.current === "connecting" || recorder.current?.state === "recording")) {
         releaseTalk();
         return;
@@ -1629,7 +1639,7 @@ export function Nova({
       void api?.novaWindow(action, route ?? transcript).catch(error => setError(voiceErrorMessage(error)));
     };
     return (
-      <section className="nova-bubble" data-screen-preview={screenResult?.status === "preview"} aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
+      <section ref={bubbleRoot} className="nova-bubble" data-screen-preview={screenResult?.status === "preview"} aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
         onKeyDown={event => {
           if (event.key === "Escape") { event.preventDefault(); windowAction("hide"); }
           if (event.key !== "Tab") return;
@@ -1646,9 +1656,12 @@ export function Nova({
         </header>
         <div className="nova-bubble-context">
           <div>{organization}</div>
-          <div id={bubbleTrustId}>{trustDisclosure}</div>
+          <div id={bubbleTrustId}>{showCallPanel ? "On this device" : trustDisclosure}</div>
         </div>
-        {screenResult?.status === "preview" ? screenControls : <>
+        {showCallPanel ? <NovaCallAssist close={() => {
+          setCallPanel(false);
+          requestAnimationFrame(() => bubbleRoot.current?.querySelector<HTMLButtonElement>("[data-call-start]")?.focus());
+        }} /> : screenResult?.status === "preview" ? screenControls : <>
         <div className="nova-bubble-voice">
           <span ref={element => { orb.current = element; }} className="nova-orb" data-phase={error ? "error" : muted ? "muted" : phase} aria-hidden="true">
             <span className="nova-orb-core"><NovaOrbArtwork /></span>
@@ -1716,6 +1729,11 @@ export function Nova({
             <Button size="sm" type="submit" disabled={!question.trim() || active && (phase !== "listening" || mode === "local" && !localHandsFree && recorder.current?.state !== "recording")}>Ask</Button>
           </form>
           {screenControls}
+          {callAssistEnabled && !active && <Button data-call-start size="sm" variant="secondary" onClick={() => {
+            stop();
+            discardScreen();
+            setCallPanel(true);
+          }}>Start call assist</Button>}
           <Button size="sm" variant="secondary" onClick={() => windowAction("open-main")}>Open in OpenAdminOS</Button>
         </footer>
         </>}

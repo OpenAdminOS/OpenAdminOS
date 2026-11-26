@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
 import type { NovaActivity, OpenAdminOSApi } from "@openadminos/agent-sdk";
 
-type BubbleApi = Pick<OpenAdminOSApi, "platform" | "getAppState" | "getGraphCacheStatus" | "nova" | "novaWindow" | "novaScreen" | "onAppStateChanged">;
+type BubbleApi = Pick<OpenAdminOSApi, "platform" | "getAppState" | "getGraphCacheStatus" | "nova" | "novaWindow" | "novaScreen" | "novaCall" | "onNovaCallChanged" | "onAppStateChanged">;
 const platform = navigator.userAgent.toLowerCase();
 const api: BubbleApi = {
   platform: platform.includes("mac os") ? "macos" : platform.includes("windows") ? "windows" : platform.includes("linux") ? "linux" : "unknown",
@@ -25,6 +25,12 @@ const api: BubbleApi = {
     ipcRenderer.on("openadminos:nova-activity", handler);
     return ipcRenderer.invoke("openadminos:nova", input, streamId)
       .finally(() => ipcRenderer.removeListener("openadminos:nova-activity", handler));
+  },
+  novaCall: request => ipcRenderer.invoke("openadminos:nova-call", request),
+  onNovaCallChanged: listener => {
+    const handler = (_event: unknown, view: import("@openadminos/agent-sdk").NovaCallUpdate) => listener(view);
+    ipcRenderer.on("openadminos:nova-call-changed", handler);
+    return () => ipcRenderer.removeListener("openadminos:nova-call-changed", handler);
   },
   novaScreen: request => ipcRenderer.invoke("openadminos:nova-screen", request),
   novaWindow: (action, payload) => ipcRenderer.invoke("openadminos:nova-window", action, payload),

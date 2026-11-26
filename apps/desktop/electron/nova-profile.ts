@@ -203,6 +203,7 @@ export function sanitizeNovaProfile(value: unknown): NovaProfile | undefined {
     const revisions = pruneRevisions(value.revisions.map(sanitizeRevision).filter((entry): entry is NovaInstructionRevision => entry !== undefined));
     if (revisions.length > 0) profile.revisions = revisions;
   }
+  if (value.callAssist === true) profile.callAssist = true;
   if (value.memoryPaused === true) profile.memoryPaused = true;
   if (value.migratedFromLocalStorage === true) profile.migratedFromLocalStorage = true;
   if (isRecord(value.lastChange) && typeof value.lastChange.id === "string" && value.lastChange.id.length <= 128 && ["settings", "nova-proposal", "revert", "migration", "disconnect"].includes(value.lastChange.via as string))
@@ -334,6 +335,7 @@ export function effectiveNovaProfile(
     ...(sendsPolicy !== undefined ? { connectorSendsPolicy: Array.isArray(sendsPolicy) ? [...sendsPolicy] : sendsPolicy } : {}),
     memoryEnabled: !memoryOff && profile?.memoryPaused !== true,
     memoryPaused: profile?.memoryPaused === true,
+    ...(profile?.callAssist ? { callAssist: true } : {}),
     shortcuts: [...(profile?.shortcuts ?? [])],
     locked: {
       voiceMode: policy?.values.novaVoiceModes !== undefined && allowedVoiceModes.length <= 1,
@@ -430,6 +432,7 @@ const PATCH_KEYS = [
   "saveShortcut",
   "deleteShortcut",
   "memoryPaused",
+  "callAssist",
 ] as const;
 
 function setInstructions(profile: NovaProfile, value: unknown, policy: ManagedPolicyStatus | undefined, context: NovaProfileChangeContext): void {
@@ -590,6 +593,11 @@ export function applyNovaProfilePatch(
   if (change.connectorSends !== undefined) setConnectorSends(profile, change.connectorSends, policy);
   if (change.saveShortcut !== undefined) saveShortcut(profile, change.saveShortcut, context);
   if (change.deleteShortcut !== undefined) deleteShortcut(profile, change.deleteShortcut);
+  if (change.callAssist !== undefined) {
+    if (typeof change.callAssist !== "boolean") throw new NovaProfileError("Call assist must be on or off.");
+    if (change.callAssist) profile.callAssist = true;
+    else delete profile.callAssist;
+  }
   if (change.memoryPaused !== undefined) {
     if (typeof change.memoryPaused !== "boolean") throw new NovaProfileError("Pausing notes must be on or off.");
     // While the IT policy turns notes off, the pause switch is theirs too; resuming would take effect only once the policy goes.

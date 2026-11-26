@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- On supported Macs, enable Nova call assist in Settings to start or stop playback capture and request private suggestions from the floating bubble.
+
 - Nova call assist can transcribe playback locally and suggest text answers from recent speech on demand.
 
 - Add the Apple Silicon playback capture and recovery foundation for Nova call assist.

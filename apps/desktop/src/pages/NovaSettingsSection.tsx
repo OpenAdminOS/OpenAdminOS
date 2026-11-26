@@ -368,6 +368,11 @@ export function NovaSettingsSection() {
           }
         />
         {effective.allowedVoiceModes.includes("local") && !blocked && <LocalSpeechSetup showModel />}
+        {state.novaCallAssistAvailable && <SettingRow
+          id="nova-call-assist"
+          control={<Switch label="Show in bubble" aria-label="Call assist" checked={effective.callAssist === true} disabled={blocked}
+            onCheckedChange={checked => void save({ callAssist: checked })} />}
+        />}
         <SettingRow
           id="nova-instructions"
           stacked

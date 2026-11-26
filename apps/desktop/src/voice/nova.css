@@ -640,3 +640,64 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+
+.nova-bubble > .nova-call-assist {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.nova-call-assist :is(h2, h3) { font-weight: 600; }
+.nova-call-assist p { color: var(--color-text-soft); }
+.nova-call-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.nova-call-agreement {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.nova-call-agreement input { margin-top: 3px; accent-color: var(--color-accent); }
+
+.nova-call-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.nova-call-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.nova-call-status[data-reconnecting="true"] {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.nova-call-answer {
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.nova-call-answer h3 { margin-bottom: 6px; }
+.nova-call-answer p { white-space: pre-wrap; }
+.nova-call-assist .nova-call-error { color: var(--color-danger); }

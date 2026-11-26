@@ -2,7 +2,8 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import type { CaptureState } from "./capture.js";
-import { NovaCallSession, type CallContext, type CallView } from "./session.js";
+import type { NovaCallView } from "@openadminos/agent-sdk";
+import { NovaCallSession, type CallContext } from "./session.js";
 
 const voice = Buffer.alloc(1024);
 voice.writeInt16LE(8000);
@@ -18,7 +19,7 @@ function fixture(t: { after: (run: () => void) => void }, retrieve?: (query: str
   let context: CallContext | undefined;
   let resolveWhisper: ((value: { text: string }) => void) | undefined;
   const prompts: string[] = [];
-  const views: CallView[] = [];
+  const views: NovaCallView[] = [];
   const session = new NovaCallSession({
     context: async () => context,
     capture: (state, pcm) => {

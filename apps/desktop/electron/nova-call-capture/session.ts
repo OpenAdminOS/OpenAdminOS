@@ -1,4 +1,4 @@
-import type { RunLlmApi } from "@openadminos/agent-sdk";
+import type { NovaCallState, NovaCallView, RunLlmApi } from "@openadminos/agent-sdk";
 import { type CaptureState } from "./capture.js";
 
 const frameSamples = 512;
@@ -14,15 +14,6 @@ const retentionMs = 60_000;
 const silenceMs = 5 * 60_000;
 const sessionMs = 60 * 60_000;
 
-type CallState = CaptureState | "idle" | "no-speech" | "time-limit" | "context-changed" | "speech-error";
-export interface CallView {
-  state: CallState;
-  canSuggest: boolean;
-  suggesting: boolean;
-  answer?: string;
-  speechSkipped?: boolean;
-}
-
 export interface CallContext {
   key: string;
   model: () => Promise<Pick<RunLlmApi, "complete">>;
@@ -36,7 +27,7 @@ type Dependencies = {
   vad(signal: AbortSignal): Vad;
   transcriber(signal: AbortSignal): Promise<Transcriber>;
   retrieve(query: string, signal: AbortSignal): Promise<Array<{ text: string }>>;
-  changed(view: CallView): void;
+  changed(view: NovaCallView): void;
   now?: () => number;
 };
 type Segment = { start: number; wav: Buffer };
@@ -101,7 +92,7 @@ export class NovaCallSession {
   private transcriber?: Transcriber;
   private generation?: Generation;
   private context?: CallContext;
-  private state: CallState = "idle";
+  private state: NovaCallState = "idle";
   private transcript: Array<{ start: number; text: string }> = [];
   private suggestion?: AbortController;
   private answer?: { text: string; expires: number };
@@ -117,7 +108,7 @@ export class NovaCallSession {
     this.now = deps.now ?? (() => performance.now());
   }
 
-  view(): CallView {
+  view(): NovaCallView {
     return {
       state: this.state,
       canSuggest: this.state === "capturing" && this.transcript.some(part => part.start > this.now() - retentionMs),
@@ -164,7 +155,7 @@ export class NovaCallSession {
     }
   }
 
-  stop(reason: CallState = "stopped") {
+  stop(reason: NovaCallState = "stopped") {
     if (!this.controller) return;
     this.controller.abort();
     this.controller = undefined;
@@ -268,6 +259,7 @@ export class NovaCallSession {
       return;
     }
     this.resetGeneration();
+    if (state === "reconnecting") this.answer = undefined;
     if (state === "capturing") {
       const controller = new AbortController();
       this.generation = { controller, vad: this.deps.vad(controller.signal), pending: Buffer.alloc(0), scoring: false,

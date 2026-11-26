@@ -551,6 +551,7 @@ function novaSeeds(
   if ((previous?.voiceMode ?? "openai") !== (next?.voiceMode ?? "openai")) changed.push("voiceMode");
   if ((previous?.greetingName ?? "") !== (next?.greetingName ?? "")) changed.push("greetingName");
   if (previous?.globalShortcut !== next?.globalShortcut) changed.push("globalShortcut");
+  if (Boolean(previous?.callAssist) !== Boolean(next?.callAssist)) changed.push("callAssist");
   if (changed.length > 0) {
     seeds.push({
       type: "nova.settings-changed",

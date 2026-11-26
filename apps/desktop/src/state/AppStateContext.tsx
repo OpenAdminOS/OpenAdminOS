@@ -184,10 +184,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   const setState = useCallback((next: SetStateAction<AppState>) => {
     setStateSnapshot(current => {
       const updated = typeof next === "function" ? next(current) : next;
-      // Mutation replies can omit the main process shortcut status.
-      if (updated.novaRegisteredShortcut === undefined && current.novaRegisteredShortcut !== undefined)
-        return { ...updated, novaRegisteredShortcut: current.novaRegisteredShortcut };
-      return updated;
+      // Mutation replies may omit runtime metadata attached by Electron main.
+      return {
+        ...updated,
+        ...(updated.novaRegisteredShortcut === undefined && current.novaRegisteredShortcut !== undefined
+          ? { novaRegisteredShortcut: current.novaRegisteredShortcut } : {}),
+        ...(updated.novaCallAssistAvailable === undefined && current.novaCallAssistAvailable !== undefined
+          ? { novaCallAssistAvailable: current.novaCallAssistAvailable } : {}),
+      };
     });
   }, []);
   const [registryAgents, setRegistryAgents] = useState<RegistryAgentSummary[]>([]);
