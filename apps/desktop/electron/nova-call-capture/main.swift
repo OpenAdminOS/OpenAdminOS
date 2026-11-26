@@ -27,7 +27,8 @@ private func property(_ selector: AudioObjectPropertySelector) -> AudioObjectPro
 }
 
 private func executablePath(_ pid: pid_t) -> String? {
-    var path = [CChar](repeating: 0, count: Int(PROC_PIDPATHINFO_MAXSIZE))
+    // proc_info.h defines PROC_PIDPATHINFO_MAXSIZE as a macro Swift cannot import.
+    var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
     guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return nil }
     return String(cString: path)
 }
