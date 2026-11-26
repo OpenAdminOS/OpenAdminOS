@@ -1,6 +1,3 @@
-export const SOPHOS_PREVIEW_NOTE =
-  "Built from Sophos API documentation. Live tenant testing is pending.";
-
 export interface SophosConnectionRecord {
   tenantId: string;
   connectionId: string;

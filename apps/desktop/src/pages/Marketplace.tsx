@@ -1,4 +1,3 @@
-import { SOPHOS_PREVIEW_NOTE } from "../shared/openAdminOS";
 import { useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -236,7 +235,7 @@ function SophosListingCard() {
         <span aria-hidden="true" className="svc-mark" data-size="lg">SC</span>
         <span className="text-base font-semibold">Sophos Central</span>
       </span>
-      <span className="text-sm text-[var(--color-text-muted)]">{SOPHOS_PREVIEW_NOTE}</span>
+      <span className="text-sm text-[var(--color-text-muted)]">Read endpoint health, alerts, firewall inventory and account health. Plan endpoint isolation, release or scans with typed confirmation.</span>
       <span className="mt-auto text-sm">Connect on Connections</span>
     </button>
   );

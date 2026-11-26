@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { useNavigate } from "react-router";
 
-import { SOPHOS_PREVIEW_NOTE, type SophosChangeKind, type SophosConnectionSummary, type SophosTarget } from "../shared/openAdminOS";
+import type { SophosChangeKind, SophosConnectionSummary, SophosTarget } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { splashtopErrorText } from "./SplashtopConnection";
 import { Modal, ModalHeader } from "./Modal";
@@ -75,7 +75,6 @@ export function SophosConnection({ organizationId, connection, focus }: {
           <h3 ref={heading} tabIndex={-1} className="text-base font-medium">Sophos Central</h3>
           <Badge>Preview</Badge>
         </div>
-        <p className="text-sm text-[var(--color-text-muted)]">{SOPHOS_PREVIEW_NOTE}</p>
         <p className="text-sm text-[var(--color-text-muted)]">Requests go to your Sophos region. If you use a hosted model, Sophos Chat results go to that provider.</p>
         {connection ? (
           <>
