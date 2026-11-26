@@ -55,6 +55,54 @@ export function LocalSpeechSetup({ showModel = false, onChange, openSettings }: 
             <option value="servers">My own servers (advanced)</option>
           </select>
         </label>}
+        {showModel && status.preferences && <fieldset disabled={busy} className="grid gap-2">
+          <legend>Local voice controls</legend>
+          <p>Applies to the next conversation.</p>
+          <label className="nova-field">
+            Voice mode
+            <select value={status.preferences.interaction} onChange={event => void act({
+              action: "speech-preferences",
+              preferences: { ...status.preferences!, interaction: event.target.value as "hands-free" | "hold-to-talk" },
+            })}>
+              <option value="hands-free">Hands-free</option>
+              <option value="hold-to-talk">Hold to talk</option>
+            </select>
+          </label>
+          {status.preferences.interaction === "hands-free" && <>
+            <label className="nova-field">
+              End-of-speech wait
+              <select value={status.preferences.silenceMs} onChange={event => void act({
+                action: "speech-preferences",
+                preferences: { ...status.preferences!, silenceMs: Number(event.target.value) },
+              })}>
+                {![500, 800, 1400].includes(status.preferences.silenceMs) &&
+                  <option value={status.preferences.silenceMs}>Saved setting ({status.preferences.silenceMs} ms)</option>}
+                <option value={500}>Responsive (500 ms)</option>
+                <option value={800}>Balanced (800 ms)</option>
+                <option value={1400}>Relaxed (1400 ms)</option>
+              </select>
+            </label>
+            <label className="nova-field">
+              Microphone inactivity timeout
+              <select value={status.preferences.idleSeconds} onChange={event => void act({
+                action: "speech-preferences",
+                preferences: { ...status.preferences!, idleSeconds: Number(event.target.value) },
+              })}>
+                {![60, 120, 300].includes(status.preferences.idleSeconds) &&
+                  <option value={status.preferences.idleSeconds}>Saved setting ({status.preferences.idleSeconds} seconds)</option>}
+                <option value={60}>1 minute</option>
+                <option value={120}>2 minutes</option>
+                <option value={300}>5 minutes</option>
+              </select>
+            </label>
+          </>}
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={status.preferences.showTimings} onChange={event => void act({
+              action: "speech-preferences", preferences: { ...status.preferences!, showTimings: event.target.checked },
+            })} />
+            Show timings
+          </label>
+        </fieldset>}
         {status.source === "servers" && !showModel && <p>Using your local servers. {openSettings ? <button className="underline" onClick={openSettings}>Change in Settings</button> : <Link className="underline" to="/settings/nova">Change in Settings</Link>}</p>}
         {status.source === "builtin" && <>
           {showModel && <label className="nova-field">
@@ -67,6 +115,7 @@ export function LocalSpeechSetup({ showModel = false, onChange, openSettings }: 
               <option value="turbo">{status.gpuAccelerated ? "Large v3 Turbo" : "Large v3 Turbo · slow on this device"}</option>
             </select>
           </label>}
+          <p>Whisper recognizes speech and Kokoro speaks the answer.</p>
           <strong>{status.ready && status.available ? "Ready" : "Set up local voice"}</strong>
           <p>{status.ready ? "Models are installed on this device." : `Download ${Math.ceil(status.totalBytes / 1_000_000)} MB. Speech models come from Hugging Face.`}</p>
           {!status.available && <p role="status">This build is missing the speech runtime. Install a desktop release or use your own servers.</p>}
@@ -76,7 +125,8 @@ export function LocalSpeechSetup({ showModel = false, onChange, openSettings }: 
               <div className="h-full rounded-full bg-[var(--color-accent)]" style={{ width: `${100 * (status.receivedBytes ?? 0) / status.totalBytes}%` }} />
             </div>
             <p role="status">{Math.floor((status.receivedBytes ?? 0) / 1_000_000)} of {Math.ceil(status.totalBytes / 1_000_000)} MB downloaded</p>
-            <Button onClick={() => void act({ action: "speech-cancel" })}>Cancel download</Button>
+            {openSettings ? <Button onClick={openSettings}>Manage download in Settings</Button> :
+              <Button onClick={() => void act({ action: "speech-cancel" })}>Cancel download</Button>}
           </>}
           {!status.ready && status.available && !downloading && <Button disabled={busy} onClick={() => void act({ action: "speech-install" })}>
             {status.repairNeeded ? "Download again" : status.error ? "Retry download" : "Download models"}

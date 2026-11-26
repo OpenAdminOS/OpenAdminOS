@@ -50,3 +50,26 @@ it("offers Download again for a failed model and shows the unused set size", asy
   await user.click(screen.getByRole("button", { name: "Download again" }));
   expect(nova).toHaveBeenCalledWith({ action: "speech-install" });
 });
+
+it("saves a silence preset and an inactivity preset for the next conversation", async () => {
+  const speech: NovaSpeechStatus = {
+    source: "builtin", model: "auto", selectedModel: "small", gpuAccelerated: false,
+    available: true, ready: true, totalBytes: 0,
+    preferences: { interaction: "hands-free", silenceMs: 800, idleSeconds: 120, showTimings: false },
+  };
+  const nova = vi.fn(async (request: NovaRequest) => {
+    if (request.action === "speech-preferences") speech.preferences = request.preferences;
+    return { speech: { ...speech } };
+  });
+  renderRoute(<LocalSpeechSetup showModel />, { route: "/settings", path: "/settings", bridge: makeMockBridge({ nova }) });
+  const user = userEvent.setup();
+  const silence = await screen.findByLabelText("End-of-speech wait");
+  expect(silence).toHaveValue("800");
+  expect(screen.getByText("Applies to the next conversation.")).toBeVisible();
+  await user.selectOptions(silence, "1400");
+  await user.selectOptions(screen.getByLabelText("Microphone inactivity timeout"), "300");
+  expect(nova).toHaveBeenLastCalledWith({
+    action: "speech-preferences",
+    preferences: { interaction: "hands-free", silenceMs: 1400, idleSeconds: 300, showTimings: false },
+  });
+});

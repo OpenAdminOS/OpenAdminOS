@@ -2455,7 +2455,15 @@ export type NovaScreenResponse =
   | { status: "cancelled" | "permission" }
   | { status: "answered"; text: string }
   | { status: "preview"; id: string; thumbnail: string; text: string; destination: string; consentProvider?: string; emptyOcr?: boolean };
+export interface NovaLocalVoicePreferences {
+  interaction: "hands-free" | "hold-to-talk";
+  silenceMs: number;
+  idleSeconds: number;
+  showTimings: boolean;
+}
+
 export interface NovaSpeechStatus {
+  preferences?: NovaLocalVoicePreferences;
   source: "builtin" | "servers";
   model: "auto" | "small" | "turbo";
   selectedModel: "small" | "turbo";
@@ -2471,6 +2479,8 @@ export interface NovaSpeechStatus {
 
 export type NovaRequest =
   | { action: "speech-status" }
+  | { action: "speech-preferences"; preferences: NovaLocalVoicePreferences }
+  | { action: "vad"; sessionId: string; frames: Float32Array[] }
   | { action: "speech-install" }
   | { action: "speech-cancel" }
   | { action: "speech-configure"; source: NovaSpeechStatus["source"]; model: NovaSpeechStatus["model"] }
@@ -2494,6 +2504,7 @@ export type NovaRequest =
 export interface NovaResponse {
   screenQuestion?: string;
   speech?: NovaSpeechStatus;
+  speechProbabilities?: number[];
   /** Full local result for visual review; never sent to the speech model automatically. */
   displayText?: string;
   pendingAction?: NovaActionPreview;

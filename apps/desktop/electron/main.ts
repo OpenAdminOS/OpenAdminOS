@@ -6707,6 +6707,7 @@ function registerIpcHandlers() {
       model: (...args) => store.novaPublicModel(...args),
     },
     localSpeech,
+    join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"), "native", "nova-vad", "silero_vad.onnx"),
   );
   const screenWindows = () => [mainWindow, novaBubble];
   const novaScreen = createNovaScreenHandler(store, screenWindows, novaScreenCapture(screenWindows, join(
@@ -6717,15 +6718,15 @@ function registerIpcHandlers() {
     novaScreen(event.sender, request)));
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     if (!input || typeof input !== "object") throw new Error("Nova request is missing.");
-    if (event.sender === novaBubble?.webContents && ["configure", "decide-action", "speech-configure"].includes(input.action))
-      throw new Error("Open the main OpenAdminOS window to change voice credentials or review a proposed action.");
+    if (event.sender === novaBubble?.webContents && ["configure", "decide-action", "speech-cancel", "speech-configure", "speech-preferences"].includes(input.action))
+      throw new Error("Open the main OpenAdminOS window to manage voice settings, cancel a model download or review a proposed action.");
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
     const id = event.sender.id;
     if (input.action === "stop") {
       novaWindowSession.release(id, () => { void nova.handle(input); });
       return {};
     }
-    if (!["status", "check", "configure", "speech-status", "speech-install", "speech-cancel", "speech-configure"].includes(input.action) && novaWindowSession.owner !== id)
+    if (!["status", "check", "configure", "speech-status", "speech-install", "speech-cancel", "speech-configure", "speech-preferences"].includes(input.action) && novaWindowSession.owner !== id)
       throw new Error("Start Nova in this window before continuing.");
     return nova.handle(input, activity => {
       if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });

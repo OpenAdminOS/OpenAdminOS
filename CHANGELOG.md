@@ -4,9 +4,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
-- The floating Nova window supports local voice setup, streamed playback and typed questions alongside screen questions.
-
 ### Added
+
+- Nova local voice offers hands-free conversations with interruption, a live microphone indicator, inactivity timeout, and optional response timings. Hold to talk is available in Settings > Nova.
+
+- The floating Nova window supports local voice setup, streamed playback and typed questions alongside screen questions.
 
 - Nova can answer questions about a screen region using on-device OCR, with an editable, byte-counted preview, per-share consent for hosted reasoning, and a question-only handoff to Chat.
 
@@ -27,6 +29,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Keep Chat’s privacy footer on one line and show model destinations, tool hosts, and privacy details on demand.
+- Nova keeps utterances together while a local answer is pending and keeps the floating microphone active when focus changes.
 - Nova keeps a live session while the floating window awaits consent, recovers when its global shortcut is unavailable, and reopens the main window for answer links and conversations.
 - Nova can repair corrupt local voice models and uses more reliable language detection for short answers.
 

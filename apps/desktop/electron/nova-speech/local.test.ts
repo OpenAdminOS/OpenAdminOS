@@ -107,3 +107,16 @@ test("aborting queued speech kills its worker, and a crashed worker can be re-fo
   assert.equal(forks, 3);
   assert.equal(speech.status().ready, true);
 });
+
+test("persists local voice mode, thresholds and timing preferences across source changes", async t => {
+  const { speech, root } = await fixture(t);
+  assert.deepEqual(speech.status().preferences, {
+    interaction: "hands-free", silenceMs: 800, idleSeconds: 120, showTimings: false,
+  });
+  const preferences = { interaction: "hold-to-talk", silenceMs: 900, idleSeconds: 180, showTimings: true };
+  speech.configurePreferences(preferences);
+  speech.configure("servers", "turbo");
+  const reopened = new LocalSpeech(root, join(root, "whisper"));
+  assert.deepEqual(reopened.status().preferences, preferences);
+  assert.throws(() => reopened.configurePreferences({ ...preferences, idleSeconds: 0 }), /supported local voice mode and timeout/);
+});
