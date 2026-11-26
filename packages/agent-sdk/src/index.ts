@@ -2451,7 +2451,7 @@ export type NovaRequest =
   | {
       action: "start";
       mode: "openai" | "local";
-      tenantId: string;
+      tenantId?: string | undefined;
       consent: boolean;
       name?: string;
       sdp?: string;

@@ -976,6 +976,19 @@ provider and checks readiness before microphone access. Local voice checks Whisp
 and Kokoro availability; the optional OpenAI model-access check does not gate Live
 on a separate Models API permission.
 
+Nova can start with No organization selected. The panel keeps that label visible
+during a session. Nova answers public Microsoft feature and how-to questions through
+the selected reasoning provider and the local Microsoft documentation index, within
+the voice input budget. If the index is missing, Nova offers a link to the install
+flow in Settings, Privacy, and says that it answered without consulting documentation.
+If retrieval fails, Nova points to Documentation grounding for recovery. A successful
+search with no matches is reported separately. Saved shortcuts use the same public
+question check as spoken requests. Requests that need organization data or actions
+receive a link to Connections.
+This mode has no Graph, cache, connector, findings or agent access. App navigation
+still follows Nova's navigation capability. Connecting or leaving an organization
+ends the session and releases the microphone.
+
 Common unfiltered inventory, reported encryption and OS-version questions, including
 polite requests and "currently installed OS versions on my devices", use exact
 snapshot metadata/SQL aggregates without a reasoning-model round trip. Filtered or
@@ -1006,6 +1019,12 @@ session and checked before returning results. Local reasoning with hosted voice
 still sends audio and shared context to OpenAI, visibly disclosed in the voice panel.
 Shared context includes Nova's standing instructions and the organization's
 confirmed notes when they are set; the consent says so and records it.
+With No organization selected, audio and Nova's instructions go to OpenAI. If
+the reasoning provider is hosted, the consent names that provider as the destination
+for the question, recent turns and documentation passages. No organization data
+is shared. The device records the consent in the Chat database and the audit log
+without an organization association. The Live model may start speaking before
+the app returns its request to connect an organization.
 OpenAI Voice also grants its reasoning loop a general `web_search` tool after
 session consent. The selected reasoning model decides whether to use tenant tools,
 public research, or both. Public research uses the saved Nova key with OpenAI
@@ -1015,9 +1034,10 @@ session, unavailable to local voice and ordinary Chat requests, limited to three
 searches per question, and cancelled with the session. Nova enables its tool loop
 for these hosted questions even when Chat's separate investigation setting is
 deterministic. Exact inventory shortcuts still avoid unnecessary searches.
-Voice research selects evidence through question-specific tools and does not load
-broad Microsoft documentation passages before tool selection. These passages can
-both exceed the voice budget and redirect public research to an unrelated product.
+Connected hosted research selects evidence through question-specific tools.
+When web search is available, the voice tool loop leaves out the local documentation
+index passages. These passages can exceed the voice budget and redirect public
+research to an unrelated product.
 Other voice investigations bound optional documentation and tool history in UTF-8
 bytes, retaining the newest observation and explicitly marking omitted evidence.
 Natural indirect counts such as “tell me how many devices I have in my tenant”
@@ -1043,6 +1063,9 @@ submitted recordings with no cloud fallback. Runtime/model installation and a
 background wake-word engine are separate future work, not implied by the selector.
 
 ### Nova profile, notes, follow-ups and IT policy (2026-11-12)
+
+Notes and follow-ups require an active organization. Without one, Nova uses the
+device-level settings and standing instructions.
 
 Seven additions, adapted from the assistant in CopilotKit/OpenBot. Nova still
 approves nothing by voice: every send, run, settings change, note and follow-up

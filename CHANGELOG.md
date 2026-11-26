@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Nova answers public Microsoft feature and how-to questions without a connected organization, using the local documentation index when available and explaining when it is missing, unavailable for search, or has no matching passages.
+
 ### Changed
 
 - Stable releases require approval for the exact version. Nightly builds continue automatically while stable approval is pending.

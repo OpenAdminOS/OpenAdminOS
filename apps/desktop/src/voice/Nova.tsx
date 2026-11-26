@@ -1,5 +1,5 @@
 import { providerForModel } from "@openadminos/agent-sdk";
-import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
+import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION, NOVA_PUBLIC_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
 import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
@@ -18,7 +18,7 @@ import {
   type NovaAnswerLink,
 } from "@openadminos/agent-sdk";
 import { OPEN_NOVA_EVENT, type OpenNovaDetail } from "../shared/nova-panel";
-import { NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
+import { NOVA_CHECK_DOCUMENTATION, NOVA_INSTALL_DOCUMENTATION, NOVA_SESSION_CONTEXT_CHANGED, NOVA_SESSION_CONTEXT_ENDED_REASON, NOVA_SESSION_ENDED_BEFORE_CARD, NOVA_SESSION_ENDED_REASON, NOVA_SESSION_PROFILE_CHANGED } from "../shared/nova-session";
 import "./nova.css";
 
 /** What each Nova card names, explains and asks to confirm. Nothing happens before the click. */
@@ -119,6 +119,9 @@ export function Nova({
     state.activeModelByProviderId,
   ).model;
   const reasoning = providerForModel(reasoningEndpoint, reasoningModel);
+  const hostedReasoningDisclosure = reasoning && !reasoning.isLocal
+    ? `Your question, recent turns and documentation passages go to ${reasoning.name} for reasoning.` : "";
+  const publicHostedDisclosure = ["Audio and Nova’s instructions go to OpenAI.", hostedReasoningDisclosure, "No organization data is shared."].filter(Boolean).join(" ");
   const reasoningReady =
     reasoning?.status === "connected" &&
     (mode !== "local" || reasoning.isLocal);
@@ -437,7 +440,7 @@ export function Nova({
     };
   }, [stop]);
   async function start() {
-    if (!api || !state.activeTenantId) return;
+    if (!api) return;
     stop();
     const token = generation.current;
     setError("");
@@ -622,7 +625,7 @@ export function Nova({
           setPendingAction(answer.pendingAction);
           setError(answer.answerError || "");
           appendSpeech("assistant", answer.text || "No answer returned.");
-          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || answer.text);
+          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Answer ready") }, answer.displayText || answer.text);
           setConversation(answer.conversationId);
           setLinks(answer.links ?? []);
           if (answer.route) {
@@ -736,7 +739,7 @@ export function Nova({
             if (output.current) output.current.muted = false;
             dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
               content: "For this conversational turn only, answer the user's introduction or general help question directly using the product description that follows. No lookup is needed; do not say checking or start a task. Later task requests still use normal delegation." }));
-            for (const content of novaCommentaryChunks(NOVA_INTRODUCTION)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+            for (const content of novaCommentaryChunks(state.activeTenantId ? NOVA_INTRODUCTION : NOVA_PUBLIC_INTRODUCTION)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
           }
           return;
         }
@@ -802,7 +805,7 @@ export function Nova({
           const result =
             answer.text || "No answer available. Open Chat for details.";
           completedResult.current = result;
-          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || result);
+          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Answer ready") }, answer.displayText || result);
           setPhase("listening");
           for (const chunk of novaCommentaryChunks(result))
             dc.send(
@@ -1106,14 +1109,16 @@ export function Nova({
               Close
             </Button>
           </div>
-          <p className="nova-tenant text-xs text-[var(--color-text-muted)]">
+          <p className="nova-tenant text-xs text-[var(--color-text-muted)]" data-no-organization={!state.activeTenantId}>
             {state.tenants.find((t) => t.id === state.activeTenantId)
-              ?.displayName || "No tenant selected"}{" "}
+              ?.displayName || "No organization"}{" "}
             · {location.pathname.split("/")[1] || "Chat"}
           </p>
           <p className="nova-trust text-xs text-[var(--color-accent)]">
             {mode === "openai"
-              ? "Hosted voice + web search · audio, shared context and searches go to OpenAI"
+              ? state.activeTenantId
+                ? "Hosted voice + web search · audio, shared context and searches go to OpenAI"
+                : `Hosted voice · ${publicHostedDisclosure}`
               : "Local voice · audio stays on this device"}
           </p>
           {!active && (
@@ -1143,19 +1148,19 @@ export function Nova({
               )}
               <div className="nova-readiness">
                 <p>
-                  <strong>Tenant reasoning</strong> ·{" "}
+                  <strong>{state.activeTenantId ? "Tenant reasoning" : "Reasoning provider"}</strong> ·{" "}
                   {reasoning?.name || "Not selected"}
                   {reasoningModel ? ` · ${reasoningModel}` : ""}
                 </p>
                 <p>
                   {reasoningReady
-                    ? "Ready to retrieve permitted tenant data."
+                    ? state.activeTenantId ? "Ready to retrieve permitted tenant data." : "Ready to answer public Microsoft product questions."
                     : "Connect a reasoning provider in Settings before starting voice."}
                 </p>
                 <p>
                   {mode === "openai"
-                    ? "The voice key powers speech. Tenant answers use the reasoning provider above."
-                    : "Whisper recognizes speech and Kokoro speaks the answer. Tenant answers use the local reasoning provider above."}
+                    ? "The voice key powers speech. Answers use the reasoning provider above."
+                    : "Whisper recognizes speech and Kokoro speaks the answer. Answers use the local reasoning provider above."}
                 </p>
                 {!reasoningReady && (
                   <Button
@@ -1184,7 +1189,6 @@ export function Nova({
                 voiceOff ||
                 checking ||
                 savingKey ||
-                !state.activeTenantId ||
                 (mode === "openai" && (!hasKey || !consent)))
             }
             aria-label={active ? "Stop Nova" : "Start Nova"}
@@ -1265,7 +1269,7 @@ export function Nova({
                 Voice settings
               </button>
             )}
-            {state.novaFollowUpsPending ? (
+            {state.activeTenantId && state.novaFollowUpsPending ? (
               <button
                 type="button"
                 className="nova-followups-pending"
@@ -1323,7 +1327,13 @@ export function Nova({
             </Button>
           )}
           {links.length > 0 && (
-            <div className="nova-links flex flex-wrap justify-center gap-2" aria-label="Pages in this answer">
+            <div className={`nova-links flex flex-wrap justify-center gap-2${state.activeTenantId ? "" : " rounded-lg border border-[var(--color-border-soft)] p-3"}`} aria-label="Pages in this answer">
+              {links.some(link => link.label === NOVA_INSTALL_DOCUMENTATION) && (
+                <p className="w-full text-center text-xs">The local documentation index is missing.</p>
+              )}
+              {links.some(link => link.label === NOVA_CHECK_DOCUMENTATION) && (
+                <p className="w-full text-center text-xs">Nova could not search the local documentation index.</p>
+              )}
               {links.map((link) => (
                 <Button key={link.route} size="sm" variant="secondary" onClick={() => { setExpanded(false); navigate(link.route); }}>
                   {link.label}
@@ -1341,16 +1351,22 @@ export function Nova({
           )}
           {!active && (
             <div className="nova-readiness">
-              <p>
-                <strong>Tenant data</strong> ·{" "}
-                {cacheStatus?.resources?.some((r) => r.refreshedAt)
-                  ? "Saved snapshots available"
-                  : "Retrieved when you ask"}
-              </p>
-              <p>
-                Nova fetches missing or stale data for your question. Preloading
-                is optional and keeps large collections on this device.
-              </p>
+              {state.activeTenantId ? (
+                <>
+                  <p>
+                    <strong>Tenant data</strong> ·{" "}
+                    {cacheStatus?.resources?.some((r) => r.refreshedAt)
+                      ? "Saved snapshots available"
+                      : "Retrieved when you ask"}
+                  </p>
+                  <p>
+                    Nova fetches missing or stale data for your question. Preloading
+                    is optional and keeps large collections on this device.
+                  </p>
+                </>
+              ) : (
+                <p>Ask about Microsoft features and how to use them. Notes and follow-ups need a connected organization.</p>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
@@ -1360,7 +1376,7 @@ export function Nova({
                 >
                   {checking ? "Checking…" : "Check voice setup"}
                 </Button>
-                <Button
+                {state.activeTenantId && <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => {
@@ -1369,7 +1385,7 @@ export function Nova({
                   }}
                 >
                   Review cache
-                </Button>
+                </Button>}
               </div>
               {connectionCheck && <p role="status">{connectionCheck}</p>}
             </div>
@@ -1381,9 +1397,11 @@ export function Nova({
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
               />{" "}
-              Allow audio, relevant tenant context and public web research queries
-              to the selected hosted providers for this session.
-              {" "}Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too.
+              {state.activeTenantId ? (
+                <>Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too. {hostedReasoningDisclosure}</>
+              ) : (
+                <>Allow hosted processing for this session. {publicHostedDisclosure}</>
+              )}
             </label>
           )}
           {!active && (settings || (mode === "openai" && !hasKey)) && (
@@ -1403,8 +1421,7 @@ export function Nova({
               {mode === "openai" ? (
                 <>
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    Audio, shared tenant answers and public research queries go to OpenAI.
-                    Nova can choose web search when it needs current information. Agent
+                    {state.activeTenantId ? "Audio, shared tenant answers and public research queries go to OpenAI. Nova can choose web search when it needs current information." : publicHostedDisclosure} Agent
                     reasoning uses{" "}
                     {
                       state.providers.find(

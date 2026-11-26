@@ -563,6 +563,54 @@ describe("Nova settings in the store", () => {
     }
   });
 
+  it("uses only device instructions for an explicit null profile scope", async () => {
+    const fixture = await makeStore();
+    try {
+      const organizationId = (await fixture.store.getAppState()).activeOrganizationId!;
+      await fixture.store.handleNovaProfile({ action: "save", patch: { instructions: "Device instructions.", addendum: { organizationId, text: "Organization instructions." } } });
+      assert.equal((await fixture.store.novaProfile()).effective.addendum, "Organization instructions.");
+      const profile = (await fixture.store.novaProfile(null)).effective;
+      assert.equal(profile.instructions, "Device instructions.");
+      assert.equal(profile.addendum, "");
+      assert.equal(profile.organizationId, undefined);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("stores no-organization consent in Chat and rebuilds its audit event after an audit write failure", async t => {
+    const fixture = await makeStore();
+    const audit = fixture.store["auditLog"];
+    const input = {
+      sessionId: "public-session", acknowledgedAt: "2026-11-12T10:00:00.000Z",
+      voiceModel: "gpt-live-1", reasoningProviderId: "ollama" as const,
+      includesProfile: false, includesMemory: false,
+    };
+    try {
+      const append = t.mock.method(audit, "appendOrKeep", () => { throw new Error("Audit disk unavailable"); });
+      const pending = t.mock.method(audit, "pendingPersisted", () => false);
+      assert.throws(() => fixture.store.recordNovaVoiceConsent(input), /could not record your consent/);
+      const [record] = fixture.store["requireIntelligenceStore"]().listHostedProviderConsentAuditEvents();
+      assert.ok(record);
+      assert.equal(record.tenantId, null);
+      assert.equal(record.payload.organizationScope, "none");
+      assert.deepEqual(record.payload.tenantIds, []);
+      append.mock.restore();
+      pending.mock.restore();
+
+      await fixture.store.recordAuditLogAtStartup();
+      const exported = await fixture.store.exportAuditLog({ format: "json" });
+      const document = JSON.parse(exported.content);
+      const consent = document.events.find((event: { type: string }) => event.type === "hosted-provider.consent");
+      assert.equal(consent?.tenantId, undefined);
+      assert.equal(consent?.actor.kind, "local-admin");
+      assert.equal(consent?.details.organizationScope, "none");
+      assert.equal(consent?.details.sessionId, input.sessionId);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("records the Nova voice consent in the audit log", async () => {
     const fixture = await makeStore();
     try {

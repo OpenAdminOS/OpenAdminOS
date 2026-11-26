@@ -2740,7 +2740,7 @@ export class IntuneChatService {
     // A closing tenant ends the send here. Stop pressed while providers were still being read goes on to the
     // designed cancelled answer below, never out of the send as an abort error.
     if (!userSignal?.aborted) options.signal?.throwIfAborted();
-    // Nova keeps requiring a tenant.
+    // Nova routes public voice answers outside the tenant investigation pipeline.
     if (noTenant && (options.voice || options.scope)) {
       throw new Error("Nova voice needs an organization. Connect Microsoft 365, or ask in Chat, which answers without one.");
     }
