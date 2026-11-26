@@ -97,8 +97,9 @@ describe("policy parsing", () => {
         registryInstallCounts: "on",
         novaVoiceModes: ["local"],
         novaInstructions: "Answer in short sentences.",
-        novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
+        novaCapabilities: { webSearch: false, screenQuestions: false, connectorSends: ["outlook"] },
         novaMemory: "off",
+        novaScreen: "local",
       }),
     });
     assert.ok(policy);
@@ -114,8 +115,9 @@ describe("policy parsing", () => {
       registryInstallCounts: "on",
       novaVoiceModes: ["local"],
       novaInstructions: "Answer in short sentences.",
-      novaCapabilities: { webSearch: false, connectorSends: ["outlook"] },
+      novaCapabilities: { webSearch: false, screenQuestions: false, connectorSends: ["outlook"] },
       novaMemory: "off",
+      novaScreen: "local",
     });
     // No lock list: every key the file sets is locked.
     assert.deepEqual(policy.locked, [...MANAGED_POLICY_SETTING_KEYS]);

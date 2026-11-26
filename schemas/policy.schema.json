@@ -99,9 +99,11 @@
           ]
         },
         "startAgents": { "type": "boolean", "description": "Preparing agent runs, always confirmed with a click." },
+        "screenQuestions": { "type": "boolean", "description": "Reading a selected screen area on request." },
         "navigation": { "type": "boolean", "description": "Opening app pages on request." }
       }
     },
+    "novaScreen": { "enum": ["off", "local", "any"], "description": "Controls screen questions and their reasoning destination." },
     "novaMemory": {
       "enum": ["off"],
       "description": "\"off\" turns Nova's notes off: none are added, and saved notes are kept but never reach a prompt."
@@ -124,7 +126,7 @@
       "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "splashtop-kb", "splashtop-packr-kb", "endoflife-ai"]
     },
     "settingKey": {
-      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan", "automaticNetworkRequests", "registryInstallCounts", "novaVoiceModes", "novaInstructions", "novaCapabilities", "novaMemory"]
+      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan", "automaticNetworkRequests", "registryInstallCounts", "novaVoiceModes", "novaInstructions", "novaCapabilities", "novaMemory", "novaScreen"]
     }
   }
 }

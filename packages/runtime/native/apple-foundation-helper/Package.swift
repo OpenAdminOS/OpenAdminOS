@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
   name: "OpenAdminOSAppleFoundationHelper",
   platforms: [
-    .macOS(.v26)
+    .macOS(.v13)
   ],
   products: [
     .executable(

@@ -20,12 +20,12 @@ function view(effective: Partial<EffectiveNovaProfile> = {}, rest: Partial<NovaP
       instructions: "",
       instructionsSource: "none",
       addendum: "",
-      capabilities: { webSearch: true, startAgents: true, navigation: true },
+      capabilities: { webSearch: true, startAgents: true, navigation: true, screenQuestions: true },
       connectorSends: {},
       memoryEnabled: true,
       memoryPaused: false,
       shortcuts: [],
-      locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: false },
+      locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false, screenQuestions: false }, connectorSends: false, memory: false },
       ...effective,
     },
     revisions: [],
@@ -79,7 +79,7 @@ describe("Settings, Nova", () => {
   });
 
   it("shows instructions the IT department locked as read-only", async () => {
-    setup(view({ instructions: "IT text.", instructionsSource: "policy", locked: { voiceMode: true, instructions: true, capabilities: { webSearch: true, startAgents: false, navigation: false }, connectorSends: false, memory: false }, allowedVoiceModes: ["local"], voiceMode: "local" }));
+    setup(view({ instructions: "IT text.", instructionsSource: "policy", locked: { voiceMode: true, instructions: true, capabilities: { webSearch: true, startAgents: false, navigation: false, screenQuestions: false }, connectorSends: false, memory: false }, allowedVoiceModes: ["local"], voiceMode: "local" }));
     const box = await screen.findByLabelText("Nova standing instructions");
     expect(box).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: "Save instructions" })).not.toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("Settings, Nova", () => {
   });
 
   it("shows organization instructions read-only while the IT department locks the instructions, and the profile limits", async () => {
-    setup(view({ instructions: "IT text.", instructionsSource: "policy", locked: { voiceMode: false, instructions: true, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: false } }));
+    setup(view({ instructions: "IT text.", instructionsSource: "policy", locked: { voiceMode: false, instructions: true, capabilities: { webSearch: false, startAgents: false, navigation: false, screenQuestions: false }, connectorSends: false, memory: false } }));
     const addendum = await screen.findByLabelText(/^Nova instructions for /);
     expect(addendum).toHaveAttribute("readonly");
     expect(screen.queryByRole("button", { name: /^Save for / })).not.toBeInTheDocument();
@@ -194,7 +194,7 @@ describe("Settings, Nova, notes and follow-ups", () => {
   });
 
   it("disables the notes switch when the IT policy turns notes off", async () => {
-    setupRecords({ notes: [], followUps: [] }, view({ memoryEnabled: false, locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: true } }));
+    setupRecords({ notes: [], followUps: [] }, view({ memoryEnabled: false, locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false, screenQuestions: false }, connectorSends: false, memory: true } }));
     expect(await screen.findByRole("switch", { name: /Use notes/ })).toBeDisabled();
     expect(screen.getByText(/Your IT department turned Nova notes off/)).toBeInTheDocument();
   });
@@ -391,7 +391,7 @@ describe("Settings, Nova, kept current", () => {
 
   it("keeps unsaved instructions when another switch is saved", async () => {
     const novaProfile = vi.fn(async (request: Parameters<NonNullable<typeof window.openAdminOS>["novaProfile"]>[0]) =>
-      request.action === "save" ? view({ capabilities: { webSearch: true, startAgents: false, navigation: true } }) : view());
+      request.action === "save" ? view({ capabilities: { webSearch: true, startAgents: false, navigation: true, screenQuestions: true } }) : view());
     const bridge = makeMockBridge({ novaProfile, listConnectors: vi.fn(async () => []) }, organizations());
     renderWithAppState(<NovaSettingsSection />, { bridge });
     const user = userEvent.setup();

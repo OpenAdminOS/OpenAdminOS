@@ -351,8 +351,8 @@ describe("Command Palette Nova shortcuts", () => {
       bridge: makeMockBridge({}, createMockAppState({
         novaProfile: {
           allowedVoiceModes: ["openai", "local"], greetingName: "", instructions: "", instructionsSource: "none", addendum: "",
-          capabilities: { webSearch: true, startAgents: true, navigation: true }, connectorSends: {}, memoryEnabled: true, memoryPaused: false,
-          locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false }, connectorSends: false, memory: false },
+          capabilities: { webSearch: true, startAgents: true, navigation: true, screenQuestions: true }, connectorSends: {}, memoryEnabled: true, memoryPaused: false,
+          locked: { voiceMode: false, instructions: false, capabilities: { webSearch: false, startAgents: false, navigation: false, screenQuestions: false }, connectorSends: false, memory: false },
           shortcuts: [{ id: "s1", name: "Morning check", prompt: "How many devices are noncompliant?", createdAt: "2026-11-12T08:00:00.000Z" }],
         },
       })),

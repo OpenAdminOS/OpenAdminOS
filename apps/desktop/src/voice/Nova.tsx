@@ -1,3 +1,5 @@
+import { novaScreenQuestion } from "../shared/nova-command";
+import type { NovaScreenResponse } from "@openadminos/agent-sdk";
 import { novaKeyLabel } from "../shared/nova-keyboard";
 import { providerForModel } from "@openadminos/agent-sdk";
 import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION, NOVA_PUBLIC_INTRODUCTION } from "../shared/nova-conversation";
@@ -13,6 +15,8 @@ import { useAppState } from "../state";
 import { Button } from "../components/Button";
 import {
   resolveProviderDefaultModel,
+  NOVA_SCREEN_TEXT_BYTES,
+  NOVA_SCREEN_QUESTION_BYTES,
   type GraphCacheStatus,
   type NovaActivity,
   type NovaActionPreview,
@@ -57,6 +61,12 @@ export function Nova({
     navigate = useNavigate();
   const [open, setOpen] = useState(bubble);
   const [question, setQuestion] = useState("");
+  const [screenQuestion, setScreenQuestion] = useState("");
+  const [screenResult, setScreenResult] = useState<NovaScreenResponse>();
+  const [screenConsent, setScreenConsent] = useState(false);
+  const [screenBusy, setScreenBusy] = useState(false);
+  const [screenError, setScreenError] = useState("");
+  const screenRevision = useRef(0);
   const bubbleTalk = useRef<HTMLButtonElement>(null);
   const bubbleConsent = useRef<HTMLInputElement>(null);
   const bubbleTrustId = useId();
@@ -146,7 +156,7 @@ export function Nova({
     ? state.activeTenantId
       ? ["Hosted voice · Audio, relevant tenant context, public web searches, Nova instructions and confirmed notes go to OpenAI.", hostedReasoningDisclosure].filter(Boolean).join(" ")
       : `Hosted voice · ${publicHostedDisclosure}`
-    : ["Local voice · audio stays on this device", hostedReasoningDisclosure].filter(Boolean).join(" ");
+    : ["Local voice · audio stays on this device.", hostedReasoningDisclosure].filter(Boolean).join(" ");
   const consentDisclosure = state.activeTenantId
     ? `Allow audio, relevant tenant context and public web research queries to the selected hosted providers for this session. Your Nova instructions and this organization's confirmed notes, when set, go to OpenAI too. ${hostedReasoningDisclosure}`.trim()
     : `Allow hosted processing for this session. ${publicHostedDisclosure}`;
@@ -493,7 +503,136 @@ export function Nova({
     return unsubscribe;
   }, [api, bubble]);
 
+  async function lookAtScreen(text: string, replacePreview = false) {
+    if (!api?.novaScreen || screenBusy || (!replacePreview && screenResult?.status === "preview")) return;
+    const revision = ++screenRevision.current;
+    stop();
+    setScreenResult(undefined);
+    setScreenError("");
+    setScreenConsent(false);
+    setScreenQuestion(text);
+    setScreenBusy(true);
+    try {
+      if (replacePreview && screenResult?.status === "preview") {
+        await api.novaScreen({ action: "discard", id: screenResult.id });
+      }
+      const result = await api.novaScreen({ action: "capture" });
+      if (revision === screenRevision.current) {
+        setScreenResult(result.status === "cancelled" ? undefined : result);
+      } else if (result.status === "preview") {
+        await api.novaScreen({ action: "discard", id: result.id });
+      }
+    } catch (error) {
+      if (revision === screenRevision.current) setScreenError(voiceErrorMessage(error));
+    } finally {
+      setScreenBusy(false);
+    }
+  }
+
+  function discardScreen() {
+    ++screenRevision.current;
+    if (screenResult?.status === "preview") void api?.novaScreen({ action: "discard", id: screenResult.id }).catch(() => {});
+    setScreenResult(undefined);
+    setScreenError("");
+    setScreenQuestion("");
+    setScreenConsent(false);
+  }
+
+  const screenTextBytes = screenResult?.status === "preview" ? new TextEncoder().encode(screenResult.text).length : 0;
+  const screenQuestionTooLong = new TextEncoder().encode(screenQuestion).length > NOVA_SCREEN_QUESTION_BYTES;
+  const screenTextTooLong = screenTextBytes > NOVA_SCREEN_TEXT_BYTES;
+
+  async function sendScreen() {
+    if (!api || screenBusy || screenResult?.status !== "preview" || screenTextTooLong || screenQuestionTooLong) return;
+    const revision = ++screenRevision.current;
+    setScreenError("");
+    setScreenBusy(true);
+    try {
+      const { id, text } = screenResult;
+      const result = await api.novaScreen({ action: "send", id, text, question: screenQuestion, consent: screenConsent });
+      if (revision === screenRevision.current) setScreenResult(result);
+    } catch (error) {
+      if (revision === screenRevision.current) setScreenError(voiceErrorMessage(error));
+    } finally {
+      setScreenBusy(false);
+    }
+  }
+
+  const screenControls = <section className="nova-screen-controls" aria-label="Screen questions">
+    {!bubble && !screenResult && <form className="nova-bubble-question" onSubmit={event => {
+      event.preventDefault();
+      if (!question.trim()) return;
+      if (novaScreenQuestion(question)) setScreenQuestion(question);
+      else void lookAtScreen(question);
+      setQuestion("");
+    }}>
+      <input aria-label="Question about your screen" placeholder="Question about your screen" value={question}
+        onChange={event => setQuestion(event.target.value)} />
+    </form>}
+    {screenResult?.status !== "preview" && <Button size="sm" variant="secondary" disabled={screenBusy}
+      onClick={() => void lookAtScreen(screenQuestion || question)}>
+      Look at screen
+    </Button>}
+    {screenQuestion && !screenResult && !screenBusy && !screenError && <p role="status">Select Look at screen to choose an area.</p>}
+    {screenBusy && <p role="status">Working on your screen question…</p>}
+    {screenError && <p role="alert">{screenError}</p>}
+    {screenResult?.status === "permission" && <div role="status">
+      <p>Allow OpenAdminOS in Screen Recording, then restart the app. If OpenAdminOS is missing from the list, use the + button to add it.</p>
+      <Button size="sm" onClick={() => void api?.novaScreen({ action: "settings" }).catch(error => setScreenError(voiceErrorMessage(error)))}>Open Screen Recording settings</Button>
+    </div>}
+    {screenResult?.status === "preview" && screenResult.emptyOcr && <div className="nova-screen-preview">
+      <p role="status">No text found in this area.</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => void lookAtScreen(screenQuestion, true)} disabled={screenBusy}>Select again</Button>
+        <Button size="sm" variant="secondary" onClick={discardScreen}>Discard</Button>
+      </div>
+    </div>}
+    {screenResult?.status === "preview" && !screenResult.emptyOcr && <form className="nova-screen-preview" onSubmit={event => { event.preventDefault(); void sendScreen(); }}>
+      <img src={screenResult.thumbnail} alt="Selected screen area" />
+      <fieldset disabled={screenBusy} className="nova-screen-fields">
+        <div className="nova-screen-text-label">
+          <label htmlFor={`${bubbleTrustId}-screen-text`}>Screen text</label>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setScreenResult({ ...screenResult, text: "" })}>Remove text</Button>
+        </div>
+        <textarea id={`${bubbleTrustId}-screen-text`} rows={3} value={screenResult.text} aria-invalid={screenTextTooLong}
+          aria-describedby={`${bubbleTrustId}-screen-limit`}
+          onChange={event => setScreenResult({ ...screenResult, text: event.target.value })} />
+        <small id={`${bubbleTrustId}-screen-limit`}>{screenTextBytes} / {NOVA_SCREEN_TEXT_BYTES} bytes{screenTextTooLong ? ". Shorten the screen text." : ""}</small>
+        <label className="nova-field">Question<input autoFocus value={screenQuestion} maxLength={NOVA_SCREEN_QUESTION_BYTES} aria-invalid={screenQuestionTooLong}
+          onChange={event => setScreenQuestion(event.target.value)} /></label>
+        {screenQuestionTooLong && <p role="alert">Shorten the question to {NOVA_SCREEN_QUESTION_BYTES} bytes.</p>}
+        <p>{screenResult.destination}</p>
+        <p>Nova answers from this text and public documentation, without looking up your organization.</p>
+        {screenResult.consentProvider && <label><input type="checkbox" checked={screenConsent}
+          onChange={event => setScreenConsent(event.target.checked)} /> Allow sending this screen text to {screenResult.consentProvider}</label>}
+        <div className="flex gap-2">
+          <Button size="sm" type="submit" disabled={!screenQuestion.trim() || screenTextTooLong || screenQuestionTooLong || (Boolean(screenResult.consentProvider) && !screenConsent)}>Send</Button>
+          <Button size="sm" type="button" variant="secondary" onClick={discardScreen}>Discard</Button>
+          <Button size="sm" type="button" variant="ghost" onClick={() => void lookAtScreen(screenQuestion, true)}>Select again</Button>
+        </div>
+      </fieldset>
+    </form>}
+    {screenResult?.status === "answered" && <div className="nova-screen-preview">
+      <MarkdownPreview source={screenResult.text} className="nova-markdown" />
+      <div className="flex gap-2">
+        {state.activeTenantId && <Button size="sm" onClick={() => {
+          if (bubble) void api?.novaWindow("draft-screen-question", screenQuestion).catch(error => setScreenError(voiceErrorMessage(error)));
+          else {
+            navigate("/chat", { state: { screenQuestionDraft: screenQuestion } });
+            discardScreen();
+            setOpen(false);
+          }
+        }}>Ask in Chat</Button>}
+        <Button size="sm" variant="secondary" onClick={discardScreen}>Clear answer</Button>
+      </div>
+    </div>}
+  </section>;
+
   async function start(typed?: string) {
+    if (typed && novaScreenQuestion(typed)) {
+      setScreenQuestion(typed);
+      return;
+    }
     if (!api || phaseRef.current !== "idle") return;
     if (!reasoningReady || voiceOff || (mode === "openai" && (!hasKey || !consent))) {
       if (bubble) {
@@ -689,6 +828,11 @@ export function Nova({
             text,
           }, event => { if (token === generation.current) recordActivity(activityId, event); });
           if (token !== generation.current) return;
+          if (answer.screenQuestion) {
+            stop();
+            setScreenQuestion(answer.screenQuestion);
+            return;
+          }
           setPendingAction(answer.pendingAction);
           setError(answer.answerError || "");
           appendSpeech("assistant", answer.text || "No answer returned.");
@@ -866,6 +1010,11 @@ export function Nova({
           )
             return;
           pendingAnswers = 0;
+          if (answer.screenQuestion) {
+            stop();
+            setScreenQuestion(answer.screenQuestion);
+            return;
+          }
           setPendingAction(answer.pendingAction);
           setError(answer.answerError || "");
           setConversation(answer.conversationId);
@@ -1037,6 +1186,7 @@ export function Nova({
       stop();
       setError(NOVA_SESSION_CONTEXT_CHANGED);
     } else if (bubble && reason === "nova-bubble-hidden") {
+      discardScreen();
       startRequested.current = false;
       stop();
     } else if (bubble && reason === "nova-bubble-toggle") {
@@ -1048,6 +1198,14 @@ export function Nova({
         startRequested.current = true;
         setStartSignal(value => value + 1);
       }
+    } else if (!bubble && reason === "nova-screen-draft") {
+      void api?.novaWindow("take-screen-question").then(draft => {
+        if (draft) {
+          discardScreen();
+          setOpen(false);
+          navigate("/chat", { state: { screenQuestionDraft: draft } });
+        }
+      }).catch(error => setError(voiceErrorMessage(error)));
     } else if (!bubble && reason === "nova-open-main") {
       setOpen(true);
       toggleConversation(true);
@@ -1187,11 +1345,11 @@ export function Nova({
       void api?.novaWindow(action, route ?? transcript).catch(error => setError(voiceErrorMessage(error)));
     };
     return (
-      <section className="nova-bubble" aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
+      <section className="nova-bubble" data-screen-preview={screenResult?.status === "preview"} aria-label="Nova" role="dialog" aria-modal="true" tabIndex={-1}
         onKeyDown={event => {
           if (event.key === "Escape") { event.preventDefault(); windowAction("hide"); }
           if (event.key !== "Tab") return;
-          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), a[href], [tabindex='0']"));
+          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea:not(:disabled), a[href], [tabindex='0']"));
           const target = event.shiftKey ? controls[0] : controls.at(-1);
           if (document.activeElement === target) {
             event.preventDefault();
@@ -1206,6 +1364,7 @@ export function Nova({
           <div>{organization}</div>
           <div id={bubbleTrustId}>{trustDisclosure}</div>
         </div>
+        {screenResult?.status === "preview" ? screenControls : <>
         <div className="nova-bubble-voice">
           <span ref={element => { orb.current = element; }} className="nova-orb" data-phase={error ? "error" : muted ? "muted" : phase} aria-hidden="true">
             <span className="nova-orb-core"><NovaOrbArtwork /></span>
@@ -1249,6 +1408,13 @@ export function Nova({
             event.preventDefault();
             const text = question.trim();
             if (!text) return;
+            if (novaScreenQuestion(text)) {
+              setQuestion("");
+              discardScreen();
+              setScreenQuestion(text);
+              setScreenError("");
+              return;
+            }
             if (!active && (!reasoningReady || voiceOff || (mode === "openai" && (!hasKey || !consent)))) {
               void start(text);
               return;
@@ -1260,8 +1426,10 @@ export function Nova({
             <input aria-label="Ask Nova" placeholder="Ask Nova" value={question} maxLength={12000} onChange={event => setQuestion(event.target.value)} />
             <Button size="sm" type="submit" disabled={!question.trim() || active && (phase !== "listening" || mode === "local" && recorder.current?.state !== "recording")}>Ask</Button>
           </form>
+          {screenControls}
           <Button size="sm" variant="secondary" onClick={() => windowAction("open-main")}>Open in OpenAdminOS</Button>
         </footer>
+        </>}
         <audio ref={output} autoPlay />
       </section>
     );
@@ -1290,7 +1458,7 @@ export function Nova({
             if (event.key !== "Tab") return;
             const controls = Array.from(
               panel.current?.querySelectorAll<HTMLElement>(
-                'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]',
+                'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]',
               ) || [],
             ).filter((element) => element.getClientRects().length > 0);
             const first = controls[0],
@@ -1340,6 +1508,7 @@ export function Nova({
                 stop();
                 queuedShortcut.current = undefined;
                 setShortcutNotice("");
+                discardScreen();
                 setOpen(false);
               }}
             >
@@ -1409,6 +1578,7 @@ export function Nova({
               </div>
             </>
           )}
+          {screenControls}
           <button
             ref={element => { orb.current = element; }}
             className="nova-orb"

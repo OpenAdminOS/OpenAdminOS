@@ -211,6 +211,7 @@ type HostedBatchConsentPrompt = {
 
 type IntuneChatRouteState = {
   initialQuestion?: unknown;
+  screenQuestionDraft?: string;
   resumePendingIntent?: PendingIntent;
 };
 
@@ -1458,6 +1459,11 @@ function IntuneChatContent() {
 
   useEffect(() => {
     const routeState = location.state as IntuneChatRouteState | null;
+    if (routeState?.screenQuestionDraft && !loading && activeTenant) {
+      navigate(location.pathname, { replace: true, state: null });
+      setInput(routeState.screenQuestionDraft);
+      return;
+    }
     const resumed = routeState?.resumePendingIntent;
     if (
       resumed?.kind === "chat-send" &&

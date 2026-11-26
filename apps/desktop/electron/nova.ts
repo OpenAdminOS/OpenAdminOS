@@ -2,7 +2,7 @@ import { formatChatDateTime, type ChatDateTimeLocale } from "../src/shared/chat-
 import { activeModelProvider, hostedOllamaDestination, type HostedOllamaDestination } from "@openadminos/agent-sdk";
 import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION, NOVA_PUBLIC_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
-import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
+import { novaScreenQuestion, novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
 import { NOVA_SETTINGS_UNREADABLE, NOVA_VOICE_CONSENT_NOT_KEPT, novaConnectorSetupIssue, prepareNovaAction, prepareNovaFollowUp, prepareNovaNote, prepareNovaProfileChange, readNovaSettings, requireNovaCapability, type NovaActionHost, type NovaSettings, type PreparedNovaAction } from "./nova-actions.js";
 import { novaAttention } from "./nova-attention.js";
 import { hasStrongTenantReference } from "./intune-chat/planner.js";
@@ -547,6 +547,9 @@ export class NovaService {
         session.commandContext = undefined;
         if (!afterStop) return { text: "Stopped. You can ask another question." };
         input.text = afterStop;
+      }
+      if (novaScreenQuestion(input.text)) {
+        return { screenQuestion: input.text, text: "Select a screen area in Nova to continue." };
       }
       if (/^(?:hey|hello|hi) nova[.!?,\s]*$/i.test(input.text.trim())) {
         return {
@@ -1265,6 +1268,7 @@ export function buildNovaInstructions(
   if (!tenant) return [
     ...(profileBlock ? [profileBlock, NOVA_PROFILE_BLOCK_END] : []),
     "You are Nova, the voice of OpenAdminOS. No organization is connected.",
+    "Delegate screen questions to the app and wait for the admin to select an area.",
     "Reply naturally to greetings. Delegate public Microsoft product questions, how-to questions, requests for organization data or actions, and app navigation to the app before answering. Speak the result in the user's language. Never guess organization facts or claim to have performed an action.",
     "Notes and follow-ups require a connected organization.",
   ].join("\n");
@@ -1290,6 +1294,7 @@ export function buildNovaInstructions(
     "If asked whether a tenant is connected, say yes and name the selected tenant. Do not claim that you have no tenant access just because records are not in this prompt.",
     "You access permitted tenant data THROUGH the OpenAdminOS backend. You do not need a separate Microsoft sign-in inside the voice model.",
     `General introduction, available without any lookup: ${NOVA_INTRODUCTION}`,
+    "Delegate screen questions to the app and wait for the admin to select an area.",
     "Conversation comes first: answer greetings, introductions, small talk, and general questions about what you can do directly and naturally. This includes combined questions such as What can you do and what can you help me with. Do not say checking, looking that up, or one moment for these turns; no task has started. Mention abilities without claiming a specific connector is ready. Only delegate a specific configuration check, tenant-data question, research request or action. A conversational turn must not cancel a pending investigation or approval.",
     "Let the user finish their thought, including words after a pause. Your brief acknowledgments such as mm-hmm or okay do not end their request. Being on stage and asking you to say hello to an audience is spoken conversation, not a request to start an agent or send a connector message. Greet the audience naturally without requesting an agent name.",
     "Delegation policy:",

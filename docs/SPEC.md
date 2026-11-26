@@ -1088,6 +1088,37 @@ loopback services, with a local agent provider. It uses one-minute, explicitly
 submitted recordings with no cloud fallback. Runtime/model installation and a
 background wake-word engine are separate future work, not implied by the selector.
 
+### Nova screen questions
+
+Select **Look at screen** in Nova or ask Nova to look at the screen. Nova prompts
+for a region on the display under the pointer. Drag to select, press Enter for
+the whole display, or press Escape to cancel. The selector closes after two
+minutes. On macOS, Nova requests Screen Recording on first use. If access is
+denied, grant it in System Settings and restart OpenAdminOS.
+
+On-device OCR creates editable reference text within a 1,400 UTF-8 byte limit.
+Review the thumbnail and exact text, then select **Send** or **Discard**.
+Each share to a hosted reasoning provider requires explicit consent naming that
+provider. With local reasoning, the text stays on the device even when hosted
+voice is configured. Only the reasoning provider receives the approved text.
+
+Nova keeps capture pixels in memory. Nova keeps extracted text out of Chat
+history and the audit log. Provider adapters may use transient files during
+completion, including the Codex adapter's temporary last-message output file.
+The local audit records consent and sharing metadata, including destination,
+region dimensions, OCR engine and bytes sent.
+
+Screen answers use the selected model and public documentation. Screen
+references are untrusted and cannot authorize actions or identify tenant
+targets. This path offers no Graph or connector tools. With an organization
+active, **Ask in Chat** drafts only the question, and Chat applies its usual
+tenant and provider gates. Apple Vision, Windows OCR and Tesseract run on the
+device. IT may set `novaScreen` to `off`, `local` (on-device reasoning only),
+or `any`. The unmanaged default is `any`. This lets admins use their chosen
+reasoning provider while retaining a preview for every capture and explicit
+consent before each hosted share. The **Screen questions** setting is on by
+default and follows managed policy.
+
 ### Nova profile, notes, follow-ups and IT policy (2026-11-12)
 
 Notes and follow-ups require an active organization. Without one, Nova uses the
@@ -4603,7 +4634,7 @@ OpenAdminOS is open core. The desktop app is MIT and fully functional on its own
 
 **Mobile companion (hard constraint #5 exception).** iOS and Android apps pair with the admin's own desktop instances. The desktop stays the host for tenant tokens, Graph calls, run history, and every write; typed write confirmation and the final apply stay on the requester's desktop. Tracked in #139.
 
-**Managed configuration (local policy file, #176, 2026-11-09).** Reading a policy file on one device is free core; central distribution, MDM-delivered keys and fleet reporting are team features and not built here. The app reads `policy.json` once per launch from a machine path (macOS `/Library/Application Support/OpenAdminOS/`, Windows `%ProgramData%\OpenAdminOS\`, Linux `/etc/openadminos/`) and a user path (macOS `~/Library/Application Support/OpenAdminOS/`, Windows `%APPDATA%\OpenAdminOS\`, Linux `~/.config/openadminos/`); the machine file wins key by key. Format: `schemas/policy.schema.json` (version 1) with `allowedProviders`, `defaultProvider`, `defaultModel`, `allowedPublicReferences` (empty list allows none), `appRegistration` (`clientId`, optional `tenantId`, `label`), `skipFirstRunScan`, the Nova keys `novaVoiceModes`, `novaInstructions`, `novaCapabilities` and `novaMemory` (see "Nova profile, notes, follow-ups and IT policy") and `lock` (setting keys; without it every key the file sets is locked, `[]` locks nothing). Enforcement is in the main process: the provider list leaves out what the policy does not allow, and setting, testing or building a model for such a provider is refused (`ManagedPolicyError`), so Chat, agents, schedules, Office, Nova and drafts all follow it; a locked provider is the only provider and a locked model the only model of it; the MCP host never connects to or calls a public reference the policy does not allow, and the Marketplace hides it; a locked registration is the only one sign-in accepts and cannot be removed. An allowlist that includes `ollama` allows Ollama Cloud models and aliases on a signed-in Ollama. Each Chat send to one requires the usual hosted confirmation. To exclude cloud models while keeping Ollama, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on the device. The lock pins the model name. To exclude Ollama entirely, omit `ollama` from `allowedProviders`. Unlocked defaults apply until the admin changes them. Problems never pass silently: every problem names the file, line and reason in Settings, Providers (IT policy panel) and in a one-time notice per set of problems; a file that is not JSON applies nothing, an invalid key is not applied, and an unknown id in an allowed list is dropped from the list (a typo allows less, never more). The configuration audit records `policy.loaded`, `policy.changed`, `policy.removed` and `policy.invalid` once per change, and provider or model changes made by the policy with `setByPolicy`. First run: the scan checks and offers only allowed providers and keeps the policy's provider selected; with `skipFirstRunScan` and a `defaultProvider`, launch runs the scan's bounded check of that one provider, and when it is ready the scan is skipped and the first run opens at Connect Microsoft 365, then Chat. Changes to the file apply at the next launch; there is no file watcher. Unpackaged builds may point the paths elsewhere with `OPENADMINOS_POLICY_MACHINE_PATH` and `OPENADMINOS_POLICY_USER_PATH`; smoke and capture launches ignore policy files. IT admin guide: `docs/gitbook/getting-started/managed-configuration.md`.
+**Managed configuration (local policy file, #176, 2026-11-09).** Reading a policy file on one device is free core; central distribution, MDM-delivered keys and fleet reporting are team features and not built here. The app reads `policy.json` once per launch from a machine path (macOS `/Library/Application Support/OpenAdminOS/`, Windows `%ProgramData%\OpenAdminOS\`, Linux `/etc/openadminos/`) and a user path (macOS `~/Library/Application Support/OpenAdminOS/`, Windows `%APPDATA%\OpenAdminOS\`, Linux `~/.config/openadminos/`); the machine file wins key by key. Format: `schemas/policy.schema.json` (version 1) with `allowedProviders`, `defaultProvider`, `defaultModel`, `allowedPublicReferences` (empty list allows none), `appRegistration` (`clientId`, optional `tenantId`, `label`), `skipFirstRunScan`, the Nova keys `novaVoiceModes`, `novaInstructions`, `novaCapabilities`, `novaMemory` and `novaScreen` (see the Nova screen questions and profile sections) and `lock` (setting keys; without it every key the file sets is locked, `[]` locks nothing). Enforcement is in the main process: the provider list leaves out what the policy does not allow, and setting, testing or building a model for such a provider is refused (`ManagedPolicyError`), so Chat, agents, schedules, Office, Nova and drafts all follow it; a locked provider is the only provider and a locked model the only model of it; the MCP host never connects to or calls a public reference the policy does not allow, and the Marketplace hides it; a locked registration is the only one sign-in accepts and cannot be removed. An allowlist that includes `ollama` allows Ollama Cloud models and aliases on a signed-in Ollama. Each Chat send to one requires the usual hosted confirmation. To exclude cloud models while keeping Ollama, set `defaultProvider` to `ollama` and lock `defaultModel` to an installed model that runs on the device. The lock pins the model name. To exclude Ollama entirely, omit `ollama` from `allowedProviders`. Unlocked defaults apply until the admin changes them. Problems never pass silently: every problem names the file, line and reason in Settings, Providers (IT policy panel) and in a one-time notice per set of problems; a file that is not JSON applies nothing, an invalid key is not applied, and an unknown id in an allowed list is dropped from the list (a typo allows less, never more). The configuration audit records `policy.loaded`, `policy.changed`, `policy.removed` and `policy.invalid` once per change, and provider or model changes made by the policy with `setByPolicy`. First run: the scan checks and offers only allowed providers and keeps the policy's provider selected; with `skipFirstRunScan` and a `defaultProvider`, launch runs the scan's bounded check of that one provider, and when it is ready the scan is skipped and the first run opens at Connect Microsoft 365, then Chat. Changes to the file apply at the next launch; there is no file watcher. Unpackaged builds may point the paths elsewhere with `OPENADMINOS_POLICY_MACHINE_PATH` and `OPENADMINOS_POLICY_USER_PATH`; smoke and capture launches ignore policy files. IT admin guide: `docs/gitbook/getting-started/managed-configuration.md`.
 
 ---
 

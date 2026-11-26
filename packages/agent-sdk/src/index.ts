@@ -2442,6 +2442,20 @@ export interface NovaAnswerLink {
   route: string;
 }
 
+export const NOVA_SCREEN_TEXT_BYTES = 1400;
+export const NOVA_SCREEN_QUESTION_BYTES = 600;
+
+export type NovaScreenRequest =
+  | { action: "capture" }
+  | { action: "discard"; id: string }
+  | { action: "settings" }
+  | { action: "send"; id: string; question: string; text: string; consent: boolean };
+
+export type NovaScreenResponse =
+  | { status: "cancelled" | "permission" }
+  | { status: "answered"; text: string }
+  | { status: "preview"; id: string; thumbnail: string; text: string; destination: string; consentProvider?: string; emptyOcr?: boolean };
+
 export type NovaRequest =
   | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
   | { action: "status" }
@@ -2461,6 +2475,7 @@ export type NovaRequest =
   | { action: "speak"; sessionId: string; text: string }
   | { action: "transcribe"; sessionId: string; audio: number[] };
 export interface NovaResponse {
+  screenQuestion?: string;
   /** Full local result for visual review; never sent to the speech model automatically. */
   displayText?: string;
   pendingAction?: NovaActionPreview;
@@ -2481,7 +2496,7 @@ export interface NovaResponse {
 
 export type NovaVoiceMode = "local" | "openai";
 /** Nova abilities the admin can turn off. Connector sends are set per connector. */
-export type NovaCapabilityName = "webSearch" | "startAgents" | "navigation";
+export type NovaCapabilityName = "webSearch" | "startAgents" | "navigation" | "screenQuestions";
 /** How a profile change was made; "disconnect" when Disconnect removed an organization's instructions. */
 export type NovaProfileChangeVia = "settings" | "nova-proposal" | "revert" | "migration" | "disconnect";
 
@@ -3700,8 +3715,9 @@ export interface OpenAdminOSApi {
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
+  novaScreen(request: NovaScreenRequest): Promise<NovaScreenResponse>;
   novaWindow(
-    action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings",
+    action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings" | "draft-screen-question" | "take-screen-question",
     payload?: string,
   ): Promise<string | undefined>;
   novaProfile(request: NovaProfileRequest): Promise<NovaProfileView>;

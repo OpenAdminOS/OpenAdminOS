@@ -7893,6 +7893,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (!kept && (!input.tenantId || !keptInChat)) throw new Error(NOVA_VOICE_CONSENT_NOT_KEPT);
   }
 
+  recordNovaScreenShare(consent: boolean, details: { destination: string; width: number; height: number; engine: string; textLength: number }): void {
+    const timestamp = this.clock().toISOString();
+    this.appendAuditEvents([
+      ...(consent ? [{
+        id: `event_${randomUUID()}`, timestamp, type: "nova.screen-consent",
+        source: "nova" as const, details: { destination: details.destination },
+      }] : []),
+      { id: `event_${randomUUID()}`, timestamp, type: "nova.screen-shared", source: "nova", details },
+    ]);
+  }
+
   private activeOrganizationIdOf(persisted: PersistedState): string | undefined {
     return organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId)?.id;
   }

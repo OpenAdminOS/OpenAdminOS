@@ -26,18 +26,8 @@ if (process.platform !== "darwin") {
   stop("Skipping Apple Foundation helper build: not macOS.");
 }
 
-const probe = spawnSync("swift", ["-e", 'import FoundationModels; print("ok")'], {
-  encoding: "utf8",
-});
-
-if (probe.status !== 0) {
-  const detail = (probe.stderr || probe.stdout || "").trim();
-  stop(
-    `Skipping Apple Foundation helper build: FoundationModels.framework is not available.${
-      detail ? ` ${detail}` : ""
-    }`,
-  );
-}
+const swift = spawnSync("swift", ["--version"], { stdio: "ignore" });
+if (swift.status !== 0) stop("Skipping Apple Foundation helper build: Swift is unavailable.");
 
 const build = spawnSync(
   "swift",
