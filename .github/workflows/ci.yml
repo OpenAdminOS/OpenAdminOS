@@ -98,3 +98,18 @@ jobs:
 
       - name: Support issue smoke test
         run: xvfb-run -a node scripts/smoke-report-issue.mjs
+
+  nova-call-capture:
+    name: Compile Nova call capture (Apple Silicon)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compile Core Audio helper
+        run: |
+          test "$(uname -m)" = arm64
+          node scripts/build-nova-call-capture.mjs
+          test -x apps/desktop/build/openadminos-nova-call-capture

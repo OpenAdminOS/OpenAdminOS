@@ -652,6 +652,8 @@ export function makeMockBridge(
     })),
     onConnectorConfirmRequest: vi.fn(() => () => undefined),
     onRegistryRefreshed: vi.fn(() => () => undefined),
+    onNovaCallChanged: vi.fn(() => () => {}),
+    novaCall: vi.fn(async () => ({ state: "idle" as const, canSuggest: false, suggesting: false, revision: 0 })),
     novaScreen: vi.fn(async () => ({ status: "cancelled" as const })),
     novaWindow: vi.fn(async () => undefined),
     onAppStateChanged: vi.fn(() => () => undefined),

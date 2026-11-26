@@ -1446,6 +1446,7 @@ export interface AppState {
   /** Nova's settings with defaults and the IT policy applied. */
   novaProfile?: EffectiveNovaProfile;
   novaRegisteredShortcut?: string | null;
+  novaCallAssistAvailable?: boolean;
   /** Nova follow-ups waiting to run, on this device. */
   novaFollowUpsPending?: number;
   /** Why Nova's notes and follow-ups are unavailable on this device, when openadminos.db cannot be opened. */
@@ -2445,6 +2446,24 @@ export interface NovaAnswerLink {
 export const NOVA_SCREEN_TEXT_BYTES = 1400;
 export const NOVA_SCREEN_QUESTION_BYTES = 600;
 
+export type NovaCallState =
+  | "idle" | "starting" | "waiting-audio" | "capturing" | "reconnecting" | "permission"
+  | "failed" | "stopped" | "no-speech" | "time-limit" | "context-changed" | "speech-error";
+
+export interface NovaCallView {
+  state: NovaCallState;
+  canSuggest: boolean;
+  suggesting: boolean;
+  answer?: string;
+  speechSkipped?: boolean;
+}
+
+export interface NovaCallUpdate extends NovaCallView { revision: number }
+
+export type NovaCallRequest =
+  | { action: "status" | "stop" | "suggest" | "settings" }
+  | { action: "start"; confirmed: boolean };
+
 export type NovaScreenRequest =
   | { action: "capture" }
   | { action: "discard"; id: string }
@@ -2551,6 +2570,7 @@ export interface NovaInstructionRevision {
 
 /** Nova's settings on this device, kept in main-process state. Absent fields use the defaults. */
 export interface NovaProfile {
+  callAssist?: boolean;
   globalShortcut?: string | null;
   voiceMode?: NovaVoiceMode;
   greetingName?: string;
@@ -2572,6 +2592,7 @@ export interface NovaProfile {
 
 /** The profile with defaults and the IT policy applied, as Nova and Settings use it. */
 export interface EffectiveNovaProfile {
+  callAssist?: boolean;
   globalShortcut?: string | null;
   /** Undefined when the IT policy allows no voice mode. */
   voiceMode?: NovaVoiceMode;
@@ -2611,6 +2632,7 @@ export interface NovaProfileView {
 }
 
 export interface NovaProfilePatch {
+  callAssist?: boolean;
   globalShortcut?: string | null;
   voiceMode?: NovaVoiceMode;
   greetingName?: string;
@@ -3746,6 +3768,8 @@ export interface OpenAdminOSApi {
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void, onAudio?: (wav: Uint8Array, remainingText?: string) => void): Promise<NovaResponse>;
   novaScreen(request: NovaScreenRequest): Promise<NovaScreenResponse>;
+  novaCall?(request: NovaCallRequest): Promise<NovaCallUpdate | undefined>;
+  onNovaCallChanged?(listener: (view: NovaCallUpdate) => void): () => void;
   novaWindow(
     action: "ready" | "ready-main" | "claim" | "claim-typed" | "hide" | "open-main" | "open-page" | "take-conversation" | "shortcut-error" | "microphone-settings" | "draft-screen-question" | "take-screen-question",
     payload?: string,

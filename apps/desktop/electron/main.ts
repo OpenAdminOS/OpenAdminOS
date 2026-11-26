@@ -1,3 +1,6 @@
+import { CallCapture, callCaptureExecutable } from "./nova-call-capture/capture.js";
+import { NovaCallSession } from "./nova-call-capture/session.js";
+import { NovaVad } from "./nova-speech/vad.js";
 import { isPlainRecord, requireBoundedString, validateSaveTextFileArgs } from "./save-text-file-args.js";
 import { novaScreenCapture } from "./nova-screen-capture.js";
 import { createNovaScreenHandler } from "./nova-screen.js";
@@ -60,6 +63,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  powerMonitor,
   session,
   shell,
   screen,
@@ -5521,6 +5525,14 @@ async function createWindow({ show = true, route, persistState = true, waitForLo
 }
 
 let novaBubble: BrowserWindow | undefined;
+let novaCall: NovaCallSession | undefined;
+let novaCallRevision = 0;
+let novaCallViewRevision = 0;
+
+function stopNovaCall(reason?: import("@openadminos/agent-sdk").NovaCallState) {
+  novaCallRevision++;
+  novaCall?.stop(reason);
+}
 let novaBubbleOpening = false;
 let novaBubbleReady = false;
 let novaScreenDraft: string | undefined;
@@ -5594,7 +5606,13 @@ async function showOrToggleNovaBubble() {
         }
       });
       const id = bubble.webContents.id;
-      const release = () => novaWindowSession.release(id, () => { void novaService?.handle({ action: "stop" }); });
+      const stopCall = () => stopNovaCall();
+      const release = () => {
+        stopCall();
+        novaWindowSession.release(id, () => { void novaService?.handle({ action: "stop" }); });
+      };
+      bubble.on("hide", stopCall);
+      bubble.on("close", stopCall);
       bubble.webContents.once("destroyed", release);
       bubble.webContents.on("render-process-gone", () => bubble.destroy());
       bubble.webContents.on("did-start-navigation", ({ isSameDocument, isMainFrame }) => {
@@ -6302,7 +6320,7 @@ function registerIpcHandlers() {
     "openadminos:get-companion-launch-settings",
     handleTrusted(() => getCompanionLaunchSettings()),
   );
-  ipcMain.handle("openadminos:get-app-state", handleTrusted(async () => ({ ...await store.getAppState(), novaRegisteredShortcut: novaWindowShortcut.activeKey })));
+  ipcMain.handle("openadminos:get-app-state", handleTrusted(async () => ({ ...await store.getAppState(), novaRegisteredShortcut: novaWindowShortcut.activeKey, novaCallAssistAvailable: Boolean(novaCall) })));
   ipcMain.handle(
     "openadminos:get-scheduler-launch-settings",
     handleTrusted(() => getSchedulerLaunchSettings()),
@@ -6709,6 +6727,58 @@ function registerIpcHandlers() {
     localSpeech,
     join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"), "native", "nova-vad", "silero_vad.onnx"),
   );
+  const executable = callCaptureExecutable(process.resourcesPath, app.isPackaged, app.getAppPath());
+  if (executable) {
+    const vadModel = join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"), "native", "nova-vad", "silero_vad.onnx");
+    novaCall = new NovaCallSession({
+      context: () => store.novaCallContext(),
+      capture: (onState, onPcm) => new CallCapture({ executable, onState, onPcm }),
+      vad: signal => new NovaVad(vadModel, signal),
+      transcriber: signal => localSpeech.openCallTranscriber(signal),
+      retrieve: (query, signal) => store.retrieveNovaCallDocumentation(query, signal),
+      changed: view => {
+        const revision = ++novaCallViewRevision;
+        if (novaBubble && !novaBubble.isDestroyed() && novaBubble.isVisible()) {
+          novaBubble.webContents.send("openadminos:nova-call-changed", { ...view, revision });
+        }
+      },
+    });
+    powerMonitor.on("suspend", () => stopNovaCall());
+    powerMonitor.on("lock-screen", () => stopNovaCall());
+    const resyncCall = () => sendNovaWindowEvent(novaBubble, "nova-call-resumed");
+    powerMonitor.on("resume", resyncCall);
+    powerMonitor.on("unlock-screen", resyncCall);
+    app.once("before-quit", () => stopNovaCall());
+  }
+  ipcMain.handle("openadminos:nova-call", handleTrusted(async (event, request: unknown) => {
+    const bubble = novaBubble;
+    const call = novaCall;
+    const visibility = novaCallRevision;
+    const ownsVisibleBubble = () => visibility === novaCallRevision && bubble === novaBubble && bubble && !bubble.isDestroyed() &&
+      bubble.isVisible() && bubble.webContents === event.sender;
+    if (!call || !ownsVisibleBubble() || !isPlainRecord(request)) {
+      throw new Error("Open the Nova bubble on a supported Mac to use call assist.");
+    }
+    if (request.action === "stop") {
+      stopNovaCall();
+      return { ...call.view(), revision: novaCallViewRevision };
+    }
+    const { effective } = await store.novaProfile();
+    if (!ownsVisibleBubble() || !effective.callAssist) {
+      throw new Error("Turn on call assist in Settings > Nova and open the Nova bubble.");
+    }
+    switch (request.action) {
+      case "status": break;
+      case "start": await call.start(request.confirmed === true); break;
+      case "suggest": await call.suggest(); break;
+      case "settings":
+        await shell.openExternal("x-apple.systempreferences:com.apple.preference.security");
+        break;
+      default: throw new Error("Open the Nova bubble to start call assist.");
+    }
+    if (!ownsVisibleBubble()) return;
+    return { ...call.view(), revision: novaCallViewRevision };
+  }));
   const screenWindows = () => [mainWindow, novaBubble];
   const novaScreen = createNovaScreenHandler(store, screenWindows, novaScreenCapture(screenWindows, join(
     app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"),
@@ -6728,6 +6798,7 @@ function registerIpcHandlers() {
     }
     if (!["status", "check", "configure", "speech-status", "speech-install", "speech-cancel", "speech-configure", "speech-preferences"].includes(input.action) && novaWindowSession.owner !== id)
       throw new Error("Start Nova in this window before continuing.");
+    if (input.action === "speech-configure" || input.action === "speech-install") stopNovaCall("context-changed");
     return nova.handle(input, activity => {
       if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
     }, input.action === "speak" && safeStreamId ? (wav, remainingText) => {
@@ -6802,7 +6873,10 @@ function registerIpcHandlers() {
   ));
   ipcMain.handle("openadminos:nova-profile", handleTrusted(async (_event, request: unknown) => {
     const view = await store.handleNovaProfile(request);
-    if (isPlainRecord(request) && request.action === "save") await registerNovaKey(false, view);
+    if (isPlainRecord(request) && request.action === "save") {
+      if (!view.effective.callAssist) stopNovaCall();
+      await registerNovaKey(false, view);
+    }
     return view;
   }));
   ipcMain.handle("openadminos:nova-records", handleTrusted((_event, request: unknown) => store.handleNovaRecords(request)));
@@ -7694,6 +7768,7 @@ function registerIpcHandlers() {
   // other changes it is told.
   const afterNovaContextChange = async <T,>(state: T, options: { tellPanel: boolean }): Promise<T> => {
     novaTransferredConversation = undefined;
+    stopNovaCall("context-changed");
     sendNovaWindowEvent(novaBubble, "nova-context-changed");
     try {
       const ended = await novaService?.sessionContextChanged();
@@ -8257,6 +8332,7 @@ if (!gotLock) {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
         sendNovaWindowEvent(novaBubble, info.reason);
         if (info.reason === TENANT_CLOSING_REASON) {
+          stopNovaCall("context-changed");
           void novaService?.sessionContextChanged().then((ended) => {
             if (ended) {
               sendNovaWindowEvent(mainWindow, NOVA_SESSION_CONTEXT_ENDED_REASON);
