@@ -13,9 +13,9 @@
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
-    "dev": "npm run build:apple-foundation-helper && npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "npm run build:nova-call-capture && npm run build:apple-foundation-helper && npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dev:renderer": "vite",
-    "build": "npm run build:menu-bar-helper && npm run build:apple-foundation-helper && npm run build:packages && tsc -b && npm run build:electron && vite build",
+    "build": "npm run build:nova-call-capture && npm run build:menu-bar-helper && npm run build:apple-foundation-helper && npm run build:packages && tsc -b && npm run build:electron && vite build",
     "build:menu-bar-helper": "node ../../scripts/build-menu-bar-helper.mjs",
     "build:apple-foundation-helper": "node ../../scripts/build-apple-foundation-helper.mjs",
     "build:packages": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/runtime",
@@ -27,7 +27,8 @@
     "pretest:renderer": "npm run build -w @openadminos/agent-sdk",
     "test:renderer": "vitest run --config vitest.config.ts",
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.electron.test.json --noEmit",
-    "build:nova-speech": "node scripts/build-whisper.mjs"
+    "build:nova-speech": "node scripts/build-whisper.mjs",
+    "build:nova-call-capture": "node ../../scripts/build-nova-call-capture.mjs"
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
@@ -130,16 +131,22 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "notarize": true,
+      "sign": "./scripts/sign-macos.cjs",
       "binaries": [
         "Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper",
         "Contents/Resources/native/mxc-sdk/bin/arm64/mxc-exec-mac",
         "Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app/Contents/MacOS/OpenAdminOS Menu Bar Helper",
-        "Contents/Resources/native/nova-speech/whisper-server"
+        "Contents/Resources/native/nova-speech/whisper-server",
+        "Contents/Helpers/openadminos-nova-call-capture"
       ],
       "extraFiles": [
         {
           "from": "build/menu-bar-helper/OpenAdminOS Menu Bar Helper.app",
           "to": "Library/LoginItems/OpenAdminOS Menu Bar Helper.app"
+        },
+        {
+          "from": "build/openadminos-nova-call-capture",
+          "to": "Helpers/openadminos-nova-call-capture"
         }
       ],
       "target": [
@@ -163,7 +170,8 @@
         }
       ],
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Nova uses the microphone when you start a voice conversation."
+        "NSMicrophoneUsageDescription": "Nova uses the microphone when you start a voice conversation.",
+        "NSAudioCaptureUsageDescription": "Nova listens to audio playing on this Mac when you start call assist."
       },
       "entitlements": "build/entitlements.nova.plist",
       "entitlementsInherit": "build/entitlements.nova.plist"

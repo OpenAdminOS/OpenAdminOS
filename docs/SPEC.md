@@ -1141,6 +1141,20 @@ whisper.cpp and Kokoro-FastAPI on the existing loopback ports 8080 and 8880.
 The connection check tests the selected source. A background wake-word engine
 is separate future work.
 
+### Nova call assist
+
+Call assist uses a private Core Audio playback tap on Apple Silicon Macs
+running macOS 14.2 or later. The helper requests macOS system audio
+permission and excludes OpenAdminOS and audio processes inside its bundle.
+It sends mono 16 kHz PCM to Electron main over a bounded pipe. A change in
+the excluded processes, audio route, or capture format discards the partial
+segment and rebuilds the tap. Nova shows **Reconnecting audio** during up to
+three retries and offers **Start again** when recovery runs out. **Stop**
+closes the pipe and cancels pending retries. A permission error ends capture
+and offers recovery. A tap that only returns zeros shows that Nova is waiting
+for playback and offers the macOS audio permission settings. Pilot access requires verification of the system
+permission prompt and playback exclusion in a signed, notarized Mac install.
+
 ### Nova screen questions
 
 Select **Look at screen** in Nova or ask Nova to look at the screen. Nova prompts
