@@ -1,3 +1,6 @@
+import { CallCapture, callCaptureExecutable } from "./nova-call-capture/capture.js";
+import { NovaCallSession } from "./nova-call-capture/session.js";
+import { NovaVad } from "./nova-speech/vad.js";
 import { isPlainRecord, requireBoundedString, validateSaveTextFileArgs } from "./save-text-file-args.js";
 import { novaScreenCapture } from "./nova-screen-capture.js";
 import { createNovaScreenHandler } from "./nova-screen.js";
@@ -60,6 +63,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  powerMonitor,
   session,
   shell,
   screen,
@@ -5521,6 +5525,7 @@ async function createWindow({ show = true, route, persistState = true, waitForLo
 }
 
 let novaBubble: BrowserWindow | undefined;
+let novaCall: NovaCallSession | undefined;
 let novaBubbleOpening = false;
 let novaBubbleReady = false;
 let novaScreenDraft: string | undefined;
@@ -5594,7 +5599,12 @@ async function showOrToggleNovaBubble() {
         }
       });
       const id = bubble.webContents.id;
-      const release = () => novaWindowSession.release(id, () => { void novaService?.handle({ action: "stop" }); });
+      const release = () => {
+        novaCall?.stop();
+        novaWindowSession.release(id, () => { void novaService?.handle({ action: "stop" }); });
+      };
+      bubble.on("hide", () => novaCall?.stop());
+      bubble.on("close", () => novaCall?.stop());
       bubble.webContents.once("destroyed", release);
       bubble.webContents.on("render-process-gone", () => bubble.destroy());
       bubble.webContents.on("did-start-navigation", ({ isSameDocument, isMainFrame }) => {
@@ -6709,6 +6719,20 @@ function registerIpcHandlers() {
     localSpeech,
     join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"), "native", "nova-vad", "silero_vad.onnx"),
   );
+  const executable = callCaptureExecutable(process.resourcesPath, app.isPackaged, app.getAppPath());
+  if (executable) {
+    const vadModel = join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"), "native", "nova-vad", "silero_vad.onnx");
+    novaCall = new NovaCallSession({
+      context: () => store.novaCallContext(),
+      capture: (onState, onPcm) => new CallCapture({ executable, onState, onPcm }),
+      vad: signal => new NovaVad(vadModel, signal),
+      transcriber: signal => localSpeech.openCallTranscriber(signal),
+      retrieve: (query, signal) => store.retrieveNovaCallDocumentation(query, signal),
+      changed: () => sendNovaWindowEvent(novaBubble, "nova-call-changed"),
+    });
+    powerMonitor.on("suspend", () => novaCall?.stop());
+    app.once("before-quit", () => novaCall?.stop());
+  }
   const screenWindows = () => [mainWindow, novaBubble];
   const novaScreen = createNovaScreenHandler(store, screenWindows, novaScreenCapture(screenWindows, join(
     app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "electron"),
@@ -6728,6 +6752,7 @@ function registerIpcHandlers() {
     }
     if (!["status", "check", "configure", "speech-status", "speech-install", "speech-cancel", "speech-configure", "speech-preferences"].includes(input.action) && novaWindowSession.owner !== id)
       throw new Error("Start Nova in this window before continuing.");
+    if (input.action === "speech-configure" || input.action === "speech-install") novaCall?.stop("context-changed");
     return nova.handle(input, activity => {
       if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
     }, input.action === "speak" && safeStreamId ? (wav, remainingText) => {
@@ -7694,6 +7719,7 @@ function registerIpcHandlers() {
   // other changes it is told.
   const afterNovaContextChange = async <T,>(state: T, options: { tellPanel: boolean }): Promise<T> => {
     novaTransferredConversation = undefined;
+    novaCall?.stop("context-changed");
     sendNovaWindowEvent(novaBubble, "nova-context-changed");
     try {
       const ended = await novaService?.sessionContextChanged();
@@ -8257,6 +8283,7 @@ if (!gotLock) {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
         sendNovaWindowEvent(novaBubble, info.reason);
         if (info.reason === TENANT_CLOSING_REASON) {
+          novaCall?.stop("context-changed");
           void novaService?.sessionContextChanged().then((ended) => {
             if (ended) {
               sendNovaWindowEvent(mainWindow, NOVA_SESSION_CONTEXT_ENDED_REASON);

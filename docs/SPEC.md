@@ -1155,6 +1155,19 @@ and offers recovery. A tap that only returns zeros shows that Nova is waiting
 for playback and offers the macOS audio permission settings. Pilot access requires verification of the system
 permission prompt and playback exclusion in a signed, notarized Mac install.
 
+Silero marks speech on the device and bundled Whisper transcribes bounded
+segments one at a time. Nova holds up to 60 seconds of text in memory. **Suggest
+answer** uses recent speech as untrusted context, with the local public
+documentation index when its embedding model is on device. Call assist checks
+that the selected reasoning model runs on device before starting capture and
+before every answer. It displays text without invoking voice synthesis, chat
+history, files, tools, or tenant services.
+
+**Stop**, closing or hiding the bubble, Mac sleep, quit, losing audio
+permission, or switching the organization or provider ends the session and
+clears its data. Capture also stops after five minutes without speech or one
+hour total. Start a fresh session to capture again after any of these events.
+
 ### Nova screen questions
 
 Select **Look at screen** in Nova or ask Nova to look at the screen. Nova prompts

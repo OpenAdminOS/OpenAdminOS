@@ -303,20 +303,23 @@ function embeddingFailure(server: string, url: string, error: unknown): Error {
  * Posts one question for embedding and reads the answer inside the same
  * time budget, so a body that stalls after its headers times out too.
  */
-async function queryEmbedding<T>(endpoint: string, path: string, server: string, body: unknown, read: (response: Response, base: string) => Promise<T>): Promise<T> {
+async function queryEmbedding<T>(endpoint: string, path: string, server: string, body: unknown, read: (response: Response, base: string) => Promise<T>, signal?: AbortSignal): Promise<T> {
   const label = loopbackLabel(endpoint, path);
+  const budget = AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS);
+  signal?.throwIfAborted();
   try {
     // The question is in the body. Refuse any redirect from the local service.
     const { response, url } = await fetchLoopback(endpoint, path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(EMBEDDING_QUERY_TIMEOUT_MS),
+      signal: signal ? AbortSignal.any([signal, budget]) : budget,
     });
     if (isRefusedRedirect(response, url)) throw new EmbeddingQueryError(redirectRefusedDetail(server, url));
     // The address that answered, without the request path: a localhost name may have been answered on [::1].
     return await read(response, url.slice(0, url.length - path.length));
   } catch (error) {
+    signal?.throwIfAborted();
     if (error instanceof EmbeddingQueryError) throw error;
     throw embeddingFailure(server, label, error);
   }
@@ -358,6 +361,7 @@ export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
 export function ollamaEmbedQuery(
   endpoint: string,
   model = DEFAULT_INDEX_EMBEDDING_MODEL,
+  signal?: AbortSignal,
 ): EmbedQuery {
   return async (text: string) => {
     return queryEmbedding(endpoint, "/api/embed", "Ollama", { model, input: `search_query: ${text}` }, async (response, base) => {
@@ -378,7 +382,7 @@ export function ollamaEmbedQuery(
         throw new EmbeddingQueryError("The embedding service returned no vector.");
       }
       return embedding;
-    });
+    }, signal);
   };
 }
 
