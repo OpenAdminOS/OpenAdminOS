@@ -360,6 +360,7 @@ import { GatewayService, type GatewayConfig, type GatewayConfigContext } from ".
 import {
   RetrievalIndex,
   ollamaEmbedQuery,
+  DEFAULT_INDEX_EMBEDDING_MODEL,
   type RetrievalStatus,
 } from "./retrieval/retrieval.js";
 import {
@@ -6068,6 +6069,41 @@ export class AppStateStore {
     } finally {
       await instance.dispose().catch(() => undefined);
     }
+  }
+
+  async novaCallContext(): Promise<import("./nova-call-capture/session.js").CallContext | undefined> {
+    const state = await this.getAppState();
+    const provider = state.providers.find(candidate => candidate.id === state.activeProviderId);
+    const model = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model;
+    if (provider?.status !== "connected" || !model || !isOnDeviceModel(provider, model)) return;
+    const endpoint = modelFitProviderEndpoint(provider.id);
+    if (!await verifyOnDeviceModel(provider.id, model)) return;
+    return {
+      key: JSON.stringify([state.activeOrganizationId, state.activeTenantId, provider.id, model, endpoint]),
+      model: async () => {
+        const llm = await this.buildLlm(provider.id, model, { endpoint, scope: "model-fit" });
+        return {
+          complete: async input => {
+            if (provider.id === "ollama" && !await ollamaModelIsOnDevice(model, endpoint)) {
+              throw new Error("Select an on-device model before using call assist.");
+            }
+            input.signal?.throwIfAborted();
+            return llm.complete(input);
+          },
+        };
+      },
+    };
+  }
+
+  async retrieveNovaCallDocumentation(query: string, signal: AbortSignal) {
+    const index = this.retrievalIndex();
+    if (!index?.status().available) return [];
+    const endpoint = embeddingEndpoint();
+    const model = DEFAULT_INDEX_EMBEDDING_MODEL + ":latest";
+    // The loopback embedding route must serve an installed, non-cloud model.
+    if (!await ollamaModelIsOnDevice(model, endpoint)) return [];
+    signal.throwIfAborted();
+    return index.retrieve(query, ollamaEmbedQuery(endpoint, model, signal), { k: 4 });
   }
 
   /** Public voice reasoning uses only the session's model and endpoint. */

@@ -1141,6 +1141,33 @@ whisper.cpp and Kokoro-FastAPI on the existing loopback ports 8080 and 8880.
 The connection check tests the selected source. A background wake-word engine
 is separate future work.
 
+### Nova call assist
+
+Call assist uses a private Core Audio playback tap on Apple Silicon Macs
+running macOS 14.2 or later. The helper requests macOS system audio
+permission and excludes OpenAdminOS and audio processes inside its bundle.
+It sends mono 16 kHz PCM to Electron main over a bounded pipe. A change in
+the excluded processes, audio route, or capture format discards the partial
+segment and rebuilds the tap. Nova shows **Reconnecting audio** during up to
+three retries and offers **Start again** when recovery runs out. **Stop**
+closes the pipe and cancels pending retries. A permission error ends capture
+and offers recovery. A tap that only returns zeros shows that Nova is waiting
+for playback and offers the macOS audio permission settings. Pilot access requires verification of the system
+permission prompt and playback exclusion in a signed, notarized Mac install.
+
+Silero marks speech on the device and bundled Whisper transcribes bounded
+segments one at a time. Nova holds up to 60 seconds of text in memory. **Suggest
+answer** uses recent speech as untrusted context, with the local public
+documentation index when its embedding model is on device. Call assist checks
+that the selected reasoning model runs on device before starting capture and
+before every answer. It displays text without invoking voice synthesis, chat
+history, files, tools, or tenant services.
+
+**Stop**, closing or hiding the bubble, Mac sleep, quit, losing audio
+permission, or switching the organization or provider ends the session and
+clears its data. Capture also stops after five minutes without speech or one
+hour total. Start a fresh session to capture again after any of these events.
+
 ### Nova screen questions
 
 Select **Look at screen** in Nova or ask Nova to look at the screen. Nova prompts

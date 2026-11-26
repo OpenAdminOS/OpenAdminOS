@@ -212,6 +212,26 @@ export class LocalSpeech {
     }
   }
 
+  async openCallTranscriber(signal: AbortSignal): Promise<WhisperRuntime> {
+    await this.requireModels(signal).catch(() => {
+      signal.throwIfAborted();
+      throw new Error("Set up built-in local speech in Settings > Nova, then start call assist again.");
+    });
+    const runtime = new WhisperRuntime(this.binary, join(this.target, whisperModels[this.model].path), 5 * 60_000, true);
+    const stop = () => runtime.stop();
+    signal.addEventListener("abort", stop, { once: true });
+    try {
+      await runtime.check(signal);
+      return runtime;
+    } catch {
+      runtime.stop();
+      signal.throwIfAborted();
+      throw new Error("Set up built-in local speech in Settings > Nova, then start call assist again.");
+    } finally {
+      signal.removeEventListener("abort", stop);
+    }
+  }
+
   async transcribe(audio: Uint8Array, signal: AbortSignal) {
     const budget = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
     const runtime = await this.whisperRuntime(budget);

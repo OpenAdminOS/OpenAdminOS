@@ -6,6 +6,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Nova call assist can transcribe playback locally and suggest text answers from recent speech on demand.
+
+- Add the Apple Silicon playback capture and recovery foundation for Nova call assist.
+
 - Nova local voice offers hands-free conversations with interruption, a live microphone indicator, inactivity timeout, and optional response timings. Hold to talk is available in Settings > Nova.
 
 - The floating Nova window supports local voice setup, streamed playback and typed questions alongside screen questions.

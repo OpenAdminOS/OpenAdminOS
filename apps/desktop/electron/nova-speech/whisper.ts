@@ -23,7 +23,7 @@ export class WhisperRuntime {
   private idle?: ReturnType<typeof setTimeout>;
   private active = 0;
 
-  constructor(private readonly executable: string, private readonly model: string, private readonly idleMs = 5 * 60_000) {}
+  constructor(private readonly executable: string, private readonly model: string, private readonly idleMs = 5 * 60_000, private readonly quiet = false) {}
 
   stop() {
     clearTimeout(this.idle);
@@ -57,7 +57,7 @@ export class WhisperRuntime {
       if (typeof result.text !== "string") throw new Error("Whisper did not return a transcript. Retry or type your question.");
       return { text: result.text, language: typeof result.language === "string" ? result.language : undefined };
     });
-    console.info("[nova-speech] transcribe ms", Math.round(performance.now() - started));
+    if (!this.quiet) console.info("[nova-speech] transcribe ms", Math.round(performance.now() - started));
     return transcript;
   }
 
@@ -132,7 +132,7 @@ export class WhisperRuntime {
       while (this.child === child && !signal.aborted) {
         const health = await localJson(url + "/health", signal).catch(() => undefined);
         if (health?.status === "ok") {
-          console.info("[nova-speech] whisper model load ms", Math.round(performance.now() - started));
+          if (!this.quiet) console.info("[nova-speech] whisper model load ms", Math.round(performance.now() - started));
           return url;
         }
         await delay(150, undefined, { signal });
