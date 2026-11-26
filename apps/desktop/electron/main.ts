@@ -2009,6 +2009,21 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   const sawDirectChatFrontDoor = location.hash === "#/chat";
 
+  const privacy = findNamedButton("Local model · Processing stays on this device. Privacy details");
+  const privacyPanel = document.getElementById(privacy?.getAttribute("popovertarget") ?? "");
+  if (!privacy || !privacyPanel || privacyPanel.matches(":popover-open")) {
+    throw new Error("Chat privacy details did not start collapsed.");
+  }
+  const footerHeight = privacy.parentElement?.offsetHeight;
+  privacy.click();
+  await waitFor(
+    () => privacyPanel.matches(":popover-open") && document.activeElement === privacyPanel,
+    "open and focused Chat privacy details",
+  );
+  if (privacy.parentElement?.offsetHeight !== footerHeight) throw new Error("Privacy details changed the Chat footer height.");
+  privacy.click();
+  await waitFor(() => !privacyPanel.matches(":popover-open"), "closed Chat privacy details");
+
   location.hash = "/settings/data";
   await waitFor(
     () => bodyText().includes("Tenant cache") && bodyText().includes("Automatic refresh"),
